@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: portflow-dashboard
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    disk:
+      name: portflow-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: VITE_API_BASE
+        value: ""
+      - key: DB_PATH
+        value: /var/data/portflow.db
+      - key: UPLOADS_DIR
+        value: /var/data/uploads
+      - key: BACKUP_DIR
+        value: /var/data/backups
+      - key: MAX_UPLOAD_MB
+        value: "25"
+      - key: JWT_SECRET
+        generateValue: true
