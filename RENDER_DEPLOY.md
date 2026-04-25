@@ -7,7 +7,7 @@ PortFlow is configured to run on Render as one Node web service. Express serves 
 Use the included `render.yaml` Blueprint or create a Web Service manually with:
 
 - Runtime: `Node`
-- Build command: `npm install --build-from-source=sqlite3 && npm run build`
+- Build command: `npm install && npm run build`
 - Start command: `cd server && node server.js`
 - Health check path: `/api/health`
 - Persistent disk mount path: `/var/data`
@@ -23,7 +23,7 @@ DB_PATH=/var/data/portflow.db
 UPLOADS_DIR=/var/data/uploads
 BACKUP_DIR=/var/data/backups
 MAX_UPLOAD_MB=25
-npm_config_build_from_source=sqlite3
+NODE_VERSION=22
 JWT_SECRET=<long random secret>
 ```
 
