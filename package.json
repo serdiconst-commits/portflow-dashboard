@@ -16,6 +16,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server/server.js",
+    "start:render": "npm rebuild sqlite3 --build-from-source && cd server && node server.js",
     "start:local": "node --env-file=.env.production server/server.js",
     "server": "node --env-file=.env.production server/server.js",
     "backup:db": "node server/backup-database.js",

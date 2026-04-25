@@ -5,7 +5,7 @@ services:
     plan: starter
     region: oregon
     buildCommand: npm install && npm run build
-    startCommand: cd server && node server.js
+    startCommand: npm run start:render
     healthCheckPath: /api/health
     disk:
       name: portflow-data

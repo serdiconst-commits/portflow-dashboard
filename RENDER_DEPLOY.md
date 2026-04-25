@@ -8,7 +8,7 @@ Use the included `render.yaml` Blueprint or create a Web Service manually with:
 
 - Runtime: `Node`
 - Build command: `npm install && npm run build`
-- Start command: `cd server && node server.js`
+- Start command: `npm run start:render`
 - Health check path: `/api/health`
 - Persistent disk mount path: `/var/data`
 
