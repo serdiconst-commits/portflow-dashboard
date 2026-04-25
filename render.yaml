@@ -4,8 +4,8 @@ services:
     runtime: node
     plan: starter
     region: oregon
-    buildCommand: npm ci && npm run build
-    startCommand: npm start
+    buildCommand: npm install --build-from-source=sqlite3 && npm run build
+    startCommand: cd server && node server.js
     healthCheckPath: /api/health
     disk:
       name: portflow-data
@@ -24,5 +24,7 @@ services:
         value: /var/data/backups
       - key: MAX_UPLOAD_MB
         value: "25"
+      - key: npm_config_build_from_source
+        value: sqlite3
       - key: JWT_SECRET
         generateValue: true
