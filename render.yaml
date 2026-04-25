@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: starter
     region: oregon
-    buildCommand: npm_config_build_from_source=false npm install --include=optional && npm run build
+    buildCommand: unset npm_config_build_from_source && npm install --include=optional --os=linux --cpu=x64 && npm run build
     startCommand: npm run start:render
     healthCheckPath: /api/health
     disk:
