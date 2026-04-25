@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: starter
     region: oregon
-    buildCommand: npm install && npm run build
+    buildCommand: npm_config_build_from_source=false npm install --include=optional && npm run build
     startCommand: npm run start:render
     healthCheckPath: /api/health
     disk:

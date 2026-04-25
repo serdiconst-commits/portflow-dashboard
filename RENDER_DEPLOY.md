@@ -7,7 +7,7 @@ PortFlow is configured to run on Render as one Node web service. Express serves 
 Use the included `render.yaml` Blueprint or create a Web Service manually with:
 
 - Runtime: `Node`
-- Build command: `npm install && npm run build`
+- Build command: `npm_config_build_from_source=false npm install --include=optional && npm run build`
 - Start command: `npm run start:render`
 - Health check path: `/api/health`
 - Persistent disk mount path: `/var/data`

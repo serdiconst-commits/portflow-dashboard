@@ -12,7 +12,6 @@
     "dev:server": "node --env-file=.env.development server/server.js",
     "staging:client": "vite --mode staging --port 5174",
     "staging:server": "node --env-file=.env.staging server/server.js",
-    "postinstall": "npm rebuild sqlite3 --build-from-source",
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server/server.js",
