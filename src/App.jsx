@@ -316,6 +316,8 @@ const [editingLoad, setEditingLoad] = useState(emptyLoad);
 const [loginEmail, setLoginEmail] = useState('');
 const [loginPassword, setLoginPassword] = useState('');
 const [loginError, setLoginError] = useState('');
+const [authMode, setAuthMode] = useState('login');
+const [registerName, setRegisterName] = useState('');
 const [authToken, setAuthToken] = useState(localStorage.getItem('authToken') || '');
 const [currentUser, setCurrentUser] = useState(savedUser || null);
 const [company, setCompany] = useState(savedCompany || null);
@@ -360,6 +362,45 @@ console.log('LOGGED IN USER:', data.user);
     setLoginError('');
   } catch (error) {
     console.error('Login failed:', error);
+    setLoginError(error.message);
+  }
+};
+
+const handleRegister = async (e) => {
+  e.preventDefault();
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: registerName,
+        email: loginEmail,
+        password: loginPassword,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(`Server said: ${data.error || 'Registration failed'}`);
+    }
+
+    setAuthToken(data.token);
+    setCurrentUser(data.user);
+    setCompany(data.company || null);
+    setActiveView('dispatch');
+
+    localStorage.setItem('authToken', data.token);
+    localStorage.setItem('currentUser', JSON.stringify(data.user));
+
+    if (data.company) {
+      localStorage.setItem('company', JSON.stringify(data.company));
+    }
+
+    setLoginError('');
+  } catch (error) {
+    console.error('Registration failed:', error);
     setLoginError(error.message);
   }
 };
@@ -2412,9 +2453,21 @@ const handleSelectedLoadCustomerChange = (e) => {
 if (!authToken) {
 return (
     <div style={{ maxWidth: '400px', margin: '80px auto', padding: '24px' }}>
-      <h2>PortFlow Login</h2>
+      <h2>{authMode === 'register' ? 'Create PortFlow Account' : 'PortFlow Login'}</h2>
 
-      <form onSubmit={handleLogin}>
+      <form onSubmit={authMode === 'register' ? handleRegister : handleLogin}>
+        {authMode === 'register' && (
+          <div style={{ marginBottom: '12px' }}>
+            <label>Company Name</label>
+            <input
+              type="text"
+              value={registerName}
+              onChange={(e) => setRegisterName(e.target.value)}
+              style={{ width: '100%', padding: '10px', marginTop: '4px' }}
+            />
+          </div>
+        )}
+
         <div style={{ marginBottom: '12px' }}>
           <label>Email</label>
           <input
@@ -2442,9 +2495,28 @@ return (
         )}
 
         <button type="submit" style={{ width: '100%', padding: '10px' }}>
-          Log In
+          {authMode === 'register' ? 'Create Account' : 'Log In'}
         </button>
       </form>
+
+      <button
+        type="button"
+        onClick={() => {
+          setLoginError('');
+          setAuthMode(authMode === 'register' ? 'login' : 'register');
+        }}
+        style={{
+          width: '100%',
+          padding: '10px',
+          marginTop: '10px',
+          background: 'transparent',
+          border: '1px solid #d1d5db',
+        }}
+      >
+        {authMode === 'register'
+          ? 'Already have an account? Log in'
+          : 'Create first company account'}
+      </button>
     </div>
   );
 }
