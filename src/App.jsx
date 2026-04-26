@@ -1585,6 +1585,8 @@ const handleCustomerFormChange = (e) => {
 
 const handleSaveCustomer = async (e) => {
   if (e) e.preventDefault();
+  const isCreatingCustomer = !editingCustomerId;
+  const savedCustomerName = customerForm.name || '';
 
   const payload = {
     ...customerForm,
@@ -1613,8 +1615,12 @@ const handleSaveCustomer = async (e) => {
     }
 
     await fetchCustomers();
+    if (isCreatingCustomer && savedCustomerName) {
+      setNewLoad((prev) => ({ ...prev, customer: savedCustomerName }));
+    }
     setCustomerForm(emptyCustomer);
     setEditingCustomerId(null);
+    setShowCustomerEditor(false);
   } catch (error) {
     console.error('Failed to save customer:', error);
     alert(`Failed to save customer: ${error.message}`);
@@ -3174,12 +3180,25 @@ const refreshLoadsData = async () => {
     ))}
   </select>
 </div>
-  <button
-    type="button"
-    onClick={() => setShowCustomerEditor((prev) => !prev)}
-  >
-    {showCustomerEditor ? 'Close Customer Editor' : 'Edit Customer'}
-  </button>
+  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+    <button
+      type="button"
+      onClick={() => setShowCustomerEditor((prev) => !prev)}
+    >
+      {showCustomerEditor ? 'Close Customer Editor' : 'Edit Customer'}
+    </button>
+
+    <button
+      type="button"
+      onClick={() => {
+        setCustomerForm(emptyCustomer);
+        setEditingCustomerId(null);
+        setShowCustomerEditor(true);
+      }}
+    >
+      Create Customer
+    </button>
+  </div>
 
   {showCustomerEditor && (
     <div style={{ marginTop: '10px', marginBottom: '12px' }}>
@@ -3243,6 +3262,10 @@ const refreshLoadsData = async () => {
           }))
         }
       />
+
+      <button type="button" onClick={handleSaveCustomer}>
+        {editingCustomerId ? 'Save Customer' : 'Create Customer'}
+      </button>
     </div>
   )}
 </div>
