@@ -16,6 +16,8 @@ services:
         value: production
       - key: VITE_API_BASE
         value: ""
+      - key: VITE_GOOGLE_MAPS_API_KEY
+        sync: false
       - key: DB_PATH
         value: /var/data/portflow.db
       - key: UPLOADS_DIR

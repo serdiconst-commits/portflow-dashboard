@@ -19,6 +19,7 @@ Render should set these values:
 ```env
 APP_ENV=production
 VITE_API_BASE=
+VITE_GOOGLE_MAPS_API_KEY=<Google Maps browser API key>
 DB_PATH=/var/data/portflow.db
 UPLOADS_DIR=/var/data/uploads
 BACKUP_DIR=/var/data/backups

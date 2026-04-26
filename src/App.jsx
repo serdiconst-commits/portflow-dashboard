@@ -5,6 +5,7 @@ import './App.css';
 
 export default function App() {
 const API_BASE = import.meta.env.VITE_API_BASE || '';
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
 const [driverForm, setDriverForm] = useState({
   name: '',
@@ -259,6 +260,8 @@ zip: '',
   
   const addressInputRef = useRef(null);
   const autocompleteRef = useRef(null);
+  const inlineCustomerAddressInputRef = useRef(null);
+  const inlineCustomerAutocompleteRef = useRef(null);
 
   const pickupInputRef = useRef(null);
 const pickupAutocompleteRef = useRef(null);
@@ -275,6 +278,39 @@ const newDeliveryAutocompleteRef = useRef(null);
 const [uploadDocType, setUploadDocType] = useState({});
 const [uploadFileByLoad, setUploadFileByLoad] = useState({});
 const [dashboardFilter, setDashboardFilter] = useState('all');
+
+const getAddressPartsFromPlace = (place) => {
+  let street = '';
+  let city = '';
+  let state = '';
+  let zip = '';
+
+  (place?.address_components || []).forEach((component) => {
+    const types = component.types || [];
+
+    if (types.includes('street_number')) {
+      street = `${component.long_name} ${street}`;
+    }
+
+    if (types.includes('route')) {
+      street += component.long_name;
+    }
+
+    if (types.includes('locality')) {
+      city = component.long_name;
+    }
+
+    if (types.includes('administrative_area_level_1')) {
+      state = component.short_name;
+    }
+
+    if (types.includes('postal_code')) {
+      zip = component.long_name;
+    }
+  });
+
+  return { street: street.trim(), city, state, zip };
+};
 
 const savedUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
 const savedCompany = JSON.parse(localStorage.getItem('company') || 'null');
@@ -498,7 +534,25 @@ useEffect(() => {
     setActiveView('dispatch');
   }
 }, [currentUser]);
+
 useEffect(() => {
+  if (!GOOGLE_MAPS_API_KEY) return;
+  if (window.google?.maps?.places) return;
+  if (document.querySelector('script[data-portflow-google-maps="true"]')) return;
+
+  const script = document.createElement('script');
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
+    GOOGLE_MAPS_API_KEY
+  )}&libraries=places`;
+  script.async = true;
+  script.defer = true;
+  script.dataset.portflowGoogleMaps = 'true';
+  document.head.appendChild(script);
+}, [GOOGLE_MAPS_API_KEY]);
+
+useEffect(() => {
+  pickupAutocompleteRef.current = null;
+
   const interval = setInterval(() => {
     if (
       window.google &&
@@ -519,34 +573,7 @@ useEffect(() => {
         const place = autocomplete.getPlace();
         if (!place || !place.address_components) return;
 
-        let street = '';
-        let city = '';
-        let state = '';
-        let zip = '';
-
-        place.address_components.forEach((component) => {
-          const types = component.types;
-
-          if (types.includes('street_number')) {
-            street = component.long_name + ' ' + street;
-          }
-
-          if (types.includes('route')) {
-            street += component.long_name;
-          }
-
-          if (types.includes('locality')) {
-            city = component.long_name;
-          }
-
-          if (types.includes('administrative_area_level_1')) {
-            state = component.short_name;
-          }
-
-          if (types.includes('postal_code')) {
-            zip = component.long_name;
-          }
-        });
+        const { street, city, state, zip } = getAddressPartsFromPlace(place);
 
         setCustomerForm((prev) => ({
           ...prev,
@@ -563,9 +590,11 @@ useEffect(() => {
   }, 500);
 
   return () => clearInterval(interval);
-}, []);
+}, [showForm]);
 
 useEffect(() => {
+  deliveryAutocompleteRef.current = null;
+
   const interval = setInterval(() => {
     if (
       window.google &&
@@ -599,6 +628,48 @@ useEffect(() => {
 
   return () => clearInterval(interval);
 }, []);
+
+useEffect(() => {
+  inlineCustomerAutocompleteRef.current = null;
+
+  const interval = setInterval(() => {
+    if (
+      window.google &&
+      window.google.maps &&
+      window.google.maps.places &&
+      inlineCustomerAddressInputRef.current &&
+      !inlineCustomerAutocompleteRef.current
+    ) {
+      const autocomplete = new window.google.maps.places.Autocomplete(
+        inlineCustomerAddressInputRef.current,
+        {
+          types: ['address'],
+          componentRestrictions: { country: 'us' },
+        }
+      );
+
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (!place || !place.address_components) return;
+
+        const { street, city, state, zip } = getAddressPartsFromPlace(place);
+
+        setCustomerForm((prev) => ({
+          ...prev,
+          address: street,
+          city,
+          state,
+          zip,
+        }));
+      });
+
+      inlineCustomerAutocompleteRef.current = autocomplete;
+      clearInterval(interval);
+    }
+  }, 500);
+
+  return () => clearInterval(interval);
+}, [showCustomerEditor]);
 useEffect(() => {
   const interval = setInterval(() => {
     if (
@@ -632,8 +703,10 @@ useEffect(() => {
   }, 500);
 
   return () => clearInterval(interval);
-}, []);
+}, [showForm]);
 useEffect(() => {
+  returnAutocompleteRef.current = null;
+
   const interval = setInterval(() => {
     if (
       window.google &&
@@ -666,7 +739,7 @@ useEffect(() => {
   }, 500);
 
   return () => clearInterval(interval);
-}, []);
+}, [showForm]);
 
 useEffect(() => {
   const interval = setInterval(() => {
@@ -689,34 +762,7 @@ useEffect(() => {
         const place = autocomplete.getPlace();
         if (!place || !place.address_components) return;
 
-        let street = '';
-        let city = '';
-        let state = '';
-        let zip = '';
-
-        place.address_components.forEach((component) => {
-          const types = component.types;
-
-          if (types.includes('street_number')) {
-            street = component.long_name + ' ' + street;
-          }
-
-          if (types.includes('route')) {
-            street += component.long_name;
-          }
-
-          if (types.includes('locality')) {
-            city = component.long_name;
-          }
-
-          if (types.includes('administrative_area_level_1')) {
-            state = component.short_name;
-          }
-
-          if (types.includes('postal_code')) {
-            zip = component.long_name;
-          }
-        });
+        const { street, city, state, zip } = getAddressPartsFromPlace(place);
 
         setNewDeliveryLocation((prev) => ({
           ...prev,
@@ -3216,6 +3262,7 @@ const refreshLoadsData = async () => {
         }
       />
       <input
+        ref={inlineCustomerAddressInputRef}
         type="text"
         placeholder="Street Address"
         value={customerForm.address || ''}
@@ -3384,6 +3431,19 @@ const refreshLoadsData = async () => {
     </option>
   ))}
 </select>
+
+<input
+  ref={pickupInputRef}
+  type="text"
+  placeholder="Search pickup address"
+  value={newLoad.pickup || ''}
+  onChange={(e) =>
+    setNewLoad((prev) => ({
+      ...prev,
+      pickup: e.target.value,
+    }))
+  }
+/>
 
     <button
       type="button"
@@ -3573,6 +3633,15 @@ const refreshLoadsData = async () => {
   ))}
 </select>
 
+<input
+  ref={deliveryInputRef}
+  type="text"
+  name="delivery"
+  placeholder="Search delivery address"
+  value={newLoad.delivery || ''}
+  onChange={handleInputChange}
+/>
+
 <button
   type="button"
   onClick={() => setShowNewDeliveryForm((prev) => !prev)}
@@ -3649,6 +3718,18 @@ const refreshLoadsData = async () => {
   ))}
 </select>
 
+<input
+  ref={returnInputRef}
+  type="text"
+  placeholder="Search return address"
+  value={newLoad.returnLocation || ''}
+  onChange={(e) =>
+    setNewLoad((prev) => ({
+      ...prev,
+      returnLocation: e.target.value,
+    }))
+  }
+/>
 
 <label>LFD</label>
 <input
