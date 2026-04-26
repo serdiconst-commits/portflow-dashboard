@@ -265,6 +265,8 @@ zip: '',
 
   const pickupInputRef = useRef(null);
 const pickupAutocompleteRef = useRef(null);
+const newPickupAddressInputRef = useRef(null);
+const newPickupAutocompleteRef = useRef(null);
 
 const deliveryInputRef = useRef(null);
 const deliveryAutocompleteRef = useRef(null);
@@ -593,7 +595,7 @@ useEffect(() => {
 }, [showForm]);
 
 useEffect(() => {
-  deliveryAutocompleteRef.current = null;
+  pickupAutocompleteRef.current = null;
 
   const interval = setInterval(() => {
     if (
@@ -627,7 +629,49 @@ useEffect(() => {
   }, 500);
 
   return () => clearInterval(interval);
-}, []);
+}, [showForm]);
+
+useEffect(() => {
+  newPickupAutocompleteRef.current = null;
+
+  const interval = setInterval(() => {
+    if (
+      window.google &&
+      window.google.maps &&
+      window.google.maps.places &&
+      newPickupAddressInputRef.current &&
+      !newPickupAutocompleteRef.current
+    ) {
+      const autocomplete = new window.google.maps.places.Autocomplete(
+        newPickupAddressInputRef.current,
+        {
+          types: ['address'],
+          componentRestrictions: { country: 'us' },
+        }
+      );
+
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (!place || !place.address_components) return;
+
+        const { street, city, state, zip } = getAddressPartsFromPlace(place);
+
+        setNewPickupLocation((prev) => ({
+          ...prev,
+          address: street,
+          city,
+          state,
+          zip,
+        }));
+      });
+
+      newPickupAutocompleteRef.current = autocomplete;
+      clearInterval(interval);
+    }
+  }, 500);
+
+  return () => clearInterval(interval);
+}, [showNewPickup]);
 
 useEffect(() => {
   inlineCustomerAutocompleteRef.current = null;
@@ -3454,18 +3498,56 @@ const refreshLoadsData = async () => {
   </>
   
 ) : (
-  <>
+  <div style={{ marginTop: '10px', marginBottom: '12px' }}>
     <input
       type="text"
-      placeholder="Pickup Location"
-      value={newLoad.pickup || ''}
+      placeholder="Pickup Name"
+      value={newPickupLocation.name}
       onChange={(e) =>
-        setNewLoad((prev) => ({
-          ...prev,
-          pickup: e.target.value,
-        }))
+        setNewPickupLocation((prev) => ({ ...prev, name: e.target.value }))
       }
     />
+
+    <input
+      ref={newPickupAddressInputRef}
+      type="text"
+      placeholder="Street Address"
+      value={newPickupLocation.address}
+      onChange={(e) =>
+        setNewPickupLocation((prev) => ({ ...prev, address: e.target.value }))
+      }
+    />
+
+    <input
+      type="text"
+      placeholder="City"
+      value={newPickupLocation.city}
+      onChange={(e) =>
+        setNewPickupLocation((prev) => ({ ...prev, city: e.target.value }))
+      }
+    />
+
+    <input
+      type="text"
+      placeholder="State"
+      value={newPickupLocation.state}
+      onChange={(e) =>
+        setNewPickupLocation((prev) => ({ ...prev, state: e.target.value }))
+      }
+    />
+
+    <input
+      type="text"
+      placeholder="ZIP"
+      value={newPickupLocation.zip}
+      onChange={(e) =>
+        setNewPickupLocation((prev) => ({ ...prev, zip: e.target.value }))
+      }
+    />
+
+    <button type="button" onClick={handleSaveNewPickupLocation}>
+      Save Pickup Location
+    </button>
 
     <button
       type="button"
@@ -3473,7 +3555,7 @@ const refreshLoadsData = async () => {
     >
       Use Saved Pickup
     </button>
-  </>
+  </div>
 )}
 <button
   type="button"
@@ -3571,54 +3653,6 @@ const refreshLoadsData = async () => {
     ))
   )}
 </div>
-    <input
-      type="text"
-      placeholder="Pickup Name"
-      value={newPickupLocation.name}
-      onChange={(e) =>
-        setNewPickupLocation((prev) => ({ ...prev, name: e.target.value }))
-      }
-    />
-
-    <input
-      type="text"
-      placeholder="Street Address"
-      value={newPickupLocation.address}
-      onChange={(e) =>
-        setNewPickupLocation((prev) => ({ ...prev, address: e.target.value }))
-      }
-    />
-
-    <input
-      type="text"
-      placeholder="City"
-      value={newPickupLocation.city}
-      onChange={(e) =>
-        setNewPickupLocation((prev) => ({ ...prev, city: e.target.value }))
-      }
-    />
-
-    <input
-      type="text"
-      placeholder="State"
-      value={newPickupLocation.state}
-      onChange={(e) =>
-        setNewPickupLocation((prev) => ({ ...prev, state: e.target.value }))
-      }
-    />
-
-    <input
-      type="text"
-      placeholder="ZIP"
-      value={newPickupLocation.zip}
-      onChange={(e) =>
-        setNewPickupLocation((prev) => ({ ...prev, zip: e.target.value }))
-      }
-    />
-
-  <button type="button" onClick={handleSaveNewPickupLocation}>
-      Save Pickup Location
-    </button>
   </div>
 )}
 
