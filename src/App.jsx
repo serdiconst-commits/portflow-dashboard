@@ -6,6 +6,8 @@ import './App.css';
 export default function App() {
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+const APP_PORTAL = import.meta.env.VITE_APP_PORTAL || 'web';
+const isDriverApp = APP_PORTAL === 'driver';
 
 const [driverForm, setDriverForm] = useState({
   name: '',
@@ -318,7 +320,7 @@ const savedUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
 const savedCompany = JSON.parse(localStorage.getItem('company') || 'null');
 
 const [activeView, setActiveView] = useState(
-  savedUser?.role === 'driver' ? 'driver' : 'dispatch'
+  isDriverApp || savedUser?.role === 'driver' ? 'driver' : 'dispatch'
 );
 
 const [loadsData, setLoadsData] = useState([]);
@@ -332,7 +334,7 @@ const notAvailableLoads = loadsData.filter(
 
 const [selectedPresetName, setSelectedPresetName] = useState('');
 const [selectedLoad, setSelectedLoad] = useState(null);
-const [userRole, setUserRole] = useState('dispatcher');
+const [userRole, setUserRole] = useState(isDriverApp ? 'driver' : 'dispatcher');
 const [driversList, setDriversList] = useState([]);
 const [customers, setCustomers] = useState([]);
 const [customerForm, setCustomerForm] = useState(emptyCustomer);
@@ -383,10 +385,14 @@ const handleLogin = async (e) => {
       throw new Error(`Server said: ${data.error || 'Login failed'}`);
     }
 
+    if (isDriverApp && data.user?.role !== 'driver') {
+      throw new Error('PortFlow Driver only allows driver accounts.');
+    }
+
     setAuthToken(data.token);
     setCurrentUser(data.user);
 console.log('LOGGED IN USER:', data.user);
-    const nextView = data.user?.role === 'driver' ? 'driver' : 'dispatch';
+    const nextView = isDriverApp || data.user?.role === 'driver' ? 'driver' : 'dispatch';
     setActiveView(nextView);
 
     localStorage.setItem('authToken', data.token);
@@ -427,7 +433,7 @@ const handleRegister = async (e) => {
     setAuthToken(data.token);
     setCurrentUser(data.user);
     setCompany(data.company || null);
-    setActiveView('dispatch');
+    setActiveView(isDriverApp ? 'driver' : 'dispatch');
 
     localStorage.setItem('authToken', data.token);
     localStorage.setItem('currentUser', JSON.stringify(data.user));
@@ -530,12 +536,23 @@ const [newReturnLocation, setNewReturnLocation] = useState({
 useEffect(() => {
   if (!currentUser) return;
 
-  if (currentUser.role === 'driver') {
+  if (isDriverApp && currentUser.role !== 'driver') {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('currentUser');
+    localStorage.removeItem('company');
+    setAuthToken('');
+    setCurrentUser(null);
+    setCompany(null);
+    setLoginError('Please log in with a driver account.');
+    return;
+  }
+
+  if (isDriverApp || currentUser.role === 'driver') {
     setActiveView('driver');
   } else {
     setActiveView('dispatch');
   }
-}, [currentUser]);
+}, [currentUser, isDriverApp]);
 
 useEffect(() => {
   if (!GOOGLE_MAPS_API_KEY) return;
@@ -2212,8 +2229,10 @@ const handleGeneratePOD = () => {
 const handleLogout = () => {
   localStorage.removeItem('authToken');
   localStorage.removeItem('currentUser');
+  localStorage.removeItem('company');
   setAuthToken('');
   setCurrentUser(null);
+  setCompany(null);
 };
 
 const handlePrintInvoice = () => {
@@ -2548,11 +2567,17 @@ const handleSelectedLoadCustomerChange = (e) => {
 
 if (!authToken) {
 return (
-    <div style={{ maxWidth: '400px', margin: '80px auto', padding: '24px' }}>
-      <h2>{authMode === 'register' ? 'Create PortFlow Account' : 'PortFlow Login'}</h2>
+    <div className={isDriverApp ? 'driver-mobile-login' : ''} style={{ maxWidth: '400px', margin: '80px auto', padding: '24px' }}>
+      <h2>
+        {isDriverApp
+          ? 'PortFlow Driver'
+          : authMode === 'register'
+          ? 'Create PortFlow Account'
+          : 'PortFlow Login'}
+      </h2>
 
-      <form onSubmit={authMode === 'register' ? handleRegister : handleLogin}>
-        {authMode === 'register' && (
+      <form onSubmit={!isDriverApp && authMode === 'register' ? handleRegister : handleLogin}>
+        {!isDriverApp && authMode === 'register' && (
           <div style={{ marginBottom: '12px' }}>
             <label>Company Name</label>
             <input
@@ -2595,24 +2620,26 @@ return (
         </button>
       </form>
 
-      <button
-        type="button"
-        onClick={() => {
-          setLoginError('');
-          setAuthMode(authMode === 'register' ? 'login' : 'register');
-        }}
-        style={{
-          width: '100%',
-          padding: '10px',
-          marginTop: '10px',
-          background: 'transparent',
-          border: '1px solid #d1d5db',
-        }}
-      >
-        {authMode === 'register'
-          ? 'Already have an account? Log in'
-          : 'Create first company account'}
-      </button>
+      {!isDriverApp && (
+        <button
+          type="button"
+          onClick={() => {
+            setLoginError('');
+            setAuthMode(authMode === 'register' ? 'login' : 'register');
+          }}
+          style={{
+            width: '100%',
+            padding: '10px',
+            marginTop: '10px',
+            background: 'transparent',
+            border: '1px solid #d1d5db',
+          }}
+        >
+          {authMode === 'register'
+            ? 'Already have an account? Log in'
+            : 'Create first company account'}
+        </button>
+      )}
     </div>
   );
 }
@@ -2709,9 +2736,10 @@ const refreshLoadsData = async () => {
   }
 };
 
-    if (activeView === 'driver' && currentUser?.role === 'driver') {
+    if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') {
   return (
     <div
+  className={isDriverApp ? 'driver-mobile-shell' : ''}
   style={{
     backgroundColor: '#ffffff',
     color: '#111827',
@@ -3045,7 +3073,6 @@ const refreshLoadsData = async () => {
   <input
     type="file"
     accept="image/*,.pdf"
-    capture="environment"
     onChange={(e) =>
       setUploadFileByLoad((prev) => ({
         ...prev,

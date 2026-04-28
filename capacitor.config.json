@@ -1,0 +1,9 @@
+{
+  "appId": "com.portflow.driver",
+  "appName": "PortFlow Driver",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}

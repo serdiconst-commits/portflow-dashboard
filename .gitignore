@@ -25,6 +25,14 @@ server/*-start.err
 backups/
 uploads/
 
+# Native mobile build outputs
+android/.gradle/
+android/**/build/
+android/local.properties
+ios/App/build/
+ios/App/Pods/
+ios/App/DerivedData/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

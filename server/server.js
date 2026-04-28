@@ -611,7 +611,7 @@ app.post('/api/login', (req, res) => {
             driverId: user.driverId || null,
           },
           JWT_SECRET,
-          { expiresIn: '7d' }
+          { expiresIn: user.role === 'driver' ? '30d' : '7d' }
         );
 
         res.json({

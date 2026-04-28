@@ -13,6 +13,11 @@
     "staging:client": "vite --mode staging --port 5174",
     "staging:server": "node --env-file=.env.staging server/server.js",
     "build": "vite build",
+    "build:driver": "vite build --mode driver",
+    "mobile:sync": "npm run build:driver && npx cap sync",
+    "mobile:android": "npm run build:driver && npx cap sync android && cd android && gradlew.bat bundleRelease",
+    "mobile:android:mac": "npm run build:driver && npx cap sync android && cd android && ./gradlew bundleRelease",
+    "mobile:ios": "npm run build:driver && npx cap sync ios && npx cap open ios",
     "preview": "vite preview",
     "start": "node server/server.js",
     "start:render": "npm rebuild sqlite3 --build-from-source && cd server && node server.js",
@@ -37,6 +42,10 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/ios": "^8.3.1",
     "@eslint/js": "^9.39.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

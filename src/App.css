@@ -13,6 +13,50 @@ button {
   font: inherit;
 }
 
+.driver-mobile-login {
+  min-height: 100vh;
+  margin: 0 auto !important;
+  padding: 28px 18px !important;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.driver-mobile-login h2 {
+  font-size: 30px;
+  margin-bottom: 20px;
+}
+
+.driver-mobile-login input,
+.driver-mobile-login button {
+  min-height: 48px;
+  border-radius: 12px;
+  font-size: 16px;
+}
+
+.driver-mobile-shell {
+  min-height: 100vh;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: max(16px, env(safe-area-inset-top)) 14px max(20px, env(safe-area-inset-bottom)) !important;
+  box-shadow: none !important;
+}
+
+.driver-mobile-shell .load-list {
+  gap: 16px;
+}
+
+.driver-mobile-shell .load-card {
+  cursor: default;
+}
+
+.driver-mobile-shell button,
+.driver-mobile-shell select,
+.driver-mobile-shell input {
+  min-height: 46px;
+  font-size: 16px;
+}
+
 .app-shell {
   padding: 24px;
 }
