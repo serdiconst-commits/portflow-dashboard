@@ -1,0 +1,4 @@
+PORTFLOW_UPLOAD_STORE_FILE=keystores/portflow-upload-key.jks
+PORTFLOW_UPLOAD_STORE_PASSWORD=replace-with-keystore-password
+PORTFLOW_UPLOAD_KEY_ALIAS=portflow-upload
+PORTFLOW_UPLOAD_KEY_PASSWORD=replace-with-key-password

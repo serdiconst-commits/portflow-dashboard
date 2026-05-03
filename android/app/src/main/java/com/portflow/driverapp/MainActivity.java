@@ -1,4 +1,4 @@
-package com.portflow.driver;
+package com.portflow.driverapp;
 
 import com.getcapacitor.BridgeActivity;
 

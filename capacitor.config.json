@@ -1,5 +1,5 @@
 {
-  "appId": "com.portflow.driver",
+  "appId": "com.portflow.driverapp",
   "appName": "PortFlow Driver",
   "webDir": "dist",
   "bundledWebRuntime": false,

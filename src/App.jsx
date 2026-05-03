@@ -10,10 +10,13 @@ const APP_PORTAL = import.meta.env.VITE_APP_PORTAL || 'web';
 const isDriverApp = APP_PORTAL === 'driver';
 
 const [driverForm, setDriverForm] = useState({
+  id: '',
   name: '',
   email: '',
   password: '',
-  role: 'driver',
+  phone: '',
+  truck: '',
+  isActive: true,
 });
 
 
@@ -851,6 +854,7 @@ const fetchDrivers = async () => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
       },
+      cache: 'no-store',
     });
 
     const data = await res.json();
@@ -1772,7 +1776,7 @@ const handleSaveDriver = async (e) => {
   if (e) e.preventDefault();
 
   try {
-    const res = await fetch(`${API_BASE}/api/users`, {
+    const res = await fetch(`${API_BASE}/api/drivers`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1787,14 +1791,27 @@ const handleSaveDriver = async (e) => {
       throw new Error(data.error || 'Failed to create driver');
     }
 
+    if (data.driver) {
+      setDriversList((prev) => {
+        const withoutDuplicate = prev.filter((driver) => driver.id !== data.driver.id);
+        return [...withoutDuplicate, data.driver].sort((a, b) =>
+          String(a.name || '').localeCompare(String(b.name || ''))
+        );
+      });
+    }
+
     alert('Driver created successfully');
-await fetchDrivers();
+    await fetchDrivers();
+    await fetchAllUsers();
 
     setDriverForm({
+      id: '',
       name: '',
       email: '',
       password: '',
-      role: 'driver',
+      phone: '',
+      truck: '',
+      isActive: true,
     });
   } catch (error) {
     console.error('Failed to save driver:', error);
@@ -4908,129 +4925,204 @@ const refreshLoadsData = async () => {
         </div>
       )}
 {activeView === 'drivers' && (
-  <div>
-    <h2>Drivers</h2>
-    <p>Create and manage your drivers here.</p>
+  <div className="dashboard-grid admin-grid">
+    <section className="panel">
+      <div className="panel-header">
+        <div>
+          <h3>Create Driver</h3>
+          <p className="panel-subtitle">Add a driver login for dispatch assignments.</p>
+        </div>
+      </div>
 
-    <form onSubmit={handleSaveDriver} style={{ maxWidth: '500px', marginTop: '20px' }}>
-      <input
-        type="text"
-        placeholder="Driver Name"
-        value={driverForm.name}
-        onChange={(e) =>
-          setDriverForm((prev) => ({ ...prev, name: e.target.value }))
-        }
-      />
+      <form className="load-form admin-form" onSubmit={handleSaveDriver}>
+        <input
+          type="text"
+          placeholder="Driver ID (optional, auto-generated)"
+          value={driverForm.id}
+          onChange={(e) =>
+            setDriverForm((prev) => ({ ...prev, id: e.target.value }))
+          }
+        />
 
-      <input
-        type="email"
-        placeholder="Driver Email"
-        value={driverForm.email}
-        onChange={(e) =>
-          setDriverForm((prev) => ({ ...prev, email: e.target.value }))
-        }
-      />
+        <input
+          type="text"
+          placeholder="Driver Name"
+          value={driverForm.name}
+          onChange={(e) =>
+            setDriverForm((prev) => ({ ...prev, name: e.target.value }))
+          }
+          required
+        />
 
-      <input
-        type="password"
-        placeholder="Temporary Password"
-        value={driverForm.password}
-        onChange={(e) =>
-          setDriverForm((prev) => ({ ...prev, password: e.target.value }))
-        }
-      />
+        <input
+          type="email"
+          placeholder="Driver Email"
+          value={driverForm.email}
+          onChange={(e) =>
+            setDriverForm((prev) => ({ ...prev, email: e.target.value }))
+          }
+          required
+        />
 
-      <button type="submit">Create Driver</button>
-    </form>
+        <input
+          type="tel"
+          placeholder="Driver Phone"
+          value={driverForm.phone}
+          onChange={(e) =>
+            setDriverForm((prev) => ({ ...prev, phone: e.target.value }))
+          }
+        />
 
-    <div style={{ marginTop: '24px' }}>
-      <h3>Saved Drivers</h3>
+        <input
+          type="text"
+          placeholder="Truck Number"
+          value={driverForm.truck}
+          onChange={(e) =>
+            setDriverForm((prev) => ({ ...prev, truck: e.target.value }))
+          }
+        />
+
+        <input
+          type="password"
+          placeholder="Temporary Password"
+          value={driverForm.password}
+          onChange={(e) =>
+            setDriverForm((prev) => ({ ...prev, password: e.target.value }))
+          }
+          required
+        />
+
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={driverForm.isActive}
+            onChange={(e) =>
+              setDriverForm((prev) => ({ ...prev, isActive: e.target.checked }))
+            }
+          />
+          Active driver account
+        </label>
+
+        <div className="form-actions">
+          <button type="submit" className="primary-btn">Create Driver</button>
+        </div>
+      </form>
+    </section>
+
+    <section className="panel">
+      <div className="panel-header">
+        <h3>Saved Drivers</h3>
+        <span>{driversList.length} drivers</span>
+      </div>
 
       {driversList.length === 0 ? (
-        <p>No drivers created yet.</p>
+        <div className="empty-state">
+          <p>No drivers created yet.</p>
+        </div>
       ) : (
-        driversList.map((driver) => (
-          <div
-            key={driver.id}
-            style={{
-              borderBottom: '1px solid #ddd',
-              padding: '10px 0',
-            }}
-          >
-            <div><strong>{driver.name}</strong></div>
-            <div>{driver.email}</div>
-            <div>Role: {driver.role}</div>
-            <div>Status: {driver.isActive ? 'Active' : 'Inactive'}</div>
-          </div>
-        ))
+        <div className="admin-list">
+          {driversList.map((driver) => (
+            <div key={driver.id} className="admin-row">
+              <div className="admin-row-main">
+                <strong>{driver.name}</strong>
+                <span>{driver.email}</span>
+                <span>{driver.phone || 'No phone on file'}</span>
+              </div>
+              <div className="admin-row-meta">
+                <span>{driver.id}</span>
+                <span>Truck {driver.truck || 'N/A'}</span>
+                <span>Driver</span>
+                <span className={driver.isActive ? 'status-pill active' : 'status-pill inactive'}>
+                  {driver.isActive ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
-    </div>
+    </section>
   </div>
 )}
 
 {activeView === 'settings' && (
-  <div>
-    <h2>Settings</h2>
-
-    <div style={{ marginTop: '20px' }}>
-      <h3>Users</h3>
+  <div className="dashboard-grid settings-grid">
+    <section className="panel">
+      <div className="panel-header">
+        <h3>Users</h3>
+        <span>{allUsers.length} users</span>
+      </div>
 
       {allUsers.length === 0 ? (
-        <p>No users found.</p>
+        <div className="empty-state">
+          <p>No users found.</p>
+        </div>
       ) : (
-        allUsers.map((user) => (
-          <div
-            key={user.id}
-            style={{
-              borderBottom: '1px solid #ddd',
-              padding: '10px 0',
-            }}
-          >
-            <div><strong>{user.name}</strong></div>
-            <div>{user.email}</div>
+        <div className="admin-list">
+          {allUsers.map((user) => (
+            <div key={user.id} className="admin-row user-row">
+              <div className="admin-row-main">
+                <strong>{user.name}</strong>
+                <span>{user.email}</span>
+              </div>
 
-            <div style={{ marginTop: '5px' }}>
-              Role:
-              {user.role === 'carrier' ? (
-                <span style={{ marginLeft: '8px' }}>carrier</span>
-              ) : (
-                <select
-                  value={user.role}
-                  onChange={(e) => handleChangeUserRole(user.id, e.target.value)}
-                  style={{ marginLeft: '8px' }}
-                >
-                  <option value="driver">Driver</option>
-                  <option value="dispatcher">Dispatcher</option>
-                  <option value="admin">Admin</option>
-                </select>
-              )}
-            </div>
+              <div className="user-controls">
+                {user.role === 'carrier' ? (
+                  <span className="role-label">Main Account</span>
+                ) : (
+                  <select
+                    value={user.role}
+                    onChange={(e) => handleChangeUserRole(user.id, e.target.value)}
+                    className="filter-select role-select"
+                  >
+                    <option value="driver">Driver</option>
+                    <option value="dispatcher">Dispatcher</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                )}
 
-            <div>Status: {user.isActive ? 'Active' : 'Inactive'}</div>
-
-            <div style={{ marginTop: '8px' }}>
-              {user.role === 'carrier' ? (
-                <span style={{ fontWeight: 'bold', color: '#555' }}>
-                  Main Account
+                <span className={user.isActive ? 'status-pill active' : 'status-pill inactive'}>
+                  {user.isActive ? 'Active' : 'Inactive'}
                 </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => handleToggleUserStatus(user.id, !user.isActive)}
-                >
-                  {user.isActive ? 'Deactivate' : 'Activate'}
-                </button>
-              )}
-            </div>
-          </div>
-        ))
-      )}
-    </div>
 
-    <div style={{ marginTop: '20px' }}>
-      <h3>Company Profile</h3>
-      <p>View and update your company information.</p>
-    </div>
+                {user.role !== 'carrier' && (
+                  <button
+                    type="button"
+                    className={user.isActive ? 'secondary-btn' : 'primary-btn'}
+                    onClick={() => handleToggleUserStatus(user.id, !user.isActive)}
+                  >
+                    {user.isActive ? 'Deactivate' : 'Activate'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+
+    <section className="panel">
+      <div className="panel-header">
+        <h3>Company Profile</h3>
+      </div>
+      <div className="company-profile">
+        <div className="detail-box">
+          <span>Company</span>
+          <strong>{company?.name || 'PortFlow Dispatch'}</strong>
+        </div>
+        <div className="detail-box">
+          <span>Account Email</span>
+          <strong>{company?.email || currentUser?.email || 'Not available'}</strong>
+        </div>
+        <div className="detail-box">
+          <span>Current User</span>
+          <strong>{currentUser?.name || 'Not available'}</strong>
+        </div>
+        <div className="detail-box">
+          <span>Role</span>
+          <strong>{currentUser?.role || 'Not available'}</strong>
+        </div>
+      </div>
+    </section>
   </div>
 )}
       {activeView === 'invoices' && (

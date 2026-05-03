@@ -143,6 +143,12 @@ button {
   margin: 0;
 }
 
+.panel-subtitle {
+  margin: 4px 0 0;
+  color: #6b7280;
+  font-size: 14px;
+}
+
 .load-field {
   font-size: 13px;
   line-height: 1.25;
@@ -717,6 +723,125 @@ td {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.admin-grid,
+.settings-grid {
+  align-items: start;
+}
+
+.admin-form {
+  grid-template-columns: 1fr;
+}
+
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #374151;
+  font-size: 14px;
+}
+
+.checkbox-row input {
+  width: 18px;
+  height: 18px;
+}
+
+.admin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f9fafb;
+}
+
+.admin-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-row-main strong,
+.company-profile strong {
+  overflow-wrap: anywhere;
+}
+
+.admin-row-main span,
+.admin-row-meta,
+.role-label {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.admin-row-meta,
+.user-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-pill.active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-pill.inactive {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.role-select {
+  width: auto;
+  min-width: 140px;
+  padding: 9px 10px;
+}
+
+.company-profile {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 700px) {
+  .admin-row,
+  .user-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-row-meta,
+  .user-controls {
+    justify-content: flex-start;
+  }
+
+  .user-controls .primary-btn,
+  .user-controls .secondary-btn,
+  .role-select {
+    width: 100%;
+  }
 }
 
 .invoice-preview {

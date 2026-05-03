@@ -1,10 +1,32 @@
 apply plugin: 'com.android.application'
 
+def signingPropertiesFile = rootProject.file('signing.properties')
+def signingProperties = new Properties()
+if (signingPropertiesFile.exists()) {
+    signingPropertiesFile.withInputStream { signingProperties.load(it) }
+}
+
+def getSigningValue = { name ->
+    def projectValue = project.findProperty(name)
+    if (projectValue != null) return projectValue.toString()
+
+    def fileValue = signingProperties.getProperty(name)
+    if (fileValue != null) return fileValue
+
+    return System.getenv(name)
+}
+
+def releaseStoreFile = getSigningValue('PORTFLOW_UPLOAD_STORE_FILE')
+def releaseStorePassword = getSigningValue('PORTFLOW_UPLOAD_STORE_PASSWORD')
+def releaseKeyAlias = getSigningValue('PORTFLOW_UPLOAD_KEY_ALIAS')
+def releaseKeyPassword = getSigningValue('PORTFLOW_UPLOAD_KEY_PASSWORD')
+def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+
 android {
-    namespace = "com.portflow.driver"
+    namespace = "com.portflow.driverapp"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.portflow.driver"
+        applicationId "com.portflow.driverapp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -16,8 +38,23 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile rootProject.file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            } else {
+                logger.lifecycle('Release signing is not configured. The generated AAB will be unsigned.')
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

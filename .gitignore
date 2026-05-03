@@ -29,6 +29,8 @@ uploads/
 android/.gradle/
 android/**/build/
 android/local.properties
+android/signing.properties
+android/keystores/
 ios/App/build/
 ios/App/Pods/
 ios/App/DerivedData/

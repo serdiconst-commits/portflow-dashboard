@@ -22,8 +22,8 @@ This makes the app open directly as `PortFlow Driver`, reject non-driver logins,
 ## App IDs
 
 - App name: `PortFlow Driver`
-- iOS bundle ID: `com.portflow.driver`
-- Android package ID: `com.portflow.driver`
+- iOS bundle ID: `com.portflow.driverapp`
+- Android package ID: `com.portflow.driverapp`
 
 ## Required Store Accounts
 
@@ -81,7 +81,7 @@ Then in Xcode:
 
 1. Select the `App` target.
 2. Set signing team to your Apple Developer account.
-3. Confirm bundle ID is `com.portflow.driver`.
+3. Confirm bundle ID is `com.portflow.driverapp`.
 4. Product > Archive.
 5. Upload archive to App Store Connect.
 

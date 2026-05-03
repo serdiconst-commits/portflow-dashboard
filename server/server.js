@@ -351,7 +351,7 @@ app.put('/api/users/:id/role', authenticate, (req, res) => {
 app.post('/api/users', authenticate, async (req, res) => {
   const companyId = req.company.companyId;
 
-  const { name, email, password, role } = req.body;
+  const { name, email, password, role, truck = '', phone = '', isActive = 1 } = req.body;
 
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Name, email, and password are required' });
@@ -361,29 +361,51 @@ app.post('/api/users', authenticate, async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const id = `USR-${Date.now()}`;
-    const driverId = role === 'driver' ? `DRV-${Date.now()}` : null;
+    const userRole = role || 'driver';
+    const driverId = userRole === 'driver' ? `DRV-${Date.now()}` : null;
 
     db.run(
-      `INSERT INTO users (id, companyId, name, email, password, role, isActive)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, companyId, name, email, hashedPassword, role || 'driver', 1],
+      `INSERT INTO users (id, companyId, name, email, password, role, isActive, driverId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, companyId, name, email, hashedPassword, userRole, isActive ? 1 : 0, driverId],
       function (err) {
         if (err) {
           console.error('Error creating user:', err.message);
           return res.status(500).json({ error: err.message });
         }
 
-        res.json({
-          success: true,
-          user: {
-            id,
-            name,
-            email,
-            role: role || 'driver',
-            companyId,
-            driverId,
-          },
-        });
+        const sendResponse = () => {
+          res.json({
+            success: true,
+            user: {
+              id,
+              name,
+              email,
+              role: userRole,
+              companyId,
+              driverId,
+            },
+          });
+        };
+
+        if (userRole !== 'driver') {
+          sendResponse();
+          return;
+        }
+
+        db.run(
+          `INSERT INTO drivers (id, name, email, password, truck, phone, companyId, isActive)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [driverId, name, email, hashedPassword, truck, phone, companyId, isActive ? 1 : 0],
+          (driverErr) => {
+            if (driverErr) {
+              console.error('Error creating linked driver profile:', driverErr.message);
+              return res.status(500).json({ error: driverErr.message });
+            }
+
+            sendResponse();
+          }
+        );
       }
     );
   } catch (error) {
@@ -990,17 +1012,18 @@ app.post('/api/drivers', authenticate, async (req, res) => {
     isActive = 1,
   } = req.body || {};
 
-  if (!id || !name || !email || !password) {
-    return res.status(400).json({ error: 'Missing required fields' });
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Driver name, email, and password are required' });
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
+  const driverId = String(id || `DRV-${Date.now()}`).trim().toUpperCase();
 
   // 1. Insert into drivers table
   db.run(
     `INSERT INTO drivers (id, name, email, password, truck, phone, companyId, isActive)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, name, email, hashedPassword, truck, phone, companyId, isActive ? 1 : 0],
+    [driverId, name, email, hashedPassword, truck, phone, companyId, isActive ? 1 : 0],
     function (err) {
       if (err) {
         console.error('Error creating driver:', err.message);
@@ -1013,14 +1036,14 @@ app.post('/api/drivers', authenticate, async (req, res) => {
           id, name, email, password, role, companyId, isActive, driverId
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          `USR-${id}`,
+          `USR-${driverId}`,
           name,
           email,
           hashedPassword,
           'driver',
           companyId,
           isActive ? 1 : 0,
-          id,
+          driverId,
         ],
         (userErr) => {
           if (userErr) {
@@ -1028,7 +1051,19 @@ app.post('/api/drivers', authenticate, async (req, res) => {
             return res.status(500).json({ error: userErr.message });
           }
 
-          res.json({ success: true, message: 'Driver created' });
+          res.json({
+            success: true,
+            message: 'Driver created',
+            driver: {
+              id: driverId,
+              name,
+              email,
+              truck,
+              phone,
+              companyId,
+              isActive: isActive ? 1 : 0,
+            },
+          });
         }
       );
     }
