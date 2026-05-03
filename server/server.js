@@ -1063,9 +1063,8 @@ app.post('/api/drivers', authenticate, async (req, res) => {
     return res.status(400).json({ error: 'Driver name, email, and password are required' });
   }
 
-  const createDriver = async (driverId) => {
-    const hashedPassword = await bcrypt.hash(password, 10);
-
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const createDriver = (driverId, allowRetry = false, attempt = 0) => {
     // 1. Insert into drivers table
     db.run(
       `INSERT INTO drivers (id, name, email, password, truck, phone, companyId, isActive)
@@ -1074,6 +1073,28 @@ app.post('/api/drivers', authenticate, async (req, res) => {
       function (err) {
         if (err) {
           console.error('Error creating driver:', err.message);
+          if (
+            allowRetry &&
+            attempt < 25 &&
+            String(err.message || '').includes('UNIQUE constraint failed: drivers.id')
+          ) {
+            getNextDriverId(companyId, (nextErr, nextDriverId) => {
+              if (nextErr) {
+                console.error('Error retrying driver ID generation:', nextErr.message);
+                return res.status(500).json({ error: nextErr.message });
+              }
+
+              if (nextDriverId === driverId) {
+                const fallbackNumber = String(Date.now()).slice(-6);
+                createDriver(`DRV-${fallbackNumber}`, true, attempt + 1);
+                return;
+              }
+
+              createDriver(nextDriverId, true, attempt + 1);
+            });
+            return;
+          }
+
           return res.status(500).json({ error: err.message });
         }
 
@@ -1118,7 +1139,7 @@ app.post('/api/drivers', authenticate, async (req, res) => {
   };
 
   if (id) {
-    createDriver(String(id).trim().toUpperCase());
+    createDriver(String(id).trim().toUpperCase(), false);
     return;
   }
 
@@ -1128,7 +1149,7 @@ app.post('/api/drivers', authenticate, async (req, res) => {
       return res.status(500).json({ error: err.message });
     }
 
-    createDriver(nextDriverId);
+    createDriver(nextDriverId, true);
   });
 });
 
