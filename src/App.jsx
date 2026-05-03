@@ -3087,21 +3087,44 @@ const refreshLoadsData = async () => {
   <option value="OTHER">OTHER</option>
 </select>
 
-  <input
-    type="file"
-    accept="image/*,.pdf"
-    onChange={(e) =>
-      setUploadFileByLoad((prev) => ({
-        ...prev,
-        [load.id]: e.target.files?.[0] || null,
-      }))
-    }
-    style={{
-      display: 'block',
-      marginTop: '10px',
-      width: '100%',
-    }}
-  />
+  <div className="driver-upload-actions">
+    <label className="driver-upload-label" htmlFor={`scan-${load.id}`}>
+      Scan with Camera
+    </label>
+    <input
+      id={`scan-${load.id}`}
+      type="file"
+      accept="image/*"
+      capture="environment"
+      className="driver-native-file-input"
+      onChange={(e) =>
+        setUploadFileByLoad((prev) => ({
+          ...prev,
+          [load.id]: e.target.files?.[0] || null,
+        }))
+      }
+    />
+
+    <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
+      Choose File or Photo
+    </label>
+    <input
+      id={`upload-${load.id}`}
+      type="file"
+      accept="image/*,.pdf"
+      className="driver-native-file-input"
+      onChange={(e) =>
+        setUploadFileByLoad((prev) => ({
+          ...prev,
+          [load.id]: e.target.files?.[0] || null,
+        }))
+      }
+    />
+  </div>
+
+  <p className="driver-upload-name">
+    {uploadFileByLoad[load.id]?.name || 'No document selected'}
+  </p>
 
   <button
     type="button"

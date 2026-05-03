@@ -88,6 +88,29 @@ const normalizeDriverAssignment = (companyId, value, callback) => {
   );
 };
 
+const getNextDriverId = (companyId, callback) => {
+  db.get(
+    `SELECT id
+     FROM drivers
+     WHERE companyId = ?
+       AND id LIKE 'DRV-%'
+       AND LENGTH(id) = 7
+     ORDER BY CAST(SUBSTR(id, 5) AS INTEGER) DESC
+     LIMIT 1`,
+    [companyId],
+    (err, row) => {
+      if (err) {
+        callback(err);
+        return;
+      }
+
+      const lastNumber = Number.parseInt(String(row?.id || '').replace(/^DRV-/i, ''), 10);
+      const nextNumber = Number.isFinite(lastNumber) ? lastNumber + 1 : 1;
+      callback(null, `DRV-${String(nextNumber).padStart(3, '0')}`);
+    }
+  );
+};
+
 /*app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
@@ -362,7 +385,7 @@ app.post('/api/users', authenticate, async (req, res) => {
 
     const id = `USR-${Date.now()}`;
     const userRole = role || 'driver';
-    const driverId = userRole === 'driver' ? `DRV-${Date.now()}` : null;
+    const finishCreateUser = (driverId = null) => {
 
     db.run(
       `INSERT INTO users (id, companyId, name, email, password, role, isActive, driverId)
@@ -408,6 +431,21 @@ app.post('/api/users', authenticate, async (req, res) => {
         );
       }
     );
+    };
+
+    if (userRole === 'driver') {
+      getNextDriverId(companyId, (idErr, nextDriverId) => {
+        if (idErr) {
+          console.error('Error generating driver ID:', idErr.message);
+          return res.status(500).json({ error: idErr.message });
+        }
+
+        finishCreateUser(nextDriverId);
+      });
+      return;
+    }
+
+    finishCreateUser(null);
   } catch (error) {
     console.error('Create user error:', error.message);
     res.status(500).json({ error: 'Server error' });
@@ -1016,58 +1054,73 @@ app.post('/api/drivers', authenticate, async (req, res) => {
     return res.status(400).json({ error: 'Driver name, email, and password are required' });
   }
 
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const driverId = String(id || `DRV-${Date.now()}`).trim().toUpperCase();
+  const createDriver = async (driverId) => {
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-  // 1. Insert into drivers table
-  db.run(
-    `INSERT INTO drivers (id, name, email, password, truck, phone, companyId, isActive)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [driverId, name, email, hashedPassword, truck, phone, companyId, isActive ? 1 : 0],
-    function (err) {
-      if (err) {
-        console.error('Error creating driver:', err.message);
-        return res.status(500).json({ error: err.message });
-      }
-
-      // 2. ALSO insert into users table (this is VERY important)
-      db.run(
-        `INSERT OR REPLACE INTO users (
-          id, name, email, password, role, companyId, isActive, driverId
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          `USR-${driverId}`,
-          name,
-          email,
-          hashedPassword,
-          'driver',
-          companyId,
-          isActive ? 1 : 0,
-          driverId,
-        ],
-        (userErr) => {
-          if (userErr) {
-            console.error('Error creating driver user:', userErr.message);
-            return res.status(500).json({ error: userErr.message });
-          }
-
-          res.json({
-            success: true,
-            message: 'Driver created',
-            driver: {
-              id: driverId,
-              name,
-              email,
-              truck,
-              phone,
-              companyId,
-              isActive: isActive ? 1 : 0,
-            },
-          });
+    // 1. Insert into drivers table
+    db.run(
+      `INSERT INTO drivers (id, name, email, password, truck, phone, companyId, isActive)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [driverId, name, email, hashedPassword, truck, phone, companyId, isActive ? 1 : 0],
+      function (err) {
+        if (err) {
+          console.error('Error creating driver:', err.message);
+          return res.status(500).json({ error: err.message });
         }
-      );
+
+        // 2. ALSO insert into users table (this is VERY important)
+        db.run(
+          `INSERT OR REPLACE INTO users (
+            id, name, email, password, role, companyId, isActive, driverId
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            `USR-${driverId}`,
+            name,
+            email,
+            hashedPassword,
+            'driver',
+            companyId,
+            isActive ? 1 : 0,
+            driverId,
+          ],
+          (userErr) => {
+            if (userErr) {
+              console.error('Error creating driver user:', userErr.message);
+              return res.status(500).json({ error: userErr.message });
+            }
+
+            res.json({
+              success: true,
+              message: 'Driver created',
+              driver: {
+                id: driverId,
+                name,
+                email,
+                truck,
+                phone,
+                companyId,
+                isActive: isActive ? 1 : 0,
+              },
+            });
+          }
+        );
+      }
+    );
+  };
+
+  if (id) {
+    createDriver(String(id).trim().toUpperCase());
+    return;
+  }
+
+  getNextDriverId(companyId, (err, nextDriverId) => {
+    if (err) {
+      console.error('Error generating driver ID:', err.message);
+      return res.status(500).json({ error: err.message });
     }
-  );
+
+    createDriver(nextDriverId);
+  });
 });
 
 app.post('/api/loads', authenticate, (req, res) => {

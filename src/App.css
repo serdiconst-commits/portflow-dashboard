@@ -57,6 +57,36 @@ button {
   font-size: 16px;
 }
 
+.driver-upload-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.driver-upload-label {
+  color: #111827;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.driver-native-file-input {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
+  color: #111827;
+}
+
+.driver-upload-name {
+  margin: 10px 0 0;
+  color: #4b5563;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 .app-shell {
   padding: 24px;
 }
