@@ -89,23 +89,32 @@ const normalizeDriverAssignment = (companyId, value, callback) => {
 };
 
 const getNextDriverId = (companyId, callback) => {
-  db.get(
+  db.all(
     `SELECT id
      FROM drivers
      WHERE companyId = ?
        AND id LIKE 'DRV-%'
-       AND LENGTH(id) = 7
-     ORDER BY CAST(SUBSTR(id, 5) AS INTEGER) DESC
-     LIMIT 1`,
+     ORDER BY id ASC`,
     [companyId],
-    (err, row) => {
+    (err, rows = []) => {
       if (err) {
         callback(err);
         return;
       }
 
-      const lastNumber = Number.parseInt(String(row?.id || '').replace(/^DRV-/i, ''), 10);
-      const nextNumber = Number.isFinite(lastNumber) ? lastNumber + 1 : 1;
+      const usedNumbers = new Set(
+        rows
+          .map((row) => String(row.id || '').match(/^DRV-(\d+)$/i)?.[1])
+          .filter(Boolean)
+          .map((value) => Number.parseInt(value, 10))
+          .filter((value) => Number.isFinite(value))
+      );
+
+      let nextNumber = 1;
+      while (usedNumbers.has(nextNumber)) {
+        nextNumber += 1;
+      }
+
       callback(null, `DRV-${String(nextNumber).padStart(3, '0')}`);
     }
   );
