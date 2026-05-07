@@ -4085,8 +4085,97 @@ const refreshLoadsData = async () => {
                   <option value="Submitted">Submitted</option>
                 </select>
               </div>
-<p>Current filter: {dashboardFilter || 'none'}</p>
-              <div className="load-list">
+              <div className="dispatch-sheet-wrap">
+                {filteredLoadsData.length > 0 ? (
+                  <table className="dispatch-load-sheet">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Container</th>
+                        <th>Size</th>
+                        <th>Ship Line</th>
+                        <th>Pickup</th>
+                        <th>Delivery</th>
+                        <th>Appointment</th>
+                        <th>Driver</th>
+                        <th>Status</th>
+                        <th>Ref #</th>
+                        <th>PO #</th>
+                        <th>Paperwork</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredLoadsData.map((load) => {
+                        const hasPod = load.documents?.some(
+                          (doc) => (doc.category || '').trim().toUpperCase() === 'POD'
+                        );
+                        const hasInEir = load.documents?.some(
+                          (doc) => (doc.category || '').trim().toUpperCase() === 'IN EIR'
+                        );
+                        const hasOutEir = load.documents?.some(
+                          (doc) => (doc.category || '').trim().toUpperCase() === 'OUT EIR'
+                        );
+                        const paperworkLabel =
+                          hasPod && hasInEir && hasOutEir
+                            ? 'Complete'
+                            : hasPod || hasInEir || hasOutEir
+                            ? 'Partial'
+                            : 'Missing';
+
+                        return (
+                          <tr
+                            key={load.id}
+                            className={selectedLoad?.id === load.id ? 'selected' : ''}
+                            onClick={() => {
+                              setSelectedLoad(load);
+                              setIsEditing(false);
+                            }}
+                          >
+                            <td>{load.loadDate || '-'}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="container-link"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setSelectedLoad(load);
+                                  setIsEditing(false);
+                                }}
+                              >
+                                {load.containerNumber || 'Open load'}
+                              </button>
+                            </td>
+                            <td>{load.containerSize || '-'}</td>
+                            <td>{load.shipLine || '-'}</td>
+                            <td>{shortLocation(load.pickup)}</td>
+                            <td>{shortLocation(load.delivery)}</td>
+                            <td>{load.appointmentTime || '-'}</td>
+                            <td>{load.driver ? getDriverLabel(load.driver) : 'Not Assigned'}</td>
+                            <td>
+                              <span className={`sheet-status ${String(load.status || '').toLowerCase().replace(/\s/g, '-')}`}>
+                                {load.status || '-'}
+                              </span>
+                            </td>
+                            <td>{load.referenceNumber || '-'}</td>
+                            <td>{load.poNumber || '-'}</td>
+                            <td>
+                              <span className={`sheet-paperwork ${paperworkLabel.toLowerCase()}`}>
+                                {paperworkLabel}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="empty-state">
+                    <p>No loads found with those filters.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="legacy-load-list-hidden" aria-hidden="true">
                 {filteredLoadsData.length > 0 ? (
                   filteredLoadsData.map((load) => (
                     <button
