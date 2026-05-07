@@ -188,6 +188,21 @@ const getPaperworkStatusFromDocuments = (documents = []) => {
   return documents.length > 0 ? 'Submitted' : 'Pending';
 };
 
+const getDocumentCategory = (doc) =>
+  String(doc?.category || doc?.type || '').trim().toUpperCase();
+
+const requiredDriverDocumentTypes = ['POD', 'IN EIR', 'OUT EIR'];
+
+const hasRequiredDriverDocuments = (load) => {
+  const uploaded = new Set((load?.documents || []).map(getDocumentCategory));
+  return requiredDriverDocumentTypes.every((docType) => uploaded.has(docType));
+};
+
+const getMissingDriverDocuments = (load) => {
+  const uploaded = new Set((load?.documents || []).map(getDocumentCategory));
+  return requiredDriverDocumentTypes.filter((docType) => !uploaded.has(docType));
+};
+
   const getTodayDate = () => new Date().toISOString().split('T')[0];
 
   const getStartOfWeek = (date) => {
@@ -485,6 +500,8 @@ const handleDriverDocumentUpload = async (loadId) => {
       ...prev,
       [loadId]: null,
     }));
+
+    await fetchLoads();
   } catch (error) {
     console.error('Upload error:', error);
     alert(`Failed to upload document: ${error.message}`);
@@ -923,9 +940,9 @@ console.log('RAW LOADS FROM API FULL:', JSON.stringify(data, null, 2));
 setLoadsData(loadsWithPaperwork);
 
     setSelectedLoad((prev) => {
-      if (data.length === 0) return null;
-      if (!prev) return data[0];
-      return data.find((load) => load.id === prev.id) || data[0];
+      if (loadsWithPaperwork.length === 0) return null;
+      if (!prev) return loadsWithPaperwork[0];
+      return loadsWithPaperwork.find((load) => load.id === prev.id) || loadsWithPaperwork[0];
     });
 
     setInvoiceLoadId((prev) => {
@@ -1572,6 +1589,9 @@ const handleDocumentUpload = async (e) => {
   try {
     const res = await fetch(`${API_BASE}/api/loads/${selectedLoad.id}/documents`, {
       method: 'POST',
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
       body: formData,
     });
 
@@ -1596,6 +1616,9 @@ const handleDocumentUpload = async (e) => {
     try {
       await fetch(`${API_BASE}/api/documents/${docId}`, {
         method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
       });
       await fetchLoads();
     } catch (error) {
@@ -1607,7 +1630,10 @@ const handleDocumentUpload = async (e) => {
     try {
       await fetch(`${API_BASE}/api/documents/${docId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
         body: JSON.stringify({ category: newCategory }),
       });
       await fetchLoads();
@@ -2436,7 +2462,14 @@ const handleSelectSavedLocation = (field, locationId) => {
 
 const handleDriverStatusUpdate = async (loadId, newStatus) => {
   try {
-    alert(`Starting update for ${loadId} to ${newStatus}`);
+    const loadToUpdate = loadsData.find((load) => load.id === loadId);
+
+    if (newStatus === 'Delivered' && !hasRequiredDriverDocuments(loadToUpdate)) {
+      const missing = getMissingDriverDocuments(loadToUpdate).join(', ');
+      alert(`Please upload ${missing} before completing this load.`);
+      return;
+    }
+
     console.log('STATUS UPDATE START:', { loadId, newStatus, authToken });
 
     const res = await fetch(`${API_BASE}/api/loads/${loadId}/status`, {
@@ -2466,7 +2499,8 @@ const handleDriverStatusUpdate = async (loadId, newStatus) => {
       )
     );
 
-    alert(`Status updated to ${newStatus}`);
+    await fetchLoads();
+    alert(newStatus === 'Delivered' ? 'Load completed' : `Status updated to ${newStatus}`);
   } catch (error) {
     console.error('STATUS UPDATE ERROR:', error);
     alert(`Failed to update status: ${error.message}`);
@@ -3041,17 +3075,18 @@ const refreshLoadsData = async () => {
   <button
     type="button"
     onClick={() => handleDriverStatusUpdate(load.id, 'Delivered')}
+    disabled={!hasRequiredDriverDocuments(load)}
     style={{
       padding: '10px 14px',
       border: 'none',
       borderRadius: '10px',
-      backgroundColor: '#16a34a',
+      backgroundColor: hasRequiredDriverDocuments(load) ? '#16a34a' : '#9ca3af',
       color: '#fff',
       fontWeight: '600',
-      cursor: 'pointer',
+      cursor: hasRequiredDriverDocuments(load) ? 'pointer' : 'not-allowed',
     }}
   >
-    Delivered
+    Complete Load
   </button>
 </div>
 
@@ -3064,6 +3099,11 @@ const refreshLoadsData = async () => {
   }}
 >
   <p><strong>Scan or Upload Paperwork:</strong></p>
+  {!hasRequiredDriverDocuments(load) && (
+    <p className="driver-upload-name">
+      Required before complete: {getMissingDriverDocuments(load).join(', ')}
+    </p>
+  )}
 
   <select
     value={uploadDocType[load.id] || 'POD'}

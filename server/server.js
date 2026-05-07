@@ -120,6 +120,52 @@ const getNextDriverId = (companyId, callback) => {
   );
 };
 
+const attachDocumentsToLoads = (loads, callback) => {
+  if (!Array.isArray(loads) || loads.length === 0) {
+    callback(null, []);
+    return;
+  }
+
+  const loadIds = loads.map((load) => load.id);
+  const placeholders = loadIds.map(() => '?').join(',');
+
+  db.all(
+    `SELECT * FROM documents WHERE loadId IN (${placeholders}) ORDER BY uploadedAt DESC`,
+    loadIds,
+    (err, documents = []) => {
+      if (err) {
+        callback(err);
+        return;
+      }
+
+      const documentsByLoad = documents.reduce((groups, doc) => {
+        const normalizedDoc = {
+          ...doc,
+          url: doc.filePath ? `/uploads/${path.basename(doc.filePath)}` : '',
+        };
+        groups[doc.loadId] = groups[doc.loadId] || [];
+        groups[doc.loadId].push(normalizedDoc);
+        return groups;
+      }, {});
+
+      callback(
+        null,
+        loads.map((load) => ({
+          ...load,
+          documents: documentsByLoad[load.id] || [],
+        }))
+      );
+    }
+  );
+};
+
+const hasRequiredCompletionDocuments = (documents = []) => {
+  const uploaded = new Set(
+    documents.map((doc) => String(doc.category || doc.type || '').trim().toUpperCase())
+  );
+  return ['POD', 'IN EIR', 'OUT EIR'].every((category) => uploaded.has(category));
+};
+
 /*app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
@@ -1003,11 +1049,18 @@ app.get('/api/loads', authenticate, (req, res) => {
        AND TRIM(LOWER(driver)) = TRIM(LOWER(?))`,
       [companyId, driverId],
       (err, rows) => {
-        if (err) {
-          console.error('Error loading driver loads:', err.message);
-          return res.status(500).json({ error: err.message });
-        }
-        res.json(rows);
+      if (err) {
+        console.error('Error loading driver loads:', err.message);
+        return res.status(500).json({ error: err.message });
+      }
+        attachDocumentsToLoads(rows, (docsErr, loadsWithDocuments) => {
+          if (docsErr) {
+            console.error('Error loading driver documents:', docsErr.message);
+            return res.status(500).json({ error: docsErr.message });
+          }
+
+          res.json(loadsWithDocuments);
+        });
       }
     );
     return;
@@ -1021,7 +1074,14 @@ app.get('/api/loads', authenticate, (req, res) => {
         console.error('Error loading loads:', err.message);
         return res.status(500).json({ error: err.message });
       }
-      res.json(rows);
+      attachDocumentsToLoads(rows, (docsErr, loadsWithDocuments) => {
+        if (docsErr) {
+          console.error('Error loading documents:', docsErr.message);
+          return res.status(500).json({ error: docsErr.message });
+        }
+
+        res.json(loadsWithDocuments);
+      });
     }
   );
 });
@@ -1625,22 +1685,6 @@ app.post('/api/loads/:id/documents', authenticate, upload.array('files'), async 
           }
         }
       );
-     const autoCloseCategories = ['POD'];
-
-if (autoCloseCategories.includes((category || '').trim().toUpperCase())) {
-  db.run(
-    `UPDATE loads SET status = ?, dropDateTime = ? WHERE id = ? AND companyId = ?`,
-    ['Delivered', new Date().toISOString(), loadId, companyId],
-    (err) => {
-      if (err) {
-        console.error('Error auto-updating load to Delivered:', err.message);
-      } else {
-        console.log('Load auto-updated to Delivered:', loadId);
-      }
-    }
-  );
-}
-
       docs.push({
         id,
         name: savedName,
@@ -1745,30 +1789,61 @@ app.put('/api/loads/:id/status', authenticate, (req, res) => {
     return res.status(400).json({ error: 'Invalid status value' });
   }
 
-  const query = isDriver
-    ? `UPDATE loads
-       SET status = ?, dropDateTime = ?
-       WHERE id = ? AND companyId = ? AND driver = ?`
-    : `UPDATE loads
-       SET status = ?, dropDateTime = ?
-       WHERE id = ? AND companyId = ?`;
+  const updateStatus = () => {
+    const query = isDriver
+      ? `UPDATE loads
+         SET status = ?, dropDateTime = ?
+         WHERE id = ? AND companyId = ? AND driver = ?`
+      : `UPDATE loads
+         SET status = ?, dropDateTime = ?
+         WHERE id = ? AND companyId = ?`;
 
-  const params = isDriver
-    ? [status, dropDateTime || '', loadId, companyId, driverId]
-    : [status, dropDateTime || '', loadId, companyId];
+    const params = isDriver
+      ? [status, dropDateTime || '', loadId, companyId, driverId]
+      : [status, dropDateTime || '', loadId, companyId];
 
-  db.run(query, params, function (err) {
-    if (err) {
-      console.error('Error updating load status:', err.message);
-      return res.status(500).json({ error: 'Failed to update load status' });
-    }
+    db.run(query, params, function (err) {
+      if (err) {
+        console.error('Error updating load status:', err.message);
+        return res.status(500).json({ error: 'Failed to update load status' });
+      }
 
-    if (this.changes === 0) {
-      return res.status(404).json({ error: 'Load not found or not allowed' });
-    }
+      if (this.changes === 0) {
+        return res.status(404).json({ error: 'Load not found or not allowed' });
+      }
 
-    res.json({ success: true, loadId, status, dropDateTime: dropDateTime || '' });
-  });
+      res.json({ success: true, loadId, status, dropDateTime: dropDateTime || '' });
+    });
+  };
+
+  if (isDriver && status === 'Delivered') {
+    db.all(
+      `SELECT category, type
+       FROM documents
+       WHERE loadId = ?
+         AND loadId IN (
+           SELECT id FROM loads WHERE companyId = ? AND driver = ?
+         )`,
+      [loadId, companyId, driverId],
+      (docErr, documents) => {
+        if (docErr) {
+          console.error('Error checking completion documents:', docErr.message);
+          return res.status(500).json({ error: 'Failed to verify paperwork' });
+        }
+
+        if (!hasRequiredCompletionDocuments(documents)) {
+          return res.status(400).json({
+            error: 'POD, IN EIR, and OUT EIR are required before completing this load.',
+          });
+        }
+
+        updateStatus();
+      }
+    );
+    return;
+  }
+
+  updateStatus();
 });
 
 console.log('SERVER FILE LOADED');
