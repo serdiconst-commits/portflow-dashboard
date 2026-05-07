@@ -177,6 +177,7 @@ const getGoogleMapsLink = (address) => {
 
 const getDocumentUrl = (doc) => {
   if (!doc) return '';
+  if (doc.id) return `${API_BASE}/api/documents/${encodeURIComponent(doc.id)}/file`;
   if (doc.url) return `${API_BASE}${doc.url}`;
 
   const filePath = String(doc.filePath || '');

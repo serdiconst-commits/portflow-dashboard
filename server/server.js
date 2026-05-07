@@ -1738,6 +1738,45 @@ app.put('/api/documents/:id', authenticate, (req, res) => {
   );
 });
 
+app.get('/api/documents/:id/file', authenticate, (req, res) => {
+  const docId = req.params.id;
+  const companyId = req.company.companyId;
+
+  db.get(
+    `SELECT d.*
+     FROM documents d
+     JOIN loads l ON l.id = d.loadId
+     WHERE d.id = ? AND l.companyId = ?`,
+    [docId, companyId],
+    (err, doc) => {
+      if (err) {
+        console.error('Error fetching document file:', err.message);
+        return res.status(500).json({ error: 'Failed to fetch document' });
+      }
+
+      if (!doc || !doc.filePath) {
+        return res.status(404).json({ error: 'Document not found' });
+      }
+
+      const absolutePath = path.isAbsolute(doc.filePath)
+        ? doc.filePath
+        : path.resolve(rootDir, doc.filePath);
+
+      if (!fs.existsSync(absolutePath)) {
+        console.error('Document file missing on disk:', absolutePath);
+        return res.status(404).json({ error: 'Document file missing' });
+      }
+
+      res.setHeader('Content-Type', doc.type || 'application/octet-stream');
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${String(doc.name || 'document').replace(/"/g, '')}"`
+      );
+      return res.sendFile(absolutePath);
+    }
+  );
+});
+
 app.delete('/api/documents/:id', authenticate, (req, res) => {
   const docId = req.params.id;
   const companyId = req.company.companyId;
