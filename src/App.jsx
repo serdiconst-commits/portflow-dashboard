@@ -174,6 +174,15 @@ const getGoogleMapsLink = (address) => {
   if (!address) return '#';
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
 };
+
+const getDocumentUrl = (doc) => {
+  if (!doc) return '';
+  if (doc.url) return `${API_BASE}${doc.url}`;
+
+  const filePath = String(doc.filePath || '');
+  const fileName = filePath.split(/[\\/]/).pop();
+  return fileName ? `${API_BASE}/uploads/${encodeURIComponent(fileName)}` : '';
+};
   const calculateSettlement = ({ driverRate, detention, lumper, fuelAdvance }) => {
     const total =
       parseMoney(driverRate) +
@@ -752,6 +761,8 @@ useEffect(() => {
   return () => clearInterval(interval);
 }, [showCustomerEditor]);
 useEffect(() => {
+  newDeliveryAutocompleteRef.current = null;
+
   const interval = setInterval(() => {
     if (
       window.google &&
@@ -847,7 +858,7 @@ useEffect(() => {
 
         setNewDeliveryLocation((prev) => ({
           ...prev,
-          address: street,
+          address: street || place.formatted_address || '',
           city,
           state,
           zip,
@@ -860,7 +871,7 @@ useEffect(() => {
   }, 500);
 
   return () => clearInterval(interval);
-}, [showNewDeliveryForm]);
+}, [showNewDeliveryForm, showForm, GOOGLE_MAPS_API_KEY]);
 
 const fetchDrivers = async () => {
   if (!authToken) return;
@@ -1646,7 +1657,7 @@ const handleOpenDocument = async (doc) => {
   if (!doc) return;
 
   try {
-    const fileUrl = `${API_BASE}/uploads/${doc.filePath.split('\\').pop()}`;
+    const fileUrl = getDocumentUrl(doc);
 
     const res = await fetch(fileUrl, {
       headers: {
@@ -1686,7 +1697,7 @@ const handleDownloadDocument = async (doc) => {
   if (!doc) return;
 
   try {
-    const fileUrl = `${API_BASE}/uploads/${doc.filePath.split('\\').pop()}`;
+    const fileUrl = getDocumentUrl(doc);
 
     const res = await fetch(fileUrl, {
       headers: {
@@ -3506,6 +3517,73 @@ const refreshLoadsData = async () => {
 />
 </div>
 
+<div
+  style={{
+    marginTop: '16px',
+    padding: '12px',
+    background: '#f9fafb',
+    borderRadius: '10px',
+    border: '1px solid #e5e7eb',
+  }}
+>
+  <h3 style={{ marginBottom: '10px' }}>Container Details</h3>
+
+  <input
+    type="text"
+    name="containerNumber"
+    placeholder="Container Number"
+    value={newLoad.containerNumber}
+    onChange={handleInputChange}
+  />
+
+  <input
+    type="text"
+    name="containerSize"
+    placeholder="Container Size (20 / 40 / 45)"
+    value={newLoad.containerSize}
+    onChange={handleInputChange}
+  />
+
+  <select
+    name="shipLine"
+    value={newLoad.shipLine || ''}
+    onChange={handleInputChange}
+  >
+    <option value="">🚢 Select Ship Line</option>
+    {shipLineOptions.map((line) => (
+      <option key={line} value={line}>
+        {line}
+      </option>
+    ))}
+  </select>
+
+  <input
+    type="text"
+    name="chassisNumber"
+    placeholder="Chassis Number"
+    value={newLoad.chassisNumber}
+    onChange={handleInputChange}
+  />
+
+  <div className="form-group">
+    <label>PO #</label>
+    <input
+      type="text"
+      name="poNumber"
+      value={newLoad.poNumber || ''}
+      onChange={handleInputChange}
+    />
+  </div>
+
+  <input
+    type="text"
+    name="sealNumber"
+    placeholder="Seal Number"
+    value={newLoad.sealNumber}
+    onChange={handleInputChange}
+  />
+</div>
+
 <div style={{
   marginTop: '16px',
   padding: '12px',
@@ -3879,74 +3957,6 @@ const refreshLoadsData = async () => {
   value={newLoad.lastFreeDay || ''}
   onChange={handleInputChange}
 />
-</div>
-<div
-  style={{
-    marginTop: '16px',
-    padding: '12px',
-    background: '#f9fafb',
-    borderRadius: '10px',
-    border: '1px solid #e5e7eb',
-  }}
->
-  <h3 style={{ marginBottom: '10px' }}>Container Details</h3>
-
-  <input
-    type="text"
-    name="containerNumber"
-    placeholder="Container Number"
-    value={newLoad.containerNumber}
-    onChange={handleInputChange}
-  />
-
-<input
-    type="text"
-    name="containerSize"
-    placeholder="Container Size (20 / 40 / 45)"
-    value={newLoad.containerSize}
-    onChange={handleInputChange}
-  />
-
-  <select
-    name="shipLine"
-    value={newLoad.shipLine || ''}
-    onChange={handleInputChange}
-  >
-    <option value="">🚢 Select Ship Line</option>
-    {shipLineOptions.map((line) => (
-      <option key={line} value={line}>
-        {line}
-      </option>
-    ))}
-  </select>
-
-<input
-    type="text"
-    name="chassisNumber"
-    placeholder="Chassis Number"
-    value={newLoad.chassisNumber}
-    onChange={handleInputChange}
-  />
-
-  <div className="form-group">
-    <label>PO #</label>
-    <input
-      type="text"
-      name="poNumber"
-      value={newLoad.poNumber || ''}
-      onChange={handleInputChange}
-    />
-  </div>
-
-<input
-    type="text"
-    name="sealNumber"
-    placeholder="Seal Number"
-    value={newLoad.sealNumber}
-    onChange={handleInputChange}
-  />
-
-  
 </div>
 <div
   style={{
