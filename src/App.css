@@ -109,6 +109,23 @@ button {
   color: #6b7280;
 }
 
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.company-logo {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  padding: 6px;
+}
+
 .primary-btn {
   background: #0f62fe;
   color: white;
@@ -957,6 +974,44 @@ td {
   display: grid;
   grid-template-columns: 1fr;
   gap: 12px;
+}
+
+.company-logo-settings {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f9fafb;
+}
+
+.company-logo-settings > span {
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.company-logo-preview {
+  min-height: 82px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.company-logo-preview img {
+  max-width: 220px;
+  max-height: 70px;
+  object-fit: contain;
+}
+
+.company-logo-preview strong {
+  color: #6b7280;
+  font-size: 14px;
 }
 
 @media (max-width: 700px) {

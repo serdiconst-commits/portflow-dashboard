@@ -196,6 +196,11 @@ db.run(
     createdAt TEXT NOT NULL
   )
 `);
+db.run(`ALTER TABLE companies ADD COLUMN logoPath TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding logoPath column to companies:', err.message);
+  }
+});
 db.run(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,

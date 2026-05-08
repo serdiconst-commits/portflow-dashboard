@@ -389,6 +389,16 @@ const [registerName, setRegisterName] = useState('');
 const [authToken, setAuthToken] = useState(localStorage.getItem('authToken') || '');
 const [currentUser, setCurrentUser] = useState(savedUser || null);
 const [company, setCompany] = useState(savedCompany || null);
+const [companyLogoUploading, setCompanyLogoUploading] = useState(false);
+const [companyLogoVersion, setCompanyLogoVersion] = useState(Date.now());
+
+const getCompanyLogoSrc = () => {
+  if (!company?.logoUrl) return '';
+  const url = company.logoUrl.startsWith('http')
+    ? company.logoUrl
+    : `${API_BASE}${company.logoUrl}`;
+  return `${url}${url.includes('?') ? '&' : '?'}v=${companyLogoVersion}`;
+};
 
 const handleLogin = async (e) => {
   e.preventDefault();
@@ -919,6 +929,65 @@ const fetchAllUsers = async () => {
     console.error('Failed to fetch users:', error);
   }
 };
+
+const fetchCompanyProfile = async () => {
+  if (!authToken) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/company`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+      cache: 'no-store',
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to fetch company profile');
+    }
+
+    setCompany(data);
+    localStorage.setItem('company', JSON.stringify(data));
+  } catch (error) {
+    console.error('Failed to fetch company profile:', error);
+  }
+};
+
+const handleCompanyLogoUpload = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  try {
+    setCompanyLogoUploading(true);
+    const formData = new FormData();
+    formData.append('logo', file);
+
+    const res = await fetch(`${API_BASE}/api/company/logo`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: formData,
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to upload logo');
+    }
+
+    setCompany(data);
+    setCompanyLogoVersion(Date.now());
+    localStorage.setItem('company', JSON.stringify(data));
+  } catch (error) {
+    console.error('Failed to upload company logo:', error);
+    alert(`Failed to upload logo: ${error.message}`);
+  } finally {
+    setCompanyLogoUploading(false);
+    e.target.value = '';
+  }
+};
 const fetchLoads = async () => {
   if (!authToken) return;
 
@@ -1060,6 +1129,7 @@ const handleDeleteLocation = async (locationId) => {
 useEffect(() => {
   if (activeView === 'settings') {
     fetchAllUsers();
+    fetchCompanyProfile();
   }
 }, [activeView, authToken]);
 
@@ -1078,6 +1148,7 @@ useEffect(() => {
   fetchInvoices();
   fetchLocations();
   fetchDrivers();
+  fetchCompanyProfile();
 }, [authToken]);
 
 useEffect(() => {
@@ -2234,6 +2305,7 @@ const handleGeneratePOD = () => {
           <strong>Load ID:</strong> ${selectedInvoiceLoad.id || '—'}<br/>
           <strong>Reference #:</strong> ${selectedInvoiceLoad.referenceNumber || '—'}<br/>
           <strong>Date:</strong> ${selectedInvoiceLoad.loadDate || '—'}
+          </div>
         </div>
 
         <div class="section">
@@ -3243,9 +3315,19 @@ const refreshLoadsData = async () => {
       <button onClick={handleLogout}>Logout</button>
     </div>
       <header className="topbar">
-        <div>
-          <h1>PortFlow Dispatch</h1>
+        <div className="brand-block">
+          {getCompanyLogoSrc() && (
+            <img
+              src={getCompanyLogoSrc()}
+              alt={`${company?.name || 'Company'} logo`}
+              className="company-logo"
+            />
+          )}
+          <div>
+          <h1>{company?.name || 'PortFlow Dispatch'}</h1>
           <p>Dispatch • Settlements • Paperwork • Load Tracking</p>
+        </div>
+
         </div>
 
         <div className="topbar-actions">
@@ -5275,6 +5357,26 @@ const refreshLoadsData = async () => {
         <div className="detail-box">
           <span>Account Email</span>
           <strong>{company?.email || currentUser?.email || 'Not available'}</strong>
+        </div>
+        <div className="company-logo-settings">
+          <span>Company Logo</span>
+          <div className="company-logo-preview">
+            {getCompanyLogoSrc() ? (
+              <img src={getCompanyLogoSrc()} alt={`${company?.name || 'Company'} logo`} />
+            ) : (
+              <strong>No logo uploaded</strong>
+            )}
+          </div>
+          <label className="upload-btn">
+            {companyLogoUploading ? 'Uploading...' : 'Upload Logo'}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={handleCompanyLogoUpload}
+              hidden
+              disabled={companyLogoUploading}
+            />
+          </label>
         </div>
         <div className="detail-box">
           <span>Current User</span>

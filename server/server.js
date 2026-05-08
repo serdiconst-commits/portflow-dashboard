@@ -22,6 +22,8 @@ const getMimeTypeFromName = (fileName = '') => {
   if (lower.endsWith('.png')) return 'image/png';
   return 'application/octet-stream';
 };
+const getCompanyLogoUrl = (company = {}) =>
+  company.logoPath ? `/api/company-logo/${encodeURIComponent(path.basename(company.logoPath))}` : '';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -292,6 +294,19 @@ const authenticate = (req, res, next) => {
 
 app.use('/api/invoices', authenticate, createInvoiceRoutes(db));
 
+app.get('/api/company-logo/:filename', (req, res) => {
+  const filename = path.basename(req.params.filename);
+  const logoPath = path.join(uploadsDir, filename);
+
+  if (!fs.existsSync(logoPath)) {
+    return res.status(404).json({ error: 'Logo not found' });
+  }
+
+  res.setHeader('Content-Type', getMimeTypeFromName(filename));
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  return res.sendFile(path.resolve(logoPath));
+});
+
 app.get('/uploads/:filename', authenticate, (req, res) => {
   const companyId = req.company.companyId;
   const filename = path.basename(req.params.filename);
@@ -314,6 +329,69 @@ app.get('/uploads/:filename', authenticate, (req, res) => {
       }
 
       return res.sendFile(path.resolve(doc.filePath));
+    }
+  );
+});
+
+app.get('/api/company', authenticate, (req, res) => {
+  const companyId = req.company.companyId;
+
+  db.get(
+    `SELECT id, name, email, logoPath FROM companies WHERE id = ?`,
+    [companyId],
+    (err, company) => {
+      if (err) {
+        console.error('Company profile lookup error:', err.message);
+        return res.status(500).json({ error: 'Failed to load company profile' });
+      }
+
+      if (!company) {
+        return res.status(404).json({ error: 'Company not found' });
+      }
+
+      res.json({
+        id: company.id,
+        name: company.name,
+        email: company.email,
+        logoUrl: getCompanyLogoUrl(company),
+      });
+    }
+  );
+});
+
+app.post('/api/company/logo', authenticate, upload.single('logo'), (req, res) => {
+  const companyId = req.company.companyId;
+
+  if (!req.file) {
+    return res.status(400).json({ error: 'Please choose a logo file.' });
+  }
+
+  db.run(
+    `UPDATE companies SET logoPath = ? WHERE id = ?`,
+    [req.file.path, companyId],
+    function (err) {
+      if (err) {
+        console.error('Company logo update error:', err.message);
+        return res.status(500).json({ error: 'Failed to save company logo' });
+      }
+
+      db.get(
+        `SELECT id, name, email, logoPath FROM companies WHERE id = ?`,
+        [companyId],
+        (lookupErr, company) => {
+          if (lookupErr || !company) {
+            console.error('Company logo lookup error:', lookupErr?.message);
+            return res.status(500).json({ error: 'Logo saved, but profile refresh failed' });
+          }
+
+          res.json({
+            id: company.id,
+            name: company.name,
+            email: company.email,
+            logoUrl: getCompanyLogoUrl(company),
+          });
+        }
+      );
     }
   );
 });
@@ -729,17 +807,35 @@ app.post('/api/login', (req, res) => {
           { expiresIn: user.role === 'driver' ? '30d' : '7d' }
         );
 
-        res.json({
-          token,
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            companyId: user.companyId || null,
-            driverId: user.driverId || null,
-          },
-        });
+        db.get(
+          `SELECT id, name, email, logoPath FROM companies WHERE id = ?`,
+          [user.companyId],
+          (companyErr, company) => {
+            if (companyErr) {
+              console.error('Login company lookup error:', companyErr.message);
+            }
+
+            res.json({
+              token,
+              user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                companyId: user.companyId || null,
+                driverId: user.driverId || null,
+              },
+              company: company
+                ? {
+                    id: company.id,
+                    name: company.name,
+                    email: company.email,
+                    logoUrl: getCompanyLogoUrl(company),
+                  }
+                : null,
+            });
+          }
+        );
       } catch (error) {
         console.error('Password compare error:', error.message);
         res.status(500).json({ error: 'Server error during login' });
@@ -1978,6 +2074,7 @@ app.post('/api/auth/register', async (req, res) => {
                     id: companyId,
                     name,
                     email,
+                    logoUrl: '',
                   },
                 });
               }
@@ -2029,6 +2126,7 @@ app.post('/api/auth/login', (req, res) => {
           id: company.id,
           name: company.name,
           email: company.email,
+          logoUrl: getCompanyLogoUrl(company),
         },
       });
     }
