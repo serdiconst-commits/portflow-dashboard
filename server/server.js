@@ -292,6 +292,19 @@ const authenticate = (req, res, next) => {
   }
 };
 
+const normalizeRole = (role) => String(role || '').trim().toLowerCase();
+const adminRoles = new Set(['admin', 'owner', 'carrier']);
+const staffRoles = new Set(['dispatcher', 'payroll', 'admin', 'manager']);
+const requireRoles = (allowedRoles) => (req, res, next) => {
+  const role = normalizeRole(req.user?.role);
+  if (allowedRoles.has(role)) {
+    next();
+    return;
+  }
+
+  res.status(403).json({ error: 'You do not have permission to access this area.' });
+};
+
 app.use('/api/invoices', authenticate, createInvoiceRoutes(db));
 
 app.get('/api/company-logo/:filename', (req, res) => {
@@ -452,7 +465,7 @@ app.delete('/api/customers/:id', authenticate, (req, res) => {
   );
 });
 
-app.put('/api/users/:id/status', authenticate, (req, res) => {
+app.put('/api/users/:id/status', authenticate, requireRoles(adminRoles), (req, res) => {
   const companyId = req.company.companyId;
   const { id } = req.params;
   const { isActive } = req.body;
@@ -476,20 +489,22 @@ app.put('/api/users/:id/status', authenticate, (req, res) => {
     }
   );
 });
-app.put('/api/users/:id/role', authenticate, (req, res) => {
+app.put('/api/users/:id/role', authenticate, requireRoles(adminRoles), (req, res) => {
   const companyId = req.company.companyId;
   const { id } = req.params;
   const { role } = req.body;
 
-  if (!role) {
-    return res.status(400).json({ error: 'Role is required' });
+  const normalizedRole = normalizeRole(role);
+
+  if (!staffRoles.has(normalizedRole)) {
+    return res.status(400).json({ error: 'Choose Dispatcher, Payroll, Admin, or Manager for staff users.' });
   }
 
   db.run(
     `UPDATE users
      SET role = ?
-     WHERE id = ? AND companyId = ?`,
-    [role, id, companyId],
+     WHERE id = ? AND companyId = ? AND role != 'driver'`,
+    [normalizedRole, id, companyId],
     function (err) {
       if (err) {
         console.error('Error updating user role:', err.message);
@@ -504,6 +519,56 @@ app.put('/api/users/:id/role', authenticate, (req, res) => {
     }
   );
 });
+
+app.post('/api/staff-users', authenticate, requireRoles(adminRoles), async (req, res) => {
+  const companyId = req.company.companyId;
+  const { name, email, password, role = 'dispatcher', isActive = true } = req.body;
+  const normalizedRole = normalizeRole(role);
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Name, email, and temporary password are required' });
+  }
+
+  if (!staffRoles.has(normalizedRole)) {
+    return res.status(400).json({ error: 'Choose Dispatcher, Payroll, Admin, or Manager.' });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const id = `USR-${Date.now()}`;
+
+    db.run(
+      `INSERT INTO users (id, companyId, name, email, password, role, isActive, driverId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, companyId, name, email, hashedPassword, normalizedRole, isActive ? 1 : 0, null],
+      function (err) {
+        if (err) {
+          console.error('Error creating staff user:', err.message);
+          const duplicateEmail = err.message && err.message.includes('UNIQUE constraint failed');
+          return res.status(duplicateEmail ? 400 : 500).json({
+            error: duplicateEmail ? 'That email is already used by another user.' : err.message,
+          });
+        }
+
+        res.json({
+          success: true,
+          user: {
+            id,
+            name,
+            email,
+            role: normalizedRole,
+            companyId,
+            isActive: isActive ? 1 : 0,
+          },
+        });
+      }
+    );
+  } catch (error) {
+    console.error('Create staff user error:', error.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.post('/api/users', authenticate, async (req, res) => {
   const companyId = req.company.companyId;
 
@@ -605,7 +670,7 @@ app.post('/api/users', authenticate, async (req, res) => {
     }
   );
 });
-app.get('/api/all-users', authenticate, (req, res) => {
+app.get('/api/all-users', authenticate, requireRoles(adminRoles), (req, res) => {
   const companyId = req.company.companyId;
 
   db.all(

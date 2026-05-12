@@ -19,6 +19,45 @@ const [driverForm, setDriverForm] = useState({
   isActive: true,
 });
 
+const emptyStaffForm = {
+  name: '',
+  email: '',
+  password: '',
+  role: 'dispatcher',
+  isActive: true,
+};
+
+const staffRoleOptions = [
+  { value: 'dispatcher', label: 'Dispatcher' },
+  { value: 'payroll', label: 'Payroll' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'manager', label: 'Manager' },
+];
+
+const fullAccessRoles = new Set(['admin', 'owner', 'carrier']);
+const getNormalizedRole = (role) => String(role || '').trim().toLowerCase();
+const getDefaultViewForRole = (role) => {
+  const normalizedRole = getNormalizedRole(role);
+  if (normalizedRole === 'driver') return 'driver';
+  if (normalizedRole === 'payroll') return 'settlements';
+  return 'dispatch';
+};
+
+const roleCanAccessView = (role, view) => {
+  const normalizedRole = getNormalizedRole(role);
+  if (fullAccessRoles.has(normalizedRole)) return true;
+  if (normalizedRole === 'driver') return view === 'driver';
+  if (normalizedRole === 'payroll') return ['settlements', 'invoices'].includes(view);
+  if (normalizedRole === 'manager') {
+    return ['dispatch', 'drivers', 'customers', 'settlements', 'invoices'].includes(view);
+  }
+  if (normalizedRole === 'dispatcher') {
+    return ['dispatch', 'drivers', 'customers'].includes(view);
+  }
+  return view === 'dispatch';
+};
+
+const [staffForm, setStaffForm] = useState(emptyStaffForm);
 
  const checklistDocumentTypes = [
   'IN EIR',
@@ -348,7 +387,7 @@ const savedUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
 const savedCompany = JSON.parse(localStorage.getItem('company') || 'null');
 
 const [activeView, setActiveView] = useState(
-  isDriverApp || savedUser?.role === 'driver' ? 'driver' : 'dispatch'
+  isDriverApp || savedUser?.role === 'driver' ? 'driver' : getDefaultViewForRole(savedUser?.role)
 );
 
 const [loadsData, setLoadsData] = useState([]);
@@ -430,7 +469,9 @@ const handleLogin = async (e) => {
     setAuthToken(data.token);
     setCurrentUser(data.user);
 console.log('LOGGED IN USER:', data.user);
-    const nextView = isDriverApp || data.user?.role === 'driver' ? 'driver' : 'dispatch';
+    const nextView = isDriverApp || data.user?.role === 'driver'
+      ? 'driver'
+      : getDefaultViewForRole(data.user?.role);
     setActiveView(nextView);
 
     localStorage.setItem('authToken', data.token);
@@ -471,7 +512,7 @@ const handleRegister = async (e) => {
     setAuthToken(data.token);
     setCurrentUser(data.user);
     setCompany(data.company || null);
-    setActiveView(isDriverApp ? 'driver' : 'dispatch');
+    setActiveView(isDriverApp ? 'driver' : getDefaultViewForRole(data.user?.role));
 
     localStorage.setItem('authToken', data.token);
     localStorage.setItem('currentUser', JSON.stringify(data.user));
@@ -1132,6 +1173,13 @@ useEffect(() => {
     fetchCompanyProfile();
   }
 }, [activeView, authToken]);
+
+useEffect(() => {
+  if (!currentUser) return;
+  if (!roleCanAccessView(currentUser.role, activeView)) {
+    setActiveView(getDefaultViewForRole(currentUser.role));
+  }
+}, [activeView, currentUser]);
 
 useEffect(() => {
   if (activeView === 'drivers') {
@@ -1925,6 +1973,34 @@ const handleSaveDriver = async (e) => {
   } catch (error) {
     console.error('Failed to save driver:', error);
     alert(`Failed to save driver: ${error.message}`);
+  }
+};
+
+const handleSaveStaffUser = async (e) => {
+  if (e) e.preventDefault();
+
+  try {
+    const res = await fetch(`${API_BASE}/api/staff-users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(staffForm),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to create staff user');
+    }
+
+    alert('Team member created successfully');
+    await fetchAllUsers();
+    setStaffForm(emptyStaffForm);
+  } catch (error) {
+    console.error('Failed to save staff user:', error);
+    alert(`Failed to save staff user: ${error.message}`);
   }
 };
 
@@ -3277,6 +3353,7 @@ const refreshLoadsData = async () => {
 }
   return (
   <div className="app-shell">
+     {fullAccessRoles.has(getNormalizedRole(currentUser?.role)) && (
      <div className="view-toggle">
       <button type="button" onClick={() => setUserRole('driver')}>
         Driver View
@@ -3286,6 +3363,7 @@ const refreshLoadsData = async () => {
         Dispatcher View
       </button>
     </div>
+     )}
     {userRole === 'driver' && (
   <div style={{ marginTop: '10px' }}>
    <select
@@ -3332,44 +3410,56 @@ const refreshLoadsData = async () => {
 
         <div className="topbar-actions">
           <div className="view-toggle">
+            {roleCanAccessView(currentUser?.role, 'dispatch') && (
             <button
               className={activeView === 'dispatch' ? 'toggle-btn active' : 'toggle-btn'}
               onClick={() => setActiveView('dispatch')}
             >
               Dispatch Board
             </button>
+            )}
+            {roleCanAccessView(currentUser?.role, 'settlements') && (
             <button
               className={activeView === 'settlements' ? 'toggle-btn active' : 'toggle-btn'}
               onClick={() => setActiveView('settlements')}
             >
               Driver Settlements
             </button>
+            )}
+            {roleCanAccessView(currentUser?.role, 'customers') && (
             <button
               className={activeView === 'customers' ? 'toggle-btn active' : 'toggle-btn'}
               onClick={() => setActiveView('customers')}
             >
               Customers
             </button>
+            )}
+{roleCanAccessView(currentUser?.role, 'drivers') && (
 <button
               className={activeView === 'drivers' ? 'toggle-btn active' : 'toggle-btn'}
               onClick={() => setActiveView('drivers')}
             >
               Drivers
             </button>
+)}
 
+{roleCanAccessView(currentUser?.role, 'settings') && (
 <button
   className={activeView === 'settings' ? 'toggle-btn active' : 'toggle-btn'}
   onClick={() => setActiveView('settings')}
 >
   Settings
 </button>
+)}
 
+            {roleCanAccessView(currentUser?.role, 'invoices') && (
             <button
               className={activeView === 'invoices' ? 'toggle-btn active' : 'toggle-btn'}
               onClick={() => setActiveView('invoices')}
             >
               Invoices
             </button>
+            )}
           </div>
 
           {activeView === 'dispatch' && (
@@ -5293,6 +5383,66 @@ const refreshLoadsData = async () => {
   <div className="dashboard-grid settings-grid">
     <section className="panel">
       <div className="panel-header">
+        <div>
+          <h3>Add Team Member</h3>
+          <p className="panel-subtitle">Create internal staff access. Driver accounts stay in the Drivers section.</p>
+        </div>
+      </div>
+
+      <form className="load-form admin-form" onSubmit={handleSaveStaffUser}>
+        <input
+          type="text"
+          placeholder="Name"
+          value={staffForm.name}
+          onChange={(e) => setStaffForm((prev) => ({ ...prev, name: e.target.value }))}
+          required
+        />
+
+        <input
+          type="email"
+          placeholder="Email"
+          value={staffForm.email}
+          onChange={(e) => setStaffForm((prev) => ({ ...prev, email: e.target.value }))}
+          required
+        />
+
+        <input
+          type="password"
+          placeholder="Temporary Password"
+          value={staffForm.password}
+          onChange={(e) => setStaffForm((prev) => ({ ...prev, password: e.target.value }))}
+          required
+        />
+
+        <select
+          value={staffForm.role}
+          onChange={(e) => setStaffForm((prev) => ({ ...prev, role: e.target.value }))}
+          className="filter-select"
+        >
+          {staffRoleOptions.map((role) => (
+            <option key={role.value} value={role.value}>
+              {role.label}
+            </option>
+          ))}
+        </select>
+
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={staffForm.isActive}
+            onChange={(e) => setStaffForm((prev) => ({ ...prev, isActive: e.target.checked }))}
+          />
+          Active staff account
+        </label>
+
+        <div className="form-actions">
+          <button type="submit" className="primary-btn">Create Staff User</button>
+        </div>
+      </form>
+    </section>
+
+    <section className="panel">
+      <div className="panel-header">
         <h3>Users</h3>
         <span>{allUsers.length} users</span>
       </div>
@@ -5313,15 +5463,19 @@ const refreshLoadsData = async () => {
               <div className="user-controls">
                 {user.role === 'carrier' ? (
                   <span className="role-label">Main Account</span>
+                ) : user.role === 'driver' ? (
+                  <span className="role-label">Driver - manage in Drivers</span>
                 ) : (
                   <select
                     value={user.role}
                     onChange={(e) => handleChangeUserRole(user.id, e.target.value)}
                     className="filter-select role-select"
                   >
-                    <option value="driver">Driver</option>
-                    <option value="dispatcher">Dispatcher</option>
-                    <option value="admin">Admin</option>
+                    {staffRoleOptions.map((role) => (
+                      <option key={role.value} value={role.value}>
+                        {role.label}
+                      </option>
+                    ))}
                   </select>
                 )}
 
