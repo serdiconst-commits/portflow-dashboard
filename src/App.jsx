@@ -47,12 +47,12 @@ const roleCanAccessView = (role, view) => {
   const normalizedRole = getNormalizedRole(role);
   if (fullAccessRoles.has(normalizedRole)) return true;
   if (normalizedRole === 'driver') return view === 'driver';
-  if (normalizedRole === 'payroll') return ['settlements', 'invoices'].includes(view);
+  if (normalizedRole === 'payroll') return ['settlements', 'invoices', 'settings'].includes(view);
   if (normalizedRole === 'manager') {
-    return ['dispatch', 'drivers', 'customers', 'settlements', 'invoices'].includes(view);
+    return ['dispatch', 'drivers', 'customers', 'settlements', 'invoices', 'settings'].includes(view);
   }
   if (normalizedRole === 'dispatcher') {
-    return ['dispatch', 'drivers', 'customers'].includes(view);
+    return ['dispatch', 'drivers', 'customers', 'settings'].includes(view);
   }
   return view === 'dispatch';
 };
@@ -430,6 +430,8 @@ const [currentUser, setCurrentUser] = useState(savedUser || null);
 const [company, setCompany] = useState(savedCompany || null);
 const [companyLogoUploading, setCompanyLogoUploading] = useState(false);
 const [companyLogoVersion, setCompanyLogoVersion] = useState(Date.now());
+const [auditLogs, setAuditLogs] = useState([]);
+const [selectedLoadAuditLogs, setSelectedLoadAuditLogs] = useState([]);
 
 const getCompanyLogoSrc = () => {
   if (!company?.logoUrl) return '';
@@ -1029,6 +1031,69 @@ const handleCompanyLogoUpload = async (e) => {
     e.target.value = '';
   }
 };
+
+const parseAuditJson = (value, fallback) => {
+  if (!value) return fallback;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+};
+
+const formatAuditValue = (value) => {
+  if (value === null || value === undefined || value === '') return '-';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+};
+
+const fetchAuditLogs = async () => {
+  if (!authToken) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/audit-logs`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+      cache: 'no-store',
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to fetch audit logs');
+    }
+
+    setAuditLogs(data);
+  } catch (error) {
+    console.error('Failed to fetch audit logs:', error);
+  }
+};
+
+const fetchSelectedLoadAuditLogs = async (loadId) => {
+  if (!authToken || !loadId || !roleCanAccessView(currentUser?.role, 'dispatch')) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${encodeURIComponent(loadId)}/audit-logs`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+      cache: 'no-store',
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to fetch load audit logs');
+    }
+
+    setSelectedLoadAuditLogs(data);
+  } catch (error) {
+    console.error('Failed to fetch load audit logs:', error);
+    setSelectedLoadAuditLogs([]);
+  }
+};
 const fetchLoads = async () => {
   if (!authToken) return;
 
@@ -1169,10 +1234,21 @@ const handleDeleteLocation = async (locationId) => {
 
 useEffect(() => {
   if (activeView === 'settings') {
-    fetchAllUsers();
+    if (fullAccessRoles.has(getNormalizedRole(currentUser?.role))) {
+      fetchAllUsers();
+    }
     fetchCompanyProfile();
+    fetchAuditLogs();
   }
-}, [activeView, authToken]);
+}, [activeView, authToken, currentUser?.role]);
+
+useEffect(() => {
+  if (selectedLoad?.id && roleCanAccessView(currentUser?.role, 'dispatch')) {
+    fetchSelectedLoadAuditLogs(selectedLoad.id);
+  } else {
+    setSelectedLoadAuditLogs([]);
+  }
+}, [selectedLoad?.id, authToken, currentUser?.role]);
 
 useEffect(() => {
   if (!currentUser) return;
@@ -1520,6 +1596,7 @@ const res = await fetch(`${API_BASE}/api/loads`, {
 
     await fetchLoads();
     await fetchLocations();
+    await fetchSelectedLoadAuditLogs(data.id);
   } catch (error) {
     console.error('Failed to create load:', error);
     alert(`Failed to create load: ${error.message}`);
@@ -1596,6 +1673,7 @@ const res = await fetch(`${API_BASE}/api/loads/${editingLoad.id}`, {
     setSelectedLoad(data);
     setEditingLoad(data);
     setIsEditing(false);
+    await fetchSelectedLoadAuditLogs(data.id);
   } catch (error) {
     console.error('Failed to update load:', error);
     alert(`Failed to update load: ${error.message}`);
@@ -1668,6 +1746,7 @@ const updatedLoad = {
     }
 
     await fetchLoads();
+    await fetchSelectedLoadAuditLogs(updatedLoad.id);
   } catch (error) {
     console.error('Failed to update driver:', error);
   }
@@ -1704,6 +1783,7 @@ const updatedLoad = {
     }
 
     await fetchLoads();
+    await fetchSelectedLoadAuditLogs(updatedLoad.id);
   } catch (error) {
     console.error('Failed to update status:', error);
   }
@@ -1733,6 +1813,7 @@ const handleDocumentUpload = async (e) => {
     }
 
     await fetchLoads();
+    await fetchSelectedLoadAuditLogs(selectedLoad.id);
 
     
   } catch (error) {
@@ -5009,6 +5090,50 @@ const refreshLoadsData = async () => {
                         )}
                       </div>
 
+                      <div className="audit-panel load-audit-box">
+                        <div className="documents-header">
+                          <h4>Audit History</h4>
+                          <button
+                            type="button"
+                            className="secondary-btn"
+                            onClick={() => fetchSelectedLoadAuditLogs(selectedLoad.id)}
+                          >
+                            Refresh
+                          </button>
+                        </div>
+
+                        {selectedLoadAuditLogs.length === 0 ? (
+                          <p className="documents-empty">No audit history for this load yet.</p>
+                        ) : (
+                          <div className="audit-list compact">
+                            {selectedLoadAuditLogs.map((log) => {
+                              const changedFields = parseAuditJson(log.changedFields, {});
+                              const changedEntries = Object.entries(changedFields || {});
+                              return (
+                                <div key={log.id} className="audit-row">
+                                  <div className="audit-row-main">
+                                    <strong>{log.action}</strong>
+                                    <span>{log.userName || 'System'} • {formatDateTime(log.createdAt)}</span>
+                                  </div>
+                                  <div className="audit-changes">
+                                    {changedEntries.length === 0 ? (
+                                      <span>No field details</span>
+                                    ) : (
+                                      changedEntries.map(([field, change]) => (
+                                        <div key={field} className="audit-change">
+                                          <span>{field}</span>
+                                          <strong>{formatAuditValue(change?.oldValue)} → {formatAuditValue(change?.newValue)}</strong>
+                                        </div>
+                                      ))
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
                       <div className="notes-box">
                         <h4>Dispatcher Notes</h4>
                         <p>{newLoad.notes}</p>
@@ -5381,6 +5506,8 @@ const refreshLoadsData = async () => {
 
 {activeView === 'settings' && (
   <div className="dashboard-grid settings-grid">
+    {fullAccessRoles.has(getNormalizedRole(currentUser?.role)) && (
+      <>
     <section className="panel">
       <div className="panel-header">
         <div>
@@ -5541,6 +5668,56 @@ const refreshLoadsData = async () => {
           <strong>{currentUser?.role || 'Not available'}</strong>
         </div>
       </div>
+    </section>
+      </>
+    )}
+
+    <section className="panel audit-panel">
+      <div className="panel-header">
+        <div>
+          <h3>Audit Log</h3>
+          <p className="panel-subtitle">Read-only history of changes for your company.</p>
+        </div>
+        <button type="button" className="secondary-btn" onClick={fetchAuditLogs}>
+          Refresh
+        </button>
+      </div>
+
+      {auditLogs.length === 0 ? (
+        <div className="empty-state">
+          <p>No audit history found yet.</p>
+        </div>
+      ) : (
+        <div className="audit-list">
+          {auditLogs.map((log) => {
+            const changedFields = parseAuditJson(log.changedFields, {});
+            const changedEntries = Object.entries(changedFields || {});
+            return (
+              <div key={log.id} className="audit-row">
+                <div className="audit-row-main">
+                  <strong>{log.action} {log.entityType}</strong>
+                  <span>{log.entityLabel || log.entityId || '-'}</span>
+                  <span>
+                    {log.userName || 'System'} ({log.userRole || 'unknown'}) • {formatDateTime(log.createdAt)}
+                  </span>
+                </div>
+                <div className="audit-changes">
+                  {changedEntries.length === 0 ? (
+                    <span>No field details</span>
+                  ) : (
+                    changedEntries.slice(0, 4).map(([field, change]) => (
+                      <div key={field} className="audit-change">
+                        <span>{field}</span>
+                        <strong>{formatAuditValue(change?.oldValue)} → {formatAuditValue(change?.newValue)}</strong>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   </div>
 )}

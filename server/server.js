@@ -168,6 +168,87 @@ const hasRequiredCompletionDocuments = (documents = []) => {
   return ['POD', 'IN EIR', 'OUT EIR'].every((category) => uploaded.has(category));
 };
 
+const sensitiveAuditFields = new Set(['password', 'passwordHash', 'token', 'jwt', 'secret']);
+const auditLogSafeValue = (value) => {
+  if (!value || typeof value !== 'object') return value ?? null;
+
+  return Object.fromEntries(
+    Object.entries(value).filter(([key]) => !sensitiveAuditFields.has(String(key).trim()))
+  );
+};
+
+const getChangedFields = (oldValue = {}, newValue = {}) => {
+  const oldSafe = auditLogSafeValue(oldValue) || {};
+  const newSafe = auditLogSafeValue(newValue) || {};
+  const keys = new Set([...Object.keys(oldSafe), ...Object.keys(newSafe)]);
+  const changed = {};
+
+  keys.forEach((key) => {
+    const before = oldSafe[key] ?? '';
+    const after = newSafe[key] ?? '';
+    if (String(before) !== String(after)) {
+      changed[key] = { oldValue: before, newValue: after };
+    }
+  });
+
+  return changed;
+};
+
+const writeAuditLog = (req, details = {}) => {
+  const createdAt = new Date().toISOString();
+  const oldValue = auditLogSafeValue(details.oldValue);
+  const newValue = auditLogSafeValue(details.newValue);
+  const changedFields =
+    details.changedFields || getChangedFields(oldValue || {}, newValue || {});
+
+  db.run(
+    `INSERT INTO audit_logs (
+      id, companyId, userId, userName, userRole, action, entityType, entityId,
+      entityLabel, oldValue, newValue, changedFields, ipAddress, userAgent, createdAt
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      uuidv4(),
+      req.company?.companyId || details.companyId || '',
+      req.user?.id || '',
+      req.user?.name || req.user?.email || '',
+      req.user?.role || '',
+      details.action,
+      details.entityType,
+      details.entityId || '',
+      details.entityLabel || details.entityId || '',
+      JSON.stringify(oldValue ?? null),
+      JSON.stringify(newValue ?? null),
+      JSON.stringify(changedFields ?? {}),
+      req.ip || req.headers['x-forwarded-for'] || '',
+      req.headers['user-agent'] || '',
+      createdAt,
+    ],
+    (err) => {
+      if (err) {
+        console.error('Audit log write failed:', err.message);
+      }
+    }
+  );
+};
+
+const getAuditAccessFilter = (role) => {
+  const normalizedRole = normalizeRole(role);
+  if (adminRoles.has(normalizedRole)) return { clause: '', params: [] };
+  if (normalizedRole === 'manager') {
+    return {
+      clause: ` AND entityType IN ('LOAD', 'DRIVER', 'CUSTOMER', 'INVOICE', 'DOCUMENT')`,
+      params: [],
+    };
+  }
+  if (normalizedRole === 'dispatcher') {
+    return { clause: ` AND entityType IN ('LOAD', 'DOCUMENT')`, params: [] };
+  }
+  if (normalizedRole === 'payroll') {
+    return { clause: ` AND entityType IN ('INVOICE')`, params: [] };
+  }
+  return null;
+};
+
 /*app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
@@ -405,6 +486,58 @@ app.post('/api/company/logo', authenticate, upload.single('logo'), (req, res) =>
           });
         }
       );
+    }
+  );
+});
+
+app.get('/api/audit-logs', authenticate, (req, res) => {
+  const companyId = req.company.companyId;
+  const access = getAuditAccessFilter(req.user?.role);
+
+  if (!access) {
+    return res.status(403).json({ error: 'You do not have permission to view audit logs.' });
+  }
+
+  db.all(
+    `SELECT * FROM audit_logs
+     WHERE companyId = ?${access.clause}
+     ORDER BY createdAt DESC
+     LIMIT 250`,
+    [companyId, ...access.params],
+    (err, rows = []) => {
+      if (err) {
+        console.error('Error fetching audit logs:', err.message);
+        return res.status(500).json({ error: 'Failed to fetch audit logs' });
+      }
+
+      res.json(rows);
+    }
+  );
+});
+
+app.get('/api/loads/:id/audit-logs', authenticate, (req, res) => {
+  const companyId = req.company.companyId;
+  const loadId = req.params.id;
+  const access = getAuditAccessFilter(req.user?.role);
+
+  if (!access || req.user?.role === 'driver') {
+    return res.status(403).json({ error: 'You do not have permission to view audit logs.' });
+  }
+
+  const loadAuditClause = ` AND entityType IN ('LOAD', 'DOCUMENT') AND entityId = ?`;
+  db.all(
+    `SELECT * FROM audit_logs
+     WHERE companyId = ?${loadAuditClause}${access.clause}
+     ORDER BY createdAt DESC
+     LIMIT 100`,
+    [companyId, loadId, ...access.params],
+    (err, rows = []) => {
+      if (err) {
+        console.error('Error fetching load audit logs:', err.message);
+        return res.status(500).json({ error: 'Failed to fetch load audit logs' });
+      }
+
+      res.json(rows);
     }
   );
 });
@@ -863,6 +996,7 @@ app.post('/api/login', (req, res) => {
         const token = jwt.sign(
           {
             id: user.id,
+            name: user.name,
             email: user.email,
             role: user.role,
             companyId: user.companyId || null,
@@ -1188,6 +1322,23 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
 console.log('UPDATE changes =', this.changes);
 console.log('LOAD AFTER UPDATE =', updatedLoad);
 
+              const changedFields = getChangedFields(existingLoad, updatedLoad);
+              if (Object.keys(changedFields).length > 0) {
+                writeAuditLog(req, {
+                  action: 'UPDATE',
+                  entityType: 'LOAD',
+                  entityId: loadId,
+                  entityLabel: loadId,
+                  oldValue: Object.fromEntries(
+                    Object.keys(changedFields).map((field) => [field, existingLoad[field]])
+                  ),
+                  newValue: Object.fromEntries(
+                    Object.keys(changedFields).map((field) => [field, updatedLoad[field]])
+                  ),
+                  changedFields,
+                });
+              }
+
               res.json(updatedLoad);
             }
           );
@@ -1501,6 +1652,21 @@ dropDateTime,
                     return res.status(500).json({ error: getErr.message });
                   }
 
+                  writeAuditLog(req, {
+                    action: 'CREATE',
+                    entityType: 'LOAD',
+                    entityId: generatedLoadId,
+                    entityLabel: generatedLoadId,
+                    oldValue: null,
+                    newValue: row,
+                    changedFields: Object.fromEntries(
+                      Object.entries(auditLogSafeValue(row) || {}).map(([field, value]) => [
+                        field,
+                        { oldValue: '', newValue: value },
+                      ])
+                    ),
+                  });
+
                   res.json(row);
                 }
               );
@@ -1772,7 +1938,7 @@ app.post('/api/loads/:id/documents', authenticate, upload.array('files'), async 
   try {
     const loadRow = await new Promise((resolve, reject) => {
       db.get(
-        `SELECT id FROM loads WHERE id = ? AND companyId = ?`,
+        `SELECT id, containerNumber FROM loads WHERE id = ? AND companyId = ?`,
         [loadId, companyId],
         (err, row) => (err ? reject(err) : resolve(row))
       );
@@ -1874,6 +2040,28 @@ app.post('/api/loads/:id/documents', authenticate, upload.array('files'), async 
       });
     }
 
+    writeAuditLog(req, {
+      action: 'DOCUMENT_UPLOAD',
+      entityType: 'DOCUMENT',
+      entityId: loadId,
+      entityLabel: loadRow.containerNumber || loadId,
+      oldValue: null,
+      newValue: {
+        loadId,
+        category,
+        documents: docs.map((doc) => ({
+          id: doc.id,
+          name: doc.name,
+          size: doc.size,
+          type: doc.type,
+          category: doc.category,
+        })),
+      },
+      changedFields: {
+        documents: { oldValue: '', newValue: docs.map((doc) => doc.name).join(', ') },
+      },
+    });
+
     res.json(docs);
   } catch (error) {
     console.error('Error uploading documents:', error.message);
@@ -1966,11 +2154,24 @@ app.delete('/api/loads/:id', authenticate, (req, res) => {
   const companyId = req.company.companyId;
   const loadId = req.params.id;
 
-  db.run(
-    `DELETE FROM loads
-     WHERE id = ? AND companyId = ?`,
+  db.get(
+    `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
     [loadId, companyId],
-    function (err) {
+    (findErr, existingLoad) => {
+      if (findErr) {
+        console.error('Error finding load before delete:', findErr.message);
+        return res.status(500).json({ error: 'Failed to delete load' });
+      }
+
+      if (!existingLoad) {
+        return res.status(404).json({ error: 'Load not found' });
+      }
+
+      db.run(
+        `DELETE FROM loads
+         WHERE id = ? AND companyId = ?`,
+        [loadId, companyId],
+        function (err) {
       if (err) {
         console.error('Error deleting load:', err.message);
         return res.status(500).json({ error: 'Failed to delete load' });
@@ -1980,7 +2181,19 @@ app.delete('/api/loads/:id', authenticate, (req, res) => {
         return res.status(404).json({ error: 'Load not found' });
       }
 
+      writeAuditLog(req, {
+        action: 'DELETE',
+        entityType: 'LOAD',
+        entityId: loadId,
+        entityLabel: existingLoad.containerNumber || loadId,
+        oldValue: existingLoad,
+        newValue: null,
+        changedFields: {},
+      });
+
       res.json({ success: true, changes: this.changes });
+        }
+      );
     }
   );
 });
@@ -2020,18 +2233,48 @@ app.put('/api/loads/:id/status', authenticate, (req, res) => {
       ? [status, dropDateTime || '', loadId, companyId, driverId]
       : [status, dropDateTime || '', loadId, companyId];
 
-    db.run(query, params, function (err) {
-      if (err) {
-        console.error('Error updating load status:', err.message);
-        return res.status(500).json({ error: 'Failed to update load status' });
-      }
+    db.get(
+      `SELECT id, status, dropDateTime, containerNumber FROM loads WHERE id = ? AND companyId = ?`,
+      [loadId, companyId],
+      (oldErr, oldLoad) => {
+        if (oldErr) {
+          console.error('Error reading load before status change:', oldErr.message);
+          return res.status(500).json({ error: 'Failed to update load status' });
+        }
 
-      if (this.changes === 0) {
-        return res.status(404).json({ error: 'Load not found or not allowed' });
-      }
+        db.run(query, params, function (err) {
+          if (err) {
+            console.error('Error updating load status:', err.message);
+            return res.status(500).json({ error: 'Failed to update load status' });
+          }
 
-      res.json({ success: true, loadId, status, dropDateTime: dropDateTime || '' });
-    });
+          if (this.changes === 0) {
+            return res.status(404).json({ error: 'Load not found or not allowed' });
+          }
+
+          const newStatusValue = {
+            status,
+            dropDateTime: dropDateTime || '',
+          };
+          const oldStatusValue = {
+            status: oldLoad?.status || '',
+            dropDateTime: oldLoad?.dropDateTime || '',
+          };
+
+          writeAuditLog(req, {
+            action: 'STATUS_CHANGE',
+            entityType: 'LOAD',
+            entityId: loadId,
+            entityLabel: oldLoad?.containerNumber || loadId,
+            oldValue: oldStatusValue,
+            newValue: newStatusValue,
+            changedFields: getChangedFields(oldStatusValue, newStatusValue),
+          });
+
+          res.json({ success: true, loadId, status, dropDateTime: dropDateTime || '' });
+        });
+      }
+    );
   };
 
   if (isDriver && status === 'Delivered') {
@@ -2116,6 +2359,7 @@ app.post('/api/auth/register', async (req, res) => {
                 const token = jwt.sign(
                   {
                     id: userId,
+                    name,
                     email,
                     role: 'admin',
                     companyId,

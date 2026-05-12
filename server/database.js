@@ -217,6 +217,25 @@ db.run(`ALTER TABLE users ADD COLUMN driverId TEXT`, (err) => {
     console.error('Error adding driverId column to users:', err.message);
   }
 });
+db.run(`
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    userId TEXT,
+    userName TEXT,
+    userRole TEXT,
+    action TEXT NOT NULL,
+    entityType TEXT NOT NULL,
+    entityId TEXT,
+    entityLabel TEXT,
+    oldValue TEXT,
+    newValue TEXT,
+    changedFields TEXT,
+    ipAddress TEXT,
+    userAgent TEXT,
+    createdAt TEXT NOT NULL
+  )
+`);
 const createDrivers = async () => {
   const drivers = [
     { id: 'USR-DRV-001', name: 'Juan', email: 'juan@portflow.com', driverId: 'DRV-001' },
