@@ -87,6 +87,43 @@ button {
   overflow-wrap: anywhere;
 }
 
+.driver-container-update {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin: 10px 0 12px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f9fafb;
+}
+
+.driver-container-update label {
+  color: #111827;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.driver-container-update input {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  font-size: 16px;
+  text-transform: uppercase;
+}
+
+.driver-container-update button {
+  border: none;
+  border-radius: 10px;
+  background: #0f62fe;
+  color: #ffffff;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .app-shell {
   padding: 24px;
 }

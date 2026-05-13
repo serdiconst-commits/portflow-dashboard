@@ -439,6 +439,7 @@ const [companyLogoUploading, setCompanyLogoUploading] = useState(false);
 const [companyLogoVersion, setCompanyLogoVersion] = useState(Date.now());
 const [auditLogs, setAuditLogs] = useState([]);
 const [selectedLoadAuditLogs, setSelectedLoadAuditLogs] = useState([]);
+const [driverContainerByLoad, setDriverContainerByLoad] = useState({});
 
 const getCompanyLogoSrc = () => {
   if (!company?.logoUrl) return '';
@@ -2761,6 +2762,44 @@ const handleDriverStatusUpdate = async (loadId, newStatus) => {
   }
 };
 
+const handleDriverContainerUpdate = async (loadId) => {
+  const containerNumber = String(driverContainerByLoad[loadId] || '').trim().toUpperCase();
+
+  if (!containerNumber) {
+    alert('Please enter the container number first.');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${loadId}/container-number`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ containerNumber }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to update container number');
+    }
+
+    setLoadsData((prevLoads) =>
+      prevLoads.map((load) =>
+        load.id === loadId ? { ...load, containerNumber: data.containerNumber } : load
+      )
+    );
+    setDriverContainerByLoad((prev) => ({ ...prev, [loadId]: '' }));
+    await fetchLoads();
+    alert('Container number saved');
+  } catch (error) {
+    console.error('Container update error:', error);
+    alert(`Failed to save container number: ${error.message}`);
+  }
+};
+
 const saveLocationIfNotExists = async (value, type) => {
   if (!value) return;
 
@@ -3158,6 +3197,25 @@ const refreshLoadsData = async () => {
     {load.containerNumber || '-'}
     {load.containerSize ? ` (${load.containerSize})` : ''}
   </p>
+
+  <div className="driver-container-update">
+    <label htmlFor={`container-${load.id}`}>Container Number</label>
+    <input
+      id={`container-${load.id}`}
+      type="text"
+      placeholder={load.containerNumber ? 'Update container number' : 'Enter container number'}
+      value={driverContainerByLoad[load.id] ?? ''}
+      onChange={(e) =>
+        setDriverContainerByLoad((prev) => ({
+          ...prev,
+          [load.id]: e.target.value,
+        }))
+      }
+    />
+    <button type="button" onClick={() => handleDriverContainerUpdate(load.id)}>
+      Save Container
+    </button>
+  </div>
 
   <p>
     <strong>Container Size:</strong> {load.containerSize || '-'}
