@@ -1249,6 +1249,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           droppedBy = ?,
           dropDateTime = ?,
           containerNumber = ?,
+          bookingNumber = ?,
           shipLine = ?,
           chassisNumber = ?,
           sealNumber = ?,
@@ -1284,6 +1285,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           normalizedDroppedBy,
           l.dropDateTime || '',
           l.containerNumber || '',
+          l.bookingNumber || '',
           l.shipLine || '',
           l.chassisNumber || '',
           l.sealNumber || '',
@@ -1582,6 +1584,7 @@ dropLocation,
 droppedBy,
 dropDateTime,
               containerNumber,
+              bookingNumber,
               shipLine,
               chassisNumber,
               sealNumber,
@@ -1599,7 +1602,7 @@ dropDateTime,
               companyId,
               lastFreeDay,
               carrierId
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               generatedLoadId,
               l.loadDate || new Date().toISOString().slice(0, 10),
@@ -1619,6 +1622,7 @@ dropDateTime,
               normalizedDroppedBy,
               l.dropDateTime || '',
               l.containerNumber || '',
+              l.bookingNumber || '',
               l.shipLine || '',
               l.chassisNumber || '',
               l.sealNumber || '',
@@ -2197,6 +2201,65 @@ app.delete('/api/loads/:id', authenticate, (req, res) => {
     }
   );
 });
+
+app.put('/api/loads/:id/container-number', authenticate, (req, res) => {
+  const companyId = req.company.companyId;
+  const loadId = req.params.id;
+  const containerNumber = String(req.body?.containerNumber || '').trim().toUpperCase();
+  const isDriver = req.user?.role === 'driver';
+  const driverId = req.user?.driverId;
+
+  if (!containerNumber) {
+    return res.status(400).json({ error: 'Container number is required' });
+  }
+
+  const lookupQuery = isDriver
+    ? `SELECT id, containerNumber, driver FROM loads WHERE id = ? AND companyId = ? AND driver = ?`
+    : `SELECT id, containerNumber, driver FROM loads WHERE id = ? AND companyId = ?`;
+  const lookupParams = isDriver
+    ? [loadId, companyId, driverId]
+    : [loadId, companyId];
+
+  db.get(lookupQuery, lookupParams, (findErr, existingLoad) => {
+    if (findErr) {
+      console.error('Error finding load for container update:', findErr.message);
+      return res.status(500).json({ error: 'Failed to update container number' });
+    }
+
+    if (!existingLoad) {
+      return res.status(404).json({ error: 'Load not found or not allowed' });
+    }
+
+    db.run(
+      `UPDATE loads SET containerNumber = ? WHERE id = ? AND companyId = ?`,
+      [containerNumber, loadId, companyId],
+      function (err) {
+        if (err) {
+          console.error('Error updating container number:', err.message);
+          return res.status(500).json({ error: 'Failed to update container number' });
+        }
+
+        writeAuditLog(req, {
+          action: 'UPDATE',
+          entityType: 'LOAD',
+          entityId: loadId,
+          entityLabel: containerNumber || loadId,
+          oldValue: { containerNumber: existingLoad.containerNumber || '' },
+          newValue: { containerNumber },
+          changedFields: {
+            containerNumber: {
+              oldValue: existingLoad.containerNumber || '',
+              newValue: containerNumber,
+            },
+          },
+        });
+
+        res.json({ success: true, loadId, containerNumber });
+      }
+    );
+  });
+});
+
 app.put('/api/loads/:id/status', authenticate, (req, res) => {
   const loadId = req.params.id;
   const { status, dropDateTime } = req.body;

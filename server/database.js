@@ -300,8 +300,9 @@ db.run(`
   dropType TEXT,
 dropLocation TEXT,
 droppedBy TEXT,
-dropDateTime TEXT,
+  dropDateTime TEXT,
   containerNumber TEXT,
+  bookingNumber TEXT,
   shipLine TEXT,
   chassisNumber TEXT,
   sealNumber TEXT,
@@ -384,6 +385,12 @@ db.run(`ALTER TABLE loads ADD COLUMN returnNumber TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN reservationNumber TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding reservationNumber column:', err.message);
+  }
+});
+
+db.run(`ALTER TABLE loads ADD COLUMN bookingNumber TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding bookingNumber column:', err.message);
   }
 });
 

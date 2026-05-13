@@ -101,6 +101,12 @@ const loadPresets = [
     availabilityStatus: 'Available',
     dropType: 'Yard',
   },
+  {
+    name: 'Export Load',
+    status: 'Dispatched',
+    availabilityStatus: 'Available',
+    containerNumber: '',
+  },
 ];
 const documentTypes = [...checklistDocumentTypes, 'Other'];
 const normalizeDocType = (type) => {
@@ -292,6 +298,7 @@ const getMissingDriverDocuments = (load) => {
     returnLocation: '',
     lastFreeDay: '',
     containerNumber: '',
+    bookingNumber: '',
     appointmentTime: '',
     chassisNumber: '',
     sealNumber: '',
@@ -1513,14 +1520,19 @@ if (name === 'driver' && prev.status === 'Dropped') {
 
 const handleAddLoad = async (e) => {
   e.preventDefault();
+  const isExportLoad = selectedPresetName === 'Export Load';
   if (
     !String(newLoad.customer || '').trim() ||
     !String(newLoad.referenceNumber || '').trim() ||
-    !String(newLoad.containerNumber || '').trim() ||
+    (!isExportLoad && !String(newLoad.containerNumber || '').trim()) ||
     !String(newLoad.pickup || '').trim() ||
     !String(newLoad.delivery || '').trim()
   ) {
-    alert('Please complete Customer, Reference #, Container Number, Pickup, and Delivery before creating the load.');
+    alert(
+      isExportLoad
+        ? 'Please complete Customer, Reference #, Pickup, and Delivery before creating the export load.'
+        : 'Please complete Customer, Reference #, Container Number, Pickup, and Delivery before creating the load.'
+    );
     return;
   }
   try {
@@ -1550,6 +1562,7 @@ const handleAddLoad = async (e) => {
      chassisNumber: newLoad.chassisNumber || '',
       sealNumber: newLoad.sealNumber || '',
       containerNumber: newLoad.containerNumber || '',
+      bookingNumber: newLoad.bookingNumber || '',
       availabilityStatus: newLoad.availabilityStatus || 'Available',
       documents: [],
       paperwork: getPaperworkStatusFromDocuments([]),
@@ -2991,7 +3004,14 @@ const filteredLoadsData = viewFilteredLoadsData.filter((load) => {
   if (!normalizedSearchTerm) return true;
   const loadName = String(load.name || '').trim().toLowerCase();
   const loadReference = String(load.referenceNumber || '').trim().toLowerCase();
-  return loadName.includes(normalizedSearchTerm) || loadReference.includes(normalizedSearchTerm);
+  const loadContainer = String(load.containerNumber || '').trim().toLowerCase();
+  const loadBooking = String(load.bookingNumber || '').trim().toLowerCase();
+  return (
+    loadName.includes(normalizedSearchTerm) ||
+    loadReference.includes(normalizedSearchTerm) ||
+    loadContainer.includes(normalizedSearchTerm) ||
+    loadBooking.includes(normalizedSearchTerm)
+  );
 });
 const activeLoads = filteredLoadsData.length;
 
@@ -3785,8 +3805,16 @@ const refreshLoadsData = async () => {
   <input
     type="text"
     name="containerNumber"
-    placeholder="Container Number"
+    placeholder={selectedPresetName === 'Export Load' ? 'Container Number (optional for export)' : 'Container Number'}
     value={newLoad.containerNumber}
+    onChange={handleInputChange}
+  />
+
+  <input
+    type="text"
+    name="bookingNumber"
+    placeholder="Booking Number"
+    value={newLoad.bookingNumber || ''}
     onChange={handleInputChange}
   />
 
@@ -4345,6 +4373,7 @@ const refreshLoadsData = async () => {
                       <tr>
                         <th>Date</th>
                         <th>Container</th>
+                        <th>Booking #</th>
                         <th>Size</th>
                         <th>Ship Line</th>
                         <th>Pickup</th>
@@ -4398,6 +4427,7 @@ const refreshLoadsData = async () => {
                                 {load.containerNumber || 'Open load'}
                               </button>
                             </td>
+                            <td>{load.bookingNumber || '-'}</td>
                             <td>{load.containerSize || '-'}</td>
                             <td>{load.shipLine || '-'}</td>
                             <td>{shortLocation(load.pickup)}</td>
@@ -4807,6 +4837,7 @@ const refreshLoadsData = async () => {
   <option value="Customer">Customer</option>
 </select>
                       <input type="text" name="containerNumber" placeholder="Container Number" value={editingLoad.containerNumber} onChange={handleEditInputChange} />
+                      <input type="text" name="bookingNumber" placeholder="Booking Number" value={editingLoad.bookingNumber || ''} onChange={handleEditInputChange} />
                       <select
   name="shipLine"
   value={editingLoad.shipLine || ''}
@@ -4949,6 +4980,7 @@ const refreshLoadsData = async () => {
   <strong>{selectedLoad.pickup || '—'}</strong>
 </div>
                         <div className="detail-box"><span>Container Number</span><strong>{selectedLoad.containerNumber}</strong></div>
+                        <div className="detail-box"><span>Booking Number</span><strong>{selectedLoad.bookingNumber || '—'}</strong></div>
                         <div className="detail-box"><span>Chassis Number</span><strong>{selectedLoad.chassisNumber}</strong></div>
                         <div className="detail-box"><span>Seal Number</span><strong>{selectedLoad.sealNumber}</strong></div>
                         <div className="detail-box"><span>Container Size</span><strong>{selectedLoad.containerSize}</strong></div>
