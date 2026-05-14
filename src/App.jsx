@@ -464,10 +464,6 @@ const handleLogin = async (e) => {
 
     const data = await res.json();
 
-    console.log('LOGIN RESPONSE FULL:', data);
-    console.log('LOGIN STATUS:', res.status);
-    console.log('LOGIN ERROR FIELD:', data?.error);
-
     if (!res.ok) {
       throw new Error(`Server said: ${data.error || 'Login failed'}`);
     }
@@ -478,7 +474,6 @@ const handleLogin = async (e) => {
 
     setAuthToken(data.token);
     setCurrentUser(data.user);
-console.log('LOGGED IN USER:', data.user);
     const nextView = isDriverApp || data.user?.role === 'driver'
       ? 'driver'
       : getDefaultViewForRole(data.user?.role);
@@ -585,6 +580,10 @@ const [statusFilter, setStatusFilter] = useState('All');
 const [paperworkFilter, setPaperworkFilter] = useState('All');
 const [selectedDocumentType, setSelectedDocumentType] = useState('POD');
 const [settlementPeriod, setSettlementPeriod] = useState('All');
+const [settlementContainerSearch, setSettlementContainerSearch] = useState('');
+const [selectedSettlementLoadId, setSelectedSettlementLoadId] = useState('');
+const [settlementPayDrafts, setSettlementPayDrafts] = useState({});
+const [settlementPayStatus, setSettlementPayStatus] = useState('');
 const [invoiceLoadId, setInvoiceLoadId] = useState('');
 const [savedInvoices, setSavedInvoices] = useState([]);
 const [invoiceStatusMessage, setInvoiceStatusMessage] = useState('');
@@ -1106,7 +1105,6 @@ const fetchLoads = async () => {
   if (!authToken) return;
 
   try {
-    console.log('AUTH TOKEN IN fetchLoads:', authToken);
     const res = await fetch(`${API_BASE}/api/loads`, {
       headers: {
         'Content-Type': 'application/json',
@@ -1119,9 +1117,6 @@ const fetchLoads = async () => {
     }
 
     const data = await res.json();
-    console.log('LOGIN RESPONSE:', data);
-console.log('LOADS STATUS:', res.status);
-console.log('RAW LOADS FROM API FULL:', JSON.stringify(data, null, 2));
     if (!Array.isArray(data)) {
       throw new Error('Loads response is not an array');
     }
@@ -1403,6 +1398,35 @@ useEffect(() => {
     };
   });
 
+  const settlementDetailLoads = [...filteredSettlementLoads].sort((a, b) => {
+    const dateCompare = String(a.loadDate || '').localeCompare(String(b.loadDate || ''));
+    if (dateCompare !== 0) return dateCompare;
+    return getDriverLabel(a.driver).localeCompare(getDriverLabel(b.driver));
+  });
+
+  const normalizedSettlementContainerSearch = settlementContainerSearch.trim().toLowerCase();
+  const visibleSettlementLoads = normalizedSettlementContainerSearch
+    ? settlementDetailLoads.filter((load) =>
+        String(load.containerNumber || '').toLowerCase().includes(normalizedSettlementContainerSearch)
+      )
+    : settlementDetailLoads;
+
+  const selectedSettlementLoad =
+    visibleSettlementLoads.find((load) => load.id === selectedSettlementLoadId) ||
+    visibleSettlementLoads[0] ||
+    null;
+
+  const getSettlementPayValue = (load, field) =>
+    settlementPayDrafts[load.id]?.[field] ?? load[field] ?? '$0.00';
+
+  const getSettlementPayTotal = (load) =>
+    calculateSettlement({
+      driverRate: getSettlementPayValue(load, 'driverRate'),
+      detention: getSettlementPayValue(load, 'detention'),
+      lumper: getSettlementPayValue(load, 'lumper'),
+      fuelAdvance: getSettlementPayValue(load, 'fuelAdvance'),
+    });
+
   const paperworkAlerts = loadsData.filter((load) => load.paperwork);
 
  const lfdCount = (loadsData || []).filter(
@@ -1569,16 +1593,11 @@ const handleAddLoad = async (e) => {
       paperwork: getPaperworkStatusFromDocuments([]),
     };
 
-console.log('LOAD TO ADD:', loadToAdd);
-console.log('LOAD TO ADD DRIVER:', loadToAdd.driver);
-
     const payload = {
   ...loadToAdd,
   driver: normalizeDriverForStorage(newLoad.driver),
   truck: newLoad.driver ? getDriverTruck(newLoad.driver) : '',
 };
-
-console.log('LOAD PAYLOAD:', payload);
 
 const res = await fetch(`${API_BASE}/api/loads`, {
   method: 'POST',
@@ -1594,8 +1613,6 @@ const res = await fetch(`${API_BASE}/api/loads`, {
     if (!res.ok) {
       throw new Error(data.details || data.error || 'Failed to create load');
     }
-
-    console.log('Created load:', data);
 
     setLoadsData((prev) => {
       const withoutCurrent = prev.filter((load) => load.id !== data.id);
@@ -1649,10 +1666,6 @@ const handleUpdateLoad = async (e) => {
     }),
     paperwork: getPaperworkStatusFromDocuments(editingLoad.documents || []),
   };
-  console.log('selectedLoad when clicking edit =', selectedLoad);
-console.log('API_BASE =', API_BASE);
-console.log('editingLoad before update =', editingLoad);
-console.log('editingLoad.id =', editingLoad?.id);
   try {
 
     /* EDITLOAD FUNTION */
@@ -1663,8 +1676,6 @@ const payload = {
   truck: updatedLoad.driver ? getDriverTruck(updatedLoad.driver) : '',
   droppedBy: normalizeDriverForStorage(updatedLoad.droppedBy),
 };
-
-console.log('EDIT LOAD PAYLOAD:', payload);
 
 const res = await fetch(`${API_BASE}/api/loads/${editingLoad.id}`, {
   method: 'PUT',
@@ -1693,6 +1704,86 @@ const res = await fetch(`${API_BASE}/api/loads/${editingLoad.id}`, {
     alert(`Failed to update load: ${error.message}`);
   }
 };
+
+const handleSettlementPayChange = (loadId, field, value) => {
+  setSettlementPayDrafts((prev) => ({
+    ...prev,
+    [loadId]: {
+      ...(prev[loadId] || {}),
+      [field]: value,
+    },
+  }));
+  setSettlementPayStatus('');
+};
+
+const handleSettlementLoadSelect = (loadId) => {
+  setSelectedSettlementLoadId(loadId);
+  setSettlementPayStatus('');
+};
+
+const handleResetSettlementPayDraft = (loadId) => {
+  setSettlementPayDrafts((prev) => {
+    const next = { ...prev };
+    delete next[loadId];
+    return next;
+  });
+  setSettlementPayStatus('');
+};
+
+const handleSaveSettlementPay = async (load) => {
+  const draft = settlementPayDrafts[load.id] || {};
+  const updatedLoad = {
+    ...load,
+    driverRate: draft.driverRate ?? load.driverRate ?? '$0.00',
+    detention: draft.detention ?? load.detention ?? '$0.00',
+    lumper: draft.lumper ?? load.lumper ?? '$0.00',
+    fuelAdvance: draft.fuelAdvance ?? load.fuelAdvance ?? '$0.00',
+  };
+
+  updatedLoad.settlement = calculateSettlement({
+    driverRate: updatedLoad.driverRate,
+    detention: updatedLoad.detention,
+    lumper: updatedLoad.lumper,
+    fuelAdvance: updatedLoad.fuelAdvance,
+  });
+
+  try {
+    const payload = {
+      ...updatedLoad,
+      driver: normalizeDriverForStorage(updatedLoad.driver),
+      truck: updatedLoad.driver ? getDriverTruck(updatedLoad.driver) : '',
+      droppedBy: normalizeDriverForStorage(updatedLoad.droppedBy),
+      paperwork: getPaperworkStatusFromDocuments(updatedLoad.documents || []),
+    };
+
+    const res = await fetch(`${API_BASE}/api/loads/${load.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.details || data.error || 'Failed to update load pay');
+    }
+
+    setLoadsData((prev) =>
+      prev.map((currentLoad) => (currentLoad.id === data.id ? data : currentLoad))
+    );
+    setSelectedLoad((prev) => (prev?.id === data.id ? data : prev));
+    setEditingLoad((prev) => (prev?.id === data.id ? data : prev));
+    handleResetSettlementPayDraft(load.id);
+    setSettlementPayStatus(`Load pay saved for ${data.id}.`);
+  } catch (error) {
+    console.error('Failed to update load pay:', error);
+    setSettlementPayStatus(`Failed to save load pay: ${error.message}`);
+  }
+};
+
 const handleDeleteLoad = async () => {
   if (!selectedLoad) return;
 
@@ -2259,9 +2350,25 @@ const handleSaveInvoice = async () => {
   }
 
   try {
+    const invoicePayload = {
+      customerId: selectedCustomer?.id || '',
+      customerName: selectedInvoiceLoad.customer || 'Customer',
+      loadId: selectedInvoiceLoad.id,
+      referenceNumber: selectedInvoiceLoad.referenceNumber || '',
+      poNumber: selectedInvoiceLoad.poNumber || '',
+      amount: parseMoney(selectedInvoiceLoad.rate),
+      status: 'Unpaid',
+      issueDate: getTodayDate(),
+      dueDate: '',
+      notes: selectedInvoiceLoad.notes || '',
+    };
+
     const res = await fetch(`${API_BASE}/api/invoices`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
       body: JSON.stringify(invoicePayload),
     });
 
@@ -2282,159 +2389,16 @@ const handleSaveInvoice = async () => {
   } catch (error) {
     console.error('Save invoice error:', error);
     setInvoiceStatusMessage(`Failed to save invoice: ${error.message}`);
+  }
 };
-    const invoiceNumber = savedInvoices.find(
-  inv => inv.loadId === selectedInvoiceLoad.id
-)?.invoiceNumber || 'INV-XXXX';
-    const customerName = selectedInvoiceLoad.customer || 'Customer';
-    const customerContact = selectedCustomer?.contactName || '';
-    const customerEmail = selectedCustomer?.email || '';
-    const customerPhone = selectedCustomer?.phone || '';
-    const formattedRate = `$${Number(selectedInvoiceLoad.rate || 0).toLocaleString(undefined, {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})}`;
-
-    const printWindow = window.open('', '_blank', 'width=1100,height=800');
-    if (!printWindow) return;
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Invoice ${invoiceNumber}</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              padding: 32px;
-              color: #111827;
-            }
-            .header {
-              display: flex;
-              justify-content: space-between;
-              align-items: start;
-              margin-bottom: 30px;
-            }
-            .title {
-              font-size: 28px;
-              font-weight: bold;
-              margin-bottom: 8px;
-            }
-            .muted {
-              color: #6b7280;
-              font-size: 14px;
-            }
-            .section {
-              margin-bottom: 24px;
-            }
-            .section h3 {
-              margin-bottom: 10px;
-              font-size: 16px;
-            }
-            .grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 18px;
-            }
-            .box {
-              border: 1px solid #d1d5db;
-              border-radius: 10px;
-              padding: 14px;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-top: 14px;
-            }
-            th, td {
-              border: 1px solid #d1d5db;
-              padding: 10px;
-              text-align: left;
-            }
-            th {
-              background: #f3f4f6;
-            }
-            .total-row td {
-              font-weight: bold;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div>
-              <div class="title">INVOICE</div>
-              <div class="muted">PortFlow Dispatch</div>
-            </div>
-            <div>
-  <div><strong>Invoice #:</strong> ${invoiceNumber}</div>
-  <div><strong>Invoice Date:</strong> ${selectedInvoiceLoad.loadDate}</div>
-  <div><strong>Load ID:</strong> ${selectedInvoiceLoad.id}</div>
-  <div><strong>Reference #:</strong> ${selectedInvoiceLoad.referenceNumber || '—'}</div>
-</div>
-          </div>
-
-          <div class="section grid">
-            <div class="box">
-              <h3>Bill To</h3>
-              <div><strong>${customerName}</strong></div>
-              <div>${customerContact}</div>
-              <div>${customerEmail}</div>
-              <div>${customerPhone}</div>
-            </div>
-
-            <div class="box">
-  <h3>Load Information</h3>
-  <div>
-  <div><strong>Broker Reference:</strong> {selectedInvoiceLoad.referenceNumber || '—'}</div>
-  <div><strong>POD Status:</strong> {hasUploadedPod(selectedInvoiceLoad) ? 'Received' : 'Missing'}</div>
-  <div><strong>POD Note:</strong> {selectedInvoiceLoad.pod || '—'}</div>
-
-  <div><strong>Pickup Location:</strong> {selectedInvoiceLoad.pickup}</div>
-  <div><strong>Delivery Location:</strong> {selectedInvoiceLoad.delivery}</div>
-  <div><strong>Return Location:</strong> {selectedInvoiceLoad.returnLocation || '—'}</div>
-  <div><strong>Container:</strong> {selectedInvoiceLoad.containerNumber || '—'}</div>
-  <div><strong>Chassis:</strong> {selectedInvoiceLoad.chassisNumber || '—'}</div>
-</div>
-          </div>
-
-          <div class="section">
-            <h3>Charges</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>Description</th>
-                  <th>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Linehaul / Load Rate</td>
-                  <td>${formattedRate}</td>
-                </tr>
-                <tr class="total-row">
-                  <td>Total Invoice</td>
-                  <td>${formattedRate}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="section">
-            <h3>Notes</h3>
-            <div class="box">${selectedInvoiceLoad.notes || 'No additional notes.'}</div>
-          </div>
-        </body>
-      </html>
-    `);
-
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-  };
 const handleInvoiceStatusChange = async (invoiceId, newStatus) => {
   try {
     const res = await fetch(`${API_BASE}/api/invoices/${invoiceId}/status`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
       body: JSON.stringify({ status: newStatus }),
     });
 
@@ -2725,8 +2689,6 @@ const handleDriverStatusUpdate = async (loadId, newStatus) => {
       return;
     }
 
-    console.log('STATUS UPDATE START:', { loadId, newStatus, authToken });
-
     const res = await fetch(`${API_BASE}/api/loads/${loadId}/status`, {
       method: 'PUT',
       headers: {
@@ -2740,9 +2702,6 @@ const handleDriverStatusUpdate = async (loadId, newStatus) => {
     });
 
     const data = await res.json();
-
-    console.log('STATUS UPDATE RESPONSE STATUS:', res.status);
-    console.log('STATUS UPDATE RESPONSE BODY:', data);
 
     if (!res.ok) {
       throw new Error(data.error || 'Failed to update status');
@@ -3026,14 +2985,6 @@ const viewFilteredLoadsData =
     ? (loadsData || []).filter((load) => {
         const status = String(load.status || '').trim().toLowerCase();
         const matchesDriver = driverMatchesCurrentUser(load.driver, currentUser);
-
-        console.log('DRIVER FILTER CHECK:', {
-          loadId: load.id,
-          loadDriver: normalizeDriverForStorage(load.driver),
-          currentDriverId: normalizeDriverForStorage(currentUser?.driverId),
-          matchesDriver,
-          status,
-        });
 
         return matchesDriver && status !== 'delivered';
       })
@@ -5286,6 +5237,146 @@ const refreshLoadsData = async () => {
       )}
 
       {activeView === 'settlements' && (
+        <div className="settlements-view">
+        <section className="panel settlement-entry-panel">
+          <div className="panel-header">
+            <div>
+              <h3>Payroll Load Pay Entry</h3>
+              <p className="panel-subtitle">Select a load, add the driver pay and deductions, then save it to payroll.</p>
+            </div>
+            <span>{settlementPeriod === 'All' ? 'All Loads' : settlementPeriod}</span>
+          </div>
+
+          {settlementPayStatus && (
+            <div className="settlement-period-note">
+              <p>{settlementPayStatus}</p>
+            </div>
+          )}
+
+          <div className="settlement-entry-grid">
+            <label className="settlement-entry-field settlement-container-search">
+              <span>Search Container</span>
+              <input
+                type="search"
+                placeholder="Type container number"
+                value={settlementContainerSearch}
+                onChange={(e) => {
+                  setSettlementContainerSearch(e.target.value);
+                  setSelectedSettlementLoadId('');
+                }}
+              />
+            </label>
+
+            <label className="settlement-entry-field settlement-entry-load">
+              <span>Load</span>
+              <select
+                className="filter-select"
+                value={selectedSettlementLoad?.id || ''}
+                onChange={(e) => handleSettlementLoadSelect(e.target.value)}
+              >
+                {visibleSettlementLoads.length === 0 ? (
+                  <option value="">No loads found</option>
+                ) : (
+                  visibleSettlementLoads.map((load) => (
+                    <option key={load.id} value={load.id}>
+                      {load.loadDate || 'No date'} - {load.containerNumber || 'No container'} - {getDriverLabel(load.driver)} - {load.id}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+
+            <div className="settlement-entry-meta">
+              <div>
+                <span>Customer</span>
+                <strong>{selectedSettlementLoad?.customer || '-'}</strong>
+              </div>
+              <div>
+                <span>Container</span>
+                <strong>{selectedSettlementLoad?.containerNumber || '-'}</strong>
+              </div>
+              <div>
+                <span>Reference</span>
+                <strong>{selectedSettlementLoad?.referenceNumber || selectedSettlementLoad?.bookingNumber || '-'}</strong>
+              </div>
+            </div>
+
+            {selectedSettlementLoad && (
+              <>
+                <label className="settlement-entry-field">
+                  <span>Load Pay</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={getSettlementPayValue(selectedSettlementLoad, 'driverRate')}
+                    onChange={(e) =>
+                      handleSettlementPayChange(selectedSettlementLoad.id, 'driverRate', e.target.value)
+                    }
+                  />
+                </label>
+
+                <label className="settlement-entry-field">
+                  <span>Detention</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={getSettlementPayValue(selectedSettlementLoad, 'detention')}
+                    onChange={(e) =>
+                      handleSettlementPayChange(selectedSettlementLoad.id, 'detention', e.target.value)
+                    }
+                  />
+                </label>
+
+                <label className="settlement-entry-field">
+                  <span>Lumper</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={getSettlementPayValue(selectedSettlementLoad, 'lumper')}
+                    onChange={(e) =>
+                      handleSettlementPayChange(selectedSettlementLoad.id, 'lumper', e.target.value)
+                    }
+                  />
+                </label>
+
+                <label className="settlement-entry-field">
+                  <span>Deductions / Fuel Advance</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={getSettlementPayValue(selectedSettlementLoad, 'fuelAdvance')}
+                    onChange={(e) =>
+                      handleSettlementPayChange(selectedSettlementLoad.id, 'fuelAdvance', e.target.value)
+                    }
+                  />
+                </label>
+
+                <div className="settlement-entry-total">
+                  <span>Net Driver Pay</span>
+                  <strong>{getSettlementPayTotal(selectedSettlementLoad)}</strong>
+                </div>
+
+                <div className="settlement-entry-actions">
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    onClick={() => handleSaveSettlementPay(selectedSettlementLoad)}
+                  >
+                    Save Load Pay
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={() => handleResetSettlementPayDraft(selectedSettlementLoad.id)}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+
         <section className="panel">
           <div className="panel-header">
             <h3>Driver Settlement Report</h3>
@@ -5320,7 +5411,7 @@ const refreshLoadsData = async () => {
                   <th>Driver Rate</th>
                   <th>Detention</th>
                   <th>Lumper</th>
-                  <th>Fuel Advance</th>
+                  <th>Deductions</th>
                   <th>Total Settlement</th>
                 </tr>
               </thead>
@@ -5340,6 +5431,96 @@ const refreshLoadsData = async () => {
             </table>
           </div>
         </section>
+
+        <section className="panel settlement-detail-panel">
+          <div className="panel-header">
+            <div>
+              <h3>Settlement Sheet</h3>
+              <p className="panel-subtitle">Review and edit every load in a sheet-style payroll table.</p>
+            </div>
+            <span>{visibleSettlementLoads.length} loads</span>
+          </div>
+
+          <div className="settlement-sheet-wrap">
+            <table className="settlement-load-sheet">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Driver</th>
+                  <th>Load</th>
+                  <th>Customer</th>
+                  <th>Container</th>
+                  <th>Load Pay</th>
+                  <th>Detention</th>
+                  <th>Lumper</th>
+                  <th>Deductions</th>
+                  <th>Net Settlement</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleSettlementLoads.length === 0 ? (
+                  <tr>
+                    <td colSpan="11" className="settlement-empty-cell">
+                      No loads found for this settlement period or container search.
+                    </td>
+                  </tr>
+                ) : (
+                  visibleSettlementLoads.map((load) => {
+                    const hasDraft = Boolean(settlementPayDrafts[load.id]);
+                    return (
+                      <tr key={load.id}>
+                        <td>{load.loadDate || '-'}</td>
+                        <td>{getDriverLabel(load.driver)}</td>
+                        <td>
+                          <strong>{load.id}</strong>
+                          <span>{load.referenceNumber || load.bookingNumber || 'No reference'}</span>
+                        </td>
+                        <td>{load.customer || '-'}</td>
+                        <td>{load.containerNumber || '-'}</td>
+                        {['driverRate', 'detention', 'lumper', 'fuelAdvance'].map((field) => (
+                          <td key={field}>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              className="settlement-pay-input"
+                              value={getSettlementPayValue(load, field)}
+                              onChange={(e) =>
+                                handleSettlementPayChange(load.id, field, e.target.value)
+                              }
+                            />
+                          </td>
+                        ))}
+                        <td className="settlement-net">{getSettlementPayTotal(load)}</td>
+                        <td>
+                          <div className="settlement-row-actions">
+                            <button
+                              type="button"
+                              className="primary-btn"
+                              onClick={() => handleSaveSettlementPay(load)}
+                              disabled={!hasDraft}
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-btn"
+                              onClick={() => handleResetSettlementPayDraft(load.id)}
+                              disabled={!hasDraft}
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        </div>
       )}
 
       {activeView === 'customers' && (
