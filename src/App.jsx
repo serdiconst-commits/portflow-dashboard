@@ -579,7 +579,10 @@ const [searchTerm, setSearchTerm] = useState('');
 const [statusFilter, setStatusFilter] = useState('All');
 const [paperworkFilter, setPaperworkFilter] = useState('All');
 const [selectedDocumentType, setSelectedDocumentType] = useState('POD');
-const [settlementPeriod, setSettlementPeriod] = useState('All');
+const [selectedSettlementDriverId, setSelectedSettlementDriverId] = useState('');
+const [settlementStartDate, setSettlementStartDate] = useState('');
+const [settlementEndDate, setSettlementEndDate] = useState('');
+const [settlementNote, setSettlementNote] = useState('');
 const [settlementContainerSearch, setSettlementContainerSearch] = useState('');
 const [selectedSettlementLoadId, setSelectedSettlementLoadId] = useState('');
 const [settlementPayDrafts, setSettlementPayDrafts] = useState({});
@@ -1346,32 +1349,94 @@ useEffect(() => {
     };
   });
 
-  const today = new Date();
-  const thisWeekStart = getStartOfWeek(today);
-  const thisWeekEnd = getEndOfWeek(today);
-
-  const lastWeekReference = new Date(thisWeekStart);
-  lastWeekReference.setDate(thisWeekStart.getDate() - 1);
-  const lastWeekStart = getStartOfWeek(lastWeekReference);
-  const lastWeekEnd = getEndOfWeek(lastWeekReference);
-
   const filteredSettlementLoads = useMemo(() => {
-    if (settlementPeriod === 'This Week') {
-      return loadsData.filter((load) =>
-        isDateInRange(load.loadDate, thisWeekStart, thisWeekEnd)
-      );
+    const activeDriverId = selectedSettlementDriverId || driversList[0]?.id || '';
+    const start = settlementStartDate ? new Date(`${settlementStartDate}T00:00:00`) : null;
+    const end = settlementEndDate ? new Date(`${settlementEndDate}T23:59:59`) : null;
+
+    return loadsData.filter((load) => {
+      const matchesDriver = activeDriverId
+        ? normalizeDriverForStorage(load.driver) === activeDriverId
+        : true;
+      const loadDate = load.loadDate ? new Date(`${load.loadDate}T12:00:00`) : null;
+      const matchesStart = !start || (loadDate && loadDate >= start);
+      const matchesEnd = !end || (loadDate && loadDate <= end);
+      return matchesDriver && matchesStart && matchesEnd;
+    });
+  }, [loadsData, selectedSettlementDriverId, driversList, settlementStartDate, settlementEndDate]);
+
+  const activeSettlementDriver =
+    driversList.find((driver) => driver.id === (selectedSettlementDriverId || driversList[0]?.id)) ||
+    null;
+
+  const settlementPeriodLabel =
+    settlementStartDate || settlementEndDate
+      ? `${settlementStartDate || 'Start'} to ${settlementEndDate || 'End'}`
+      : 'All load dates';
+
+  const settlementReport = activeSettlementDriver
+    ? [
+        {
+          driverId: activeSettlementDriver.id,
+          driverName: activeSettlementDriver.name,
+          loadsCount: filteredSettlementLoads.length,
+          totalDriverRate: formatMoney(
+            filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.driverRate), 0)
+          ),
+          totalDetention: formatMoney(
+            filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.detention), 0)
+          ),
+          totalLumper: formatMoney(
+            filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.lumper), 0)
+          ),
+          totalFuelAdvance: formatMoney(
+            filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.fuelAdvance), 0)
+          ),
+          totalSettlement: formatMoney(
+            filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.settlement), 0)
+          ),
+        },
+      ]
+    : [];
+
+  const settlementTotals = settlementReport[0] || {
+    loadsCount: 0,
+    totalDriverRate: formatMoney(0),
+    totalDetention: formatMoney(0),
+    totalLumper: formatMoney(0),
+    totalFuelAdvance: formatMoney(0),
+    totalSettlement: formatMoney(0),
+  };
+
+  useEffect(() => {
+    if (!selectedSettlementDriverId && driversList[0]?.id) {
+      setSelectedSettlementDriverId(driversList[0].id);
     }
+  }, [driversList, selectedSettlementDriverId]);
 
-    if (settlementPeriod === 'Last Week') {
-      return loadsData.filter((load) =>
-        isDateInRange(load.loadDate, lastWeekStart, lastWeekEnd)
-      );
-    }
+  const handleSetSettlementWeek = (direction) => {
+    const reference = direction === 'current'
+      ? new Date()
+      : settlementStartDate
+      ? new Date(`${settlementStartDate}T12:00:00`)
+      : new Date();
+    if (direction === 'previous') reference.setDate(reference.getDate() - 7);
+    if (direction === 'next') reference.setDate(reference.getDate() + 7);
 
-    return loadsData;
-  }, [loadsData, settlementPeriod, thisWeekStart, thisWeekEnd, lastWeekStart, lastWeekEnd]);
+    const start = getStartOfWeek(reference);
+    const end = getEndOfWeek(reference);
+    setSettlementStartDate(start.toISOString().split('T')[0]);
+    setSettlementEndDate(end.toISOString().split('T')[0]);
+    setSelectedSettlementLoadId('');
+  };
 
-  const settlementReport = driversList.map((driver) => {
+  const handleClearSettlementPeriod = () => {
+    setSettlementStartDate('');
+    setSettlementEndDate('');
+    setSelectedSettlementLoadId('');
+  };
+
+  /*const settlementReport = driversList.map((driver) => {
     const driverLoads = filteredSettlementLoads.filter(
       (load) => normalizeDriverForStorage(load.driver) === driver.id
     );
@@ -1396,7 +1461,7 @@ useEffect(() => {
         driverLoads.reduce((sum, load) => sum + parseMoney(load.settlement), 0)
       ),
     };
-  });
+  });*/
 
   const settlementDetailLoads = [...filteredSettlementLoads].sort((a, b) => {
     const dateCompare = String(a.loadDate || '').localeCompare(String(b.loadDate || ''));
@@ -2240,24 +2305,38 @@ const handleChangeUserRole = async (userId, newRole) => {
   }
 };
   const handleExportSettlementCsv = () => {
-    const rows = settlementReport.map((item) => ({
-      Driver: `${item.driverId} - ${item.driverName}`,
-      Loads: item.loadsCount,
-      DriverRate: item.totalDriverRate,
-      Detention: item.totalDetention,
-      Lumper: item.totalLumper,
-      FuelAdvance: item.totalFuelAdvance,
-      TotalSettlement: item.totalSettlement,
+    const rows = visibleSettlementLoads.map((load) => ({
+      Driver: activeSettlementDriver
+        ? `${activeSettlementDriver.id} - ${activeSettlementDriver.name}`
+        : getDriverLabel(load.driver),
+      Period: settlementPeriodLabel,
+      Date: load.loadDate || '',
+      Load: load.id,
+      Customer: load.customer || '',
+      Container: load.containerNumber || '',
+      Reference: load.referenceNumber || load.bookingNumber || '',
+      LoadPay: getSettlementPayValue(load, 'driverRate'),
+      Detention: getSettlementPayValue(load, 'detention'),
+      Lumper: getSettlementPayValue(load, 'lumper'),
+      Deductions: getSettlementPayValue(load, 'fuelAdvance'),
+      NetSettlement: getSettlementPayTotal(load),
+      Note: settlementNote,
     }));
 
     const headers = Object.keys(rows[0] || {
       Driver: '',
-      Loads: '',
-      DriverRate: '',
+      Period: '',
+      Date: '',
+      Load: '',
+      Customer: '',
+      Container: '',
+      Reference: '',
+      LoadPay: '',
       Detention: '',
       Lumper: '',
-      FuelAdvance: '',
-      TotalSettlement: '',
+      Deductions: '',
+      NetSettlement: '',
+      Note: '',
     });
 
     const csv = [
@@ -2273,7 +2352,12 @@ const handleChangeUserRole = async (userId, newRole) => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `driver-settlements-${settlementPeriod.toLowerCase().replace(/\s+/g, '-')}.csv`;
+    const driverSlug = (activeSettlementDriver?.name || 'driver')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+    const periodSlug = `${settlementStartDate || 'all'}-${settlementEndDate || 'dates'}`;
+    link.download = `driver-settlement-${driverSlug}-${periodSlug}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2281,19 +2365,22 @@ const handleChangeUserRole = async (userId, newRole) => {
   };
 
   const handlePrintSettlementReport = () => {
-    const periodLabel = settlementPeriod === 'All' ? 'All Loads' : settlementPeriod;
+    const periodLabel = settlementPeriodLabel;
 
-    const rowsHtml = settlementReport
+    const rowsHtml = visibleSettlementLoads
       .map(
-        (item) => `
+        (load) => `
           <tr>
-            <td>${item.driverId} - ${item.driverName}</td>
-            <td>${item.loadsCount}</td>
-            <td>${item.totalDriverRate}</td>
-            <td>${item.totalDetention}</td>
-            <td>${item.totalLumper}</td>
-            <td>${item.totalFuelAdvance}</td>
-            <td>${item.totalSettlement}</td>
+            <td>${load.loadDate || '-'}</td>
+            <td>${load.id}</td>
+            <td>${load.customer || '-'}</td>
+            <td>${load.containerNumber || '-'}</td>
+            <td>${load.referenceNumber || load.bookingNumber || '-'}</td>
+            <td>${getSettlementPayValue(load, 'driverRate')}</td>
+            <td>${getSettlementPayValue(load, 'detention')}</td>
+            <td>${getSettlementPayValue(load, 'lumper')}</td>
+            <td>${getSettlementPayValue(load, 'fuelAdvance')}</td>
+            <td>${getSettlementPayTotal(load)}</td>
           </tr>
         `
       )
@@ -2310,6 +2397,10 @@ const handleChangeUserRole = async (userId, newRole) => {
             body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
             h1 { margin: 0 0 8px; }
             p { margin: 0 0 20px; color: #4b5563; }
+            .summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 18px 0; }
+            .box { border: 1px solid #d1d5db; padding: 10px; border-radius: 8px; }
+            .box span { display: block; color: #6b7280; font-size: 12px; margin-bottom: 4px; }
+            .note { border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; margin: 18px 0; white-space: pre-wrap; }
             table { width: 100%; border-collapse: collapse; margin-top: 16px; }
             th, td { border: 1px solid #d1d5db; padding: 10px; text-align: left; font-size: 14px; }
             th { background: #f3f4f6; }
@@ -2317,17 +2408,29 @@ const handleChangeUserRole = async (userId, newRole) => {
         </head>
         <body>
           <h1>Driver Settlement Report</h1>
+          <p>Driver: ${activeSettlementDriver ? `${activeSettlementDriver.id} - ${activeSettlementDriver.name}` : '-'}</p>
           <p>Period: ${periodLabel}</p>
+          <div class="summary">
+            <div class="box"><span>Loads</span><strong>${settlementTotals.loadsCount}</strong></div>
+            <div class="box"><span>Load Pay</span><strong>${settlementTotals.totalDriverRate}</strong></div>
+            <div class="box"><span>Detention</span><strong>${settlementTotals.totalDetention}</strong></div>
+            <div class="box"><span>Lumper</span><strong>${settlementTotals.totalLumper}</strong></div>
+            <div class="box"><span>Net Pay</span><strong>${settlementTotals.totalSettlement}</strong></div>
+          </div>
+          ${settlementNote ? `<div class="note"><strong>Payroll Note</strong><br>${settlementNote}</div>` : ''}
           <table>
             <thead>
               <tr>
-                <th>Driver</th>
-                <th>Loads</th>
-                <th>Driver Rate</th>
+                <th>Date</th>
+                <th>Load</th>
+                <th>Customer</th>
+                <th>Container</th>
+                <th>Reference</th>
+                <th>Load Pay</th>
                 <th>Detention</th>
                 <th>Lumper</th>
-                <th>Fuel Advance</th>
-                <th>Total Settlement</th>
+                <th>Deductions</th>
+                <th>Net Settlement</th>
               </tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
@@ -5242,9 +5345,9 @@ const refreshLoadsData = async () => {
           <div className="panel-header">
             <div>
               <h3>Payroll Load Pay Entry</h3>
-              <p className="panel-subtitle">Select a load, add the driver pay and deductions, then save it to payroll.</p>
+              <p className="panel-subtitle">Choose one driver and settlement period, then add pay, deductions, and payroll notes.</p>
             </div>
-            <span>{settlementPeriod === 'All' ? 'All Loads' : settlementPeriod}</span>
+            <span>{settlementPeriodLabel}</span>
           </div>
 
           {settlementPayStatus && (
@@ -5254,6 +5357,67 @@ const refreshLoadsData = async () => {
           )}
 
           <div className="settlement-entry-grid">
+            <label className="settlement-entry-field settlement-entry-driver">
+              <span>Driver</span>
+              <select
+                className="filter-select"
+                value={selectedSettlementDriverId || driversList[0]?.id || ''}
+                onChange={(e) => {
+                  setSelectedSettlementDriverId(e.target.value);
+                  setSelectedSettlementLoadId('');
+                }}
+              >
+                {driversList.length === 0 ? (
+                  <option value="">No drivers found</option>
+                ) : (
+                  driversList.map((driver) => (
+                    <option key={driver.id} value={driver.id}>
+                      {driver.id} - {driver.name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+
+            <label className="settlement-entry-field">
+              <span>Start Date</span>
+              <input
+                type="date"
+                value={settlementStartDate}
+                onChange={(e) => {
+                  setSettlementStartDate(e.target.value);
+                  setSelectedSettlementLoadId('');
+                }}
+              />
+            </label>
+
+            <label className="settlement-entry-field">
+              <span>End Date</span>
+              <input
+                type="date"
+                value={settlementEndDate}
+                onChange={(e) => {
+                  setSettlementEndDate(e.target.value);
+                  setSelectedSettlementLoadId('');
+                }}
+              />
+            </label>
+
+            <div className="settlement-period-actions">
+              <button type="button" className="secondary-btn" onClick={() => handleSetSettlementWeek('previous')}>
+                Previous Week
+              </button>
+              <button type="button" className="secondary-btn" onClick={() => handleSetSettlementWeek('current')}>
+                This Week
+              </button>
+              <button type="button" className="secondary-btn" onClick={() => handleSetSettlementWeek('next')}>
+                Next Week
+              </button>
+              <button type="button" className="secondary-btn" onClick={handleClearSettlementPeriod}>
+                All Dates
+              </button>
+            </div>
+
             <label className="settlement-entry-field settlement-container-search">
               <span>Search Container</span>
               <input
@@ -5284,6 +5448,16 @@ const refreshLoadsData = async () => {
                   ))
                 )}
               </select>
+            </label>
+
+            <label className="settlement-entry-field settlement-note-field">
+              <span>Payroll Note</span>
+              <textarea
+                rows="3"
+                placeholder="Internal note for this driver's settlement"
+                value={settlementNote}
+                onChange={(e) => setSettlementNote(e.target.value)}
+              />
             </label>
 
             <div className="settlement-entry-meta">
@@ -5379,28 +5553,25 @@ const refreshLoadsData = async () => {
 
         <section className="panel">
           <div className="panel-header">
-            <h3>Driver Settlement Report</h3>
+            <div>
+              <h3>Driver Settlement Summary</h3>
+              <p className="panel-subtitle">
+                {activeSettlementDriver ? `${activeSettlementDriver.id} - ${activeSettlementDriver.name}` : 'No driver selected'} • {settlementPeriodLabel}
+              </p>
+            </div>
             <div className="details-actions">
-              <span>{settlementReport.length} drivers</span>
-              <select
-                value={settlementPeriod}
-                onChange={(e) => setSettlementPeriod(e.target.value)}
-                className="filter-select settlement-filter"
-              >
-                <option value="All">All Loads</option>
-                <option value="This Week">This Week</option>
-                <option value="Last Week">Last Week</option>
-              </select>
+              <span>{settlementTotals.loadsCount} loads</span>
               <button className="secondary-btn" onClick={handleExportSettlementCsv}>Export CSV</button>
               <button className="primary-btn" onClick={handlePrintSettlementReport}>Print Report</button>
             </div>
           </div>
 
-          <div className="settlement-period-note">
-            {settlementPeriod === 'All' && <p>Showing all load dates.</p>}
-            {settlementPeriod === 'This Week' && <p>Showing loads for this week only.</p>}
-            {settlementPeriod === 'Last Week' && <p>Showing loads for last week only.</p>}
-          </div>
+          {settlementNote && (
+            <div className="settlement-note-preview">
+              <span>Payroll Note</span>
+              <p>{settlementNote}</p>
+            </div>
+          )}
 
           <div className="table-wrap">
             <table>

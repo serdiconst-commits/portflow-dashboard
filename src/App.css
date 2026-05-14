@@ -928,11 +928,20 @@ td {
   grid-column: span 2;
 }
 
+.settlement-entry-driver {
+  grid-column: span 2;
+}
+
 .settlement-container-search {
   grid-column: span 2;
 }
 
-.settlement-entry-field input {
+.settlement-note-field {
+  grid-column: span 2;
+}
+
+.settlement-entry-field input,
+.settlement-entry-field textarea {
   width: 100%;
   min-height: 42px;
   padding: 10px 12px;
@@ -943,10 +952,23 @@ td {
   font-weight: 400;
 }
 
-.settlement-entry-field input:focus {
+.settlement-entry-field textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.settlement-entry-field input:focus,
+.settlement-entry-field textarea:focus {
   border-color: #0f62fe;
   box-shadow: 0 0 0 3px rgba(15, 98, 254, 0.12);
   outline: none;
+}
+
+.settlement-period-actions {
+  grid-column: span 4;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .settlement-entry-meta {
@@ -994,6 +1016,27 @@ td {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+.settlement-note-preview {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.settlement-note-preview span {
+  display: block;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.settlement-note-preview p {
+  margin: 0;
+  white-space: pre-wrap;
 }
 
 .settlement-sheet-wrap {
@@ -1079,6 +1122,10 @@ button:disabled {
   }
 
   .settlement-entry-load,
+  .settlement-entry-driver,
+  .settlement-container-search,
+  .settlement-note-field,
+  .settlement-period-actions,
   .settlement-entry-meta {
     grid-column: span 1;
   }
