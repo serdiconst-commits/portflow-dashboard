@@ -30,6 +30,20 @@ JWT_SECRET=<long random secret>
 
 Do not set `PORT` manually on Render. Render provides it.
 
+## Port Houston
+
+To enable the Port Houston check button, set these Render environment values after Port Houston/Navis API access is approved:
+
+```env
+PORT_HOUSTON_ENABLED=true
+PORT_HOUSTON_API_BASE=https://api.america.naviscloudops.com/v3/evp
+PORT_HOUSTON_AUTH_URL=https://auth-v1.america.naviscloudops.com/auth/realms/phaprod/protocol/openid-connect/token
+PORT_HOUSTON_CLIENT_ID=<Port Houston client id>
+PORT_HOUSTON_CLIENT_SECRET=<Port Houston client secret>
+```
+
+`PORT_HOUSTON_API_KEY`, `PORT_HOUSTON_USERNAME`, and `PORT_HOUSTON_PASSWORD` are optional fallbacks for credential formats Port Houston may provide. If `PORT_HOUSTON_ENABLED` is left as `false`, the dashboard will show `Port Houston integration is disabled` before it attempts any API request.
+
 ## Data Safety
 
 The SQLite database and uploaded documents must live on the persistent disk:

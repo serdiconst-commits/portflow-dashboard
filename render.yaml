@@ -27,7 +27,7 @@ services:
       - key: MAX_UPLOAD_MB
         value: "25"
       - key: PORT_HOUSTON_ENABLED
-        value: "false"
+        value: "true"
       - key: PORT_HOUSTON_API_BASE
         sync: false
       - key: PORT_HOUSTON_AUTH_URL
