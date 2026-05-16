@@ -30,6 +30,11 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { db, initDatabase } from './database.js';
 import createInvoiceRoutes from './routes/invoices.js';
+import {
+  getBolAvailability,
+  getContainerAvailability,
+  getGateHistory,
+} from './integrations/portHouston.js';
 
 const isProduction = process.env.NODE_ENV === 'production' || process.env.APP_ENV === 'production';
 const JWT_SECRET = process.env.JWT_SECRET || (!isProduction ? 'portflow-dev-secret-change-before-production' : '');
@@ -230,6 +235,48 @@ const writeAuditLog = (req, details = {}) => {
     }
   );
 };
+
+const insertPortCheckLog = ({
+  companyId,
+  loadId = '',
+  containerNumber = '',
+  terminal = '',
+  requestType,
+  status,
+  response,
+  checkedByUserId = '',
+}) =>
+  new Promise((resolve, reject) => {
+    const id = uuidv4();
+    const checkedAt = new Date().toISOString();
+    db.run(
+      `INSERT INTO port_check_logs (
+        id, companyId, loadId, containerNumber, terminal, provider, requestType,
+        status, responseJson, checkedByUserId, checkedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        companyId,
+        loadId,
+        containerNumber,
+        terminal,
+        'PORT_HOUSTON',
+        requestType,
+        status,
+        JSON.stringify(response ?? null),
+        checkedByUserId,
+        checkedAt,
+      ],
+      (err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        resolve({ id, checkedAt });
+      }
+    );
+  });
 
 const getAuditAccessFilter = (role) => {
   const normalizedRole = normalizeRole(role);
@@ -540,6 +587,198 @@ app.get('/api/loads/:id/audit-logs', authenticate, (req, res) => {
       res.json(rows);
     }
   );
+});
+
+app.get('/api/port-houston/container/:containerNumber/availability', authenticate, async (req, res) => {
+  const companyId = req.company.companyId;
+  const containerNumber = String(req.params.containerNumber || '').trim().toUpperCase();
+
+  if (!containerNumber) {
+    return res.status(400).json({ error: 'Container number is required.' });
+  }
+
+  try {
+    const result = await getContainerAvailability(containerNumber);
+    const log = await insertPortCheckLog({
+      companyId,
+      containerNumber,
+      terminal: result.terminal || '',
+      requestType: 'CONTAINER_AVAILABILITY',
+      status: 'SUCCESS',
+      response: result,
+      checkedByUserId: req.user?.id || '',
+    });
+
+    res.json({ ...result, checkedBy: req.user?.name || req.user?.email || '', checkedAt: log.checkedAt });
+  } catch (error) {
+    const status = error.status || 502;
+    await insertPortCheckLog({
+      companyId,
+      containerNumber,
+      requestType: 'CONTAINER_AVAILABILITY',
+      status: 'ERROR',
+      response: { error: error.message, code: error.code, details: error.response },
+      checkedByUserId: req.user?.id || '',
+    }).catch((logErr) => console.error('Port Houston log error:', logErr.message));
+    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR' });
+  }
+});
+
+app.get('/api/port-houston/bol/:bolNumber/availability', authenticate, async (req, res) => {
+  const companyId = req.company.companyId;
+  const bolNumber = String(req.params.bolNumber || '').trim();
+
+  if (!bolNumber) {
+    return res.status(400).json({ error: 'Bill of lading number is required.' });
+  }
+
+  try {
+    const result = await getBolAvailability(bolNumber);
+    const log = await insertPortCheckLog({
+      companyId,
+      requestType: 'BOL_AVAILABILITY',
+      status: 'SUCCESS',
+      response: result,
+      checkedByUserId: req.user?.id || '',
+    });
+
+    res.json({ ...result, checkedBy: req.user?.name || req.user?.email || '', checkedAt: log.checkedAt });
+  } catch (error) {
+    const status = error.status || 502;
+    await insertPortCheckLog({
+      companyId,
+      requestType: 'BOL_AVAILABILITY',
+      status: 'ERROR',
+      response: { error: error.message, code: error.code, details: error.response },
+      checkedByUserId: req.user?.id || '',
+    }).catch((logErr) => console.error('Port Houston log error:', logErr.message));
+    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR' });
+  }
+});
+
+app.get('/api/port-houston/gate/:containerNumber', authenticate, async (req, res) => {
+  const companyId = req.company.companyId;
+  const containerNumber = String(req.params.containerNumber || '').trim().toUpperCase();
+
+  if (!containerNumber) {
+    return res.status(400).json({ error: 'Container number is required.' });
+  }
+
+  try {
+    const result = await getGateHistory(containerNumber);
+    const log = await insertPortCheckLog({
+      companyId,
+      containerNumber,
+      requestType: 'GATE_HISTORY',
+      status: 'SUCCESS',
+      response: result,
+      checkedByUserId: req.user?.id || '',
+    });
+
+    res.json({ ...result, checkedBy: req.user?.name || req.user?.email || '', checkedAt: log.checkedAt });
+  } catch (error) {
+    const status = error.status || 502;
+    await insertPortCheckLog({
+      companyId,
+      containerNumber,
+      requestType: 'GATE_HISTORY',
+      status: 'ERROR',
+      response: { error: error.message, code: error.code, details: error.response },
+      checkedByUserId: req.user?.id || '',
+    }).catch((logErr) => console.error('Port Houston log error:', logErr.message));
+    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR' });
+  }
+});
+
+app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
+  const companyId = req.company.companyId;
+  const loadId = req.params.id;
+
+  try {
+    const load = await new Promise((resolve, reject) => {
+      db.get(
+        `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
+        [loadId, companyId],
+        (err, row) => (err ? reject(err) : resolve(row))
+      );
+    });
+
+    if (!load) {
+      return res.status(404).json({ error: 'Load not found.' });
+    }
+
+    const containerNumber = String(load.containerNumber || '').trim().toUpperCase();
+    const bolNumber = String(load.referenceNumber || load.poNumber || '').trim();
+
+    if (!containerNumber && !bolNumber) {
+      return res.status(400).json({ error: 'Container number or BOL/reference number is required for Port Houston check.' });
+    }
+
+    const availability = containerNumber ? await getContainerAvailability(containerNumber) : null;
+    const bolAvailability = bolNumber ? await getBolAvailability(bolNumber) : null;
+    const gate = containerNumber ? await getGateHistory(containerNumber) : null;
+    const response = {
+      loadId,
+      containerNumber,
+      bolNumber,
+      availability,
+      bolAvailability,
+      gate,
+      eir: {
+        out: null,
+        in: null,
+        note: 'EIR retrieval requires the exact Port Houston API contract/permission. No scraping is performed.',
+      },
+    };
+
+    const log = await insertPortCheckLog({
+      companyId,
+      loadId,
+      containerNumber,
+      terminal: availability?.terminal || load.pickup || '',
+      requestType: 'LOAD_PORT_CHECK',
+      status: 'SUCCESS',
+      response,
+      checkedByUserId: req.user?.id || '',
+    });
+
+    writeAuditLog(req, {
+      action: 'PORT_HOUSTON_CHECK',
+      entityType: 'LOAD',
+      entityId: loadId,
+      entityLabel: containerNumber || loadId,
+      oldValue: null,
+      newValue: {
+        containerNumber,
+        terminal: availability?.terminal || '',
+        available: availability?.available ?? null,
+        checkedAt: log.checkedAt,
+      },
+      changedFields: {
+        portHoustonCheck: {
+          oldValue: '',
+          newValue: `${containerNumber || bolNumber} checked at ${log.checkedAt}`,
+        },
+      },
+    });
+
+    res.json({
+      ...response,
+      checkedBy: req.user?.name || req.user?.email || '',
+      checkedAt: log.checkedAt,
+    });
+  } catch (error) {
+    const status = error.status || 502;
+    await insertPortCheckLog({
+      companyId,
+      loadId,
+      requestType: 'LOAD_PORT_CHECK',
+      status: 'ERROR',
+      response: { error: error.message, code: error.code, details: error.response },
+      checkedByUserId: req.user?.id || '',
+    }).catch((logErr) => console.error('Port Houston log error:', logErr.message));
+    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR' });
+  }
 });
 
 app.get('/api/customers', authenticate, (req, res) => {

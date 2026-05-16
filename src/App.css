@@ -1548,6 +1548,37 @@ button:disabled {
 .load-info-block a:hover {
   text-decoration: underline;
 }
+.port-check-box {
+  margin-top: 16px;
+  padding: 16px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+}
+
+.port-check-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.port-check-error {
+  padding: 12px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fff1f2;
+  color: #991b1b;
+}
+
+.port-check-error p {
+  margin: 6px 0 0;
+}
+
+@media (max-width: 1000px) {
+  .port-check-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .load-card .paperwork-badges,
 .load-card [style*="flex-wrap"] {
   gap: 4px;

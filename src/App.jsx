@@ -440,6 +440,8 @@ const [companyLogoVersion, setCompanyLogoVersion] = useState(Date.now());
 const [auditLogs, setAuditLogs] = useState([]);
 const [selectedLoadAuditLogs, setSelectedLoadAuditLogs] = useState([]);
 const [driverContainerByLoad, setDriverContainerByLoad] = useState({});
+const [portHoustonChecksByLoad, setPortHoustonChecksByLoad] = useState({});
+const [portHoustonCheckingLoadId, setPortHoustonCheckingLoadId] = useState('');
 
 const getCompanyLogoSrc = () => {
   if (!company?.logoUrl) return '';
@@ -1767,6 +1769,61 @@ const res = await fetch(`${API_BASE}/api/loads/${editingLoad.id}`, {
   } catch (error) {
     console.error('Failed to update load:', error);
     alert(`Failed to update load: ${error.message}`);
+  }
+};
+
+const getPortHoustonSummary = (result) => {
+  const availability = result?.availability || result || {};
+  const gate = result?.gate || {};
+  const lastGateMove = gate.lastGateMove || (Array.isArray(gate.events) ? gate.events[0] : null);
+
+  return {
+    available: availability.available,
+    terminal: availability.terminal || result?.terminal || '',
+    roadImpediments: availability.roadImpediments || availability.impediments || [],
+    lastFreeDay: availability.lastFreeDay || '',
+    lastGateMove,
+    outEir: result?.eir?.out || null,
+    inEir: result?.eir?.in || null,
+    checkedBy: result?.checkedBy || '',
+    checkedAt: result?.checkedAt || '',
+  };
+};
+
+const handleCheckPortHouston = async (load) => {
+  if (!load?.id) return;
+
+  setPortHoustonCheckingLoadId(load.id);
+  setPortHoustonChecksByLoad((prev) => ({
+    ...prev,
+    [load.id]: { loading: true, error: '', result: prev[load.id]?.result || null },
+  }));
+
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${encodeURIComponent(load.id)}/port-houston-check`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to check Port Houston');
+    }
+
+    setPortHoustonChecksByLoad((prev) => ({
+      ...prev,
+      [load.id]: { loading: false, error: '', result: data },
+    }));
+    await fetchSelectedLoadAuditLogs(load.id);
+  } catch (error) {
+    setPortHoustonChecksByLoad((prev) => ({
+      ...prev,
+      [load.id]: { loading: false, error: error.message, result: prev[load.id]?.result || null },
+    }));
+  } finally {
+    setPortHoustonCheckingLoadId('');
   }
 };
 
@@ -4815,6 +4872,13 @@ const refreshLoadsData = async () => {
                     <h3>Load Details</h3>
                     <div className="details-actions">
                       <span>{selectedLoad.id}</span>
+                      <button
+                        className="secondary-btn"
+                        onClick={() => handleCheckPortHouston(selectedLoad)}
+                        disabled={portHoustonCheckingLoadId === selectedLoad.id}
+                      >
+                        {portHoustonCheckingLoadId === selectedLoad.id ? 'Checking...' : 'Check Port Houston'}
+                      </button>
                       <button className="secondary-btn" onClick={handleEditClick}>Edit Load</button>
                       <button className="danger-btn" onClick={handleDeleteLoad}>Delete Load</button>
                     </div>
@@ -5113,6 +5177,68 @@ const refreshLoadsData = async () => {
                         <div className="settlement-row"><span>Fuel Advance</span><strong>- {selectedLoad.fuelAdvance}</strong></div>
                         <div className="settlement-row total"><span>Settlement</span><strong>{selectedLoad.settlement}</strong></div>
                       </div>
+
+                      {(() => {
+                        const checkState = portHoustonChecksByLoad[selectedLoad.id];
+                        const summary = getPortHoustonSummary(checkState?.result);
+                        return (
+                          <div className="port-check-box">
+                            <div className="documents-header">
+                              <h4>Port Houston Check</h4>
+                              <button
+                                type="button"
+                                className="secondary-btn"
+                                onClick={() => handleCheckPortHouston(selectedLoad)}
+                                disabled={portHoustonCheckingLoadId === selectedLoad.id}
+                              >
+                                {portHoustonCheckingLoadId === selectedLoad.id ? 'Checking...' : 'Refresh'}
+                              </button>
+                            </div>
+
+                            {checkState?.error ? (
+                              <div className="port-check-error">
+                                <strong>Unable to check Port Houston</strong>
+                                <p>{checkState.error}</p>
+                              </div>
+                            ) : checkState?.result ? (
+                              <div className="port-check-grid">
+                                <div className="detail-box">
+                                  <span>Available</span>
+                                  <strong>
+                                    {summary.available === true
+                                      ? 'Yes'
+                                      : summary.available === false
+                                        ? 'No'
+                                        : 'Not returned'}
+                                  </strong>
+                                </div>
+                                <div className="detail-box"><span>Terminal</span><strong>{summary.terminal || 'Not returned'}</strong></div>
+                                <div className="detail-box"><span>Last Free Day</span><strong>{summary.lastFreeDay || 'Not returned'}</strong></div>
+                                <div className="detail-box">
+                                  <span>Last Gate Move</span>
+                                  <strong>{summary.lastGateMove?.eventTypeId || summary.lastGateMove?.eventStartTime || 'Not returned'}</strong>
+                                </div>
+                                <div className="detail-box">
+                                  <span>Holds / Road Impediments</span>
+                                  <strong>
+                                    {Array.isArray(summary.roadImpediments)
+                                      ? summary.roadImpediments.join(', ') || 'None returned'
+                                      : String(summary.roadImpediments || 'None returned')}
+                                  </strong>
+                                </div>
+                                <div className="detail-box"><span>OUT EIR</span><strong>{summary.outEir?.url ? <a href={summary.outEir.url} target="_blank" rel="noreferrer">Open</a> : 'Not available'}</strong></div>
+                                <div className="detail-box"><span>IN EIR</span><strong>{summary.inEir?.url ? <a href={summary.inEir.url} target="_blank" rel="noreferrer">Open</a> : 'Not available'}</strong></div>
+                                <div className="detail-box"><span>Checked By</span><strong>{summary.checkedBy || 'Not returned'}</strong></div>
+                                <div className="detail-box"><span>Checked At</span><strong>{formatDateTime(summary.checkedAt)}</strong></div>
+                              </div>
+                            ) : (
+                              <p className="documents-empty">
+                                Click Check Port Houston to request availability, holds, LFD, and gate movement details.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       <div className="documents-box">
                         <div className="documents-header">

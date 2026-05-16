@@ -236,6 +236,25 @@ db.run(`
     createdAt TEXT NOT NULL
   )
 `);
+db.run(`
+  CREATE TABLE IF NOT EXISTS port_check_logs (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    loadId TEXT,
+    containerNumber TEXT,
+    terminal TEXT,
+    provider TEXT NOT NULL,
+    requestType TEXT NOT NULL,
+    status TEXT NOT NULL,
+    responseJson TEXT,
+    checkedByUserId TEXT,
+    checkedAt TEXT NOT NULL
+  )
+`);
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_port_check_logs_company_load
+  ON port_check_logs(companyId, loadId, checkedAt)
+`);
 const createDrivers = async () => {
   const drivers = [
     { id: 'USR-DRV-001', name: 'Juan', email: 'juan@portflow.com', driverId: 'DRV-001' },
