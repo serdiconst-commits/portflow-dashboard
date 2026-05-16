@@ -481,6 +481,12 @@ const [selectedLoadAuditLogs, setSelectedLoadAuditLogs] = useState([]);
 const [driverContainerByLoad, setDriverContainerByLoad] = useState({});
 const [portHoustonChecksByLoad, setPortHoustonChecksByLoad] = useState({});
 const [portHoustonCheckingLoadId, setPortHoustonCheckingLoadId] = useState('');
+const [portHoustonSettingsForm, setPortHoustonSettingsForm] = useState({
+  username: savedCompany?.portHoustonUsername || '',
+  password: '',
+});
+const [portHoustonSettingsStatus, setPortHoustonSettingsStatus] = useState('');
+const [portHoustonSettingsSaving, setPortHoustonSettingsSaving] = useState(false);
 
 const getCompanyLogoSrc = () => {
   if (!company?.logoUrl) return '';
@@ -489,6 +495,14 @@ const getCompanyLogoSrc = () => {
     : `${API_BASE}${company.logoUrl}`;
   return `${url}${url.includes('?') ? '&' : '?'}v=${companyLogoVersion}`;
 };
+
+useEffect(() => {
+  setPortHoustonSettingsForm((prev) => ({
+    ...prev,
+    username: company?.portHoustonUsername || '',
+    password: '',
+  }));
+}, [company?.portHoustonUsername]);
 
 const handleLogin = async (e) => {
   e.preventDefault();
@@ -1080,6 +1094,43 @@ const handleCompanyLogoUpload = async (e) => {
   } finally {
     setCompanyLogoUploading(false);
     e.target.value = '';
+  }
+};
+
+const handleSavePortHoustonSettings = async (e) => {
+  e.preventDefault();
+
+  try {
+    setPortHoustonSettingsSaving(true);
+    setPortHoustonSettingsStatus('');
+
+    const res = await fetch(`${API_BASE}/api/company/port-houston`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(portHoustonSettingsForm),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save Port Houston settings');
+    }
+
+    setCompany(data);
+    localStorage.setItem('company', JSON.stringify(data));
+    setPortHoustonSettingsForm({
+      username: data.portHoustonUsername || '',
+      password: '',
+    });
+    setPortHoustonSettingsStatus('Port Houston credentials saved.');
+  } catch (error) {
+    console.error('Failed to save Port Houston settings:', error);
+    setPortHoustonSettingsStatus(error.message);
+  } finally {
+    setPortHoustonSettingsSaving(false);
   }
 };
 
@@ -6285,6 +6336,45 @@ const refreshLoadsData = async () => {
             />
           </label>
         </div>
+        <form className="port-houston-settings" onSubmit={handleSavePortHoustonSettings}>
+          <div className="settings-row-header">
+            <div>
+              <span>Port Houston Login</span>
+              <strong>{company?.portHoustonConfigured ? 'Credentials saved' : 'Not configured'}</strong>
+            </div>
+            <span className={company?.portHoustonConfigured ? 'status-pill active' : 'status-pill inactive'}>
+              {company?.portHoustonConfigured ? 'Active' : 'Missing'}
+            </span>
+          </div>
+          <input
+            type="text"
+            placeholder="Port Houston username"
+            value={portHoustonSettingsForm.username}
+            onChange={(e) =>
+              setPortHoustonSettingsForm((prev) => ({ ...prev, username: e.target.value }))
+            }
+            autoComplete="username"
+            required
+          />
+          <input
+            type="password"
+            placeholder={company?.portHoustonConfigured ? 'New password (leave blank to keep current)' : 'Port Houston password'}
+            value={portHoustonSettingsForm.password}
+            onChange={(e) =>
+              setPortHoustonSettingsForm((prev) => ({ ...prev, password: e.target.value }))
+            }
+            autoComplete="current-password"
+            required={!company?.portHoustonConfigured}
+          />
+          <button type="submit" className="primary-btn" disabled={portHoustonSettingsSaving}>
+            {portHoustonSettingsSaving ? 'Saving...' : 'Save Port Houston Login'}
+          </button>
+          {portHoustonSettingsStatus && (
+            <p className={portHoustonSettingsStatus.includes('saved') ? 'settings-status success' : 'settings-status error'}>
+              {portHoustonSettingsStatus}
+            </p>
+          )}
+        </form>
         <div className="detail-box">
           <span>Current User</span>
           <strong>{currentUser?.name || 'Not available'}</strong>

@@ -30,13 +30,22 @@ const normalizeEnabled = (value) => String(value || '').trim().toLowerCase() ===
 
 const trimSlash = (value = '') => String(value).replace(/\/+$/, '');
 
-const getConfig = () => ({
-  enabled: normalizeEnabled(process.env.PORT_HOUSTON_ENABLED),
+const getConfig = (credentials = {}) => ({
+  enabled:
+    normalizeEnabled(process.env.PORT_HOUSTON_ENABLED) ||
+    Boolean((credentials.clientId || credentials.username) && (credentials.clientSecret || credentials.password)),
   apiBase: trimSlash(process.env.PORT_HOUSTON_API_BASE || DEFAULT_API_BASE),
   authUrl: process.env.PORT_HOUSTON_AUTH_URL || DEFAULT_AUTH_URL,
   apiKey: process.env.PORT_HOUSTON_API_KEY || '',
-  clientId: process.env.PORT_HOUSTON_CLIENT_ID || process.env.PORT_HOUSTON_USERNAME || '',
+  clientId:
+    credentials.clientId ||
+    credentials.username ||
+    process.env.PORT_HOUSTON_CLIENT_ID ||
+    process.env.PORT_HOUSTON_USERNAME ||
+    '',
   clientSecret:
+    credentials.clientSecret ||
+    credentials.password ||
     process.env.PORT_HOUSTON_CLIENT_SECRET ||
     process.env.PORT_HOUSTON_API_KEY ||
     process.env.PORT_HOUSTON_PASSWORD ||
@@ -84,8 +93,8 @@ const requestToken = async (config) => {
   return data.access_token;
 };
 
-const portHoustonFetch = async (path, query = {}) => {
-  const config = getConfig();
+const portHoustonFetch = async (path, query = {}, credentials = {}) => {
+  const config = getConfig(credentials);
   assertConfigured(config);
 
   const token = await requestToken(config);
@@ -149,22 +158,22 @@ const normalizeAvailability = (response) => {
   };
 };
 
-export const getContainerAvailability = async (containerNumber) => {
+export const getContainerAvailability = async (containerNumber, credentials = {}) => {
   const response = await portHoustonFetch('/inventory/units/', {
     operator: 'POHA',
     predicate: `unitId = ${containerNumber}`,
     fields: DEFAULT_FIELDS,
-  });
+  }, credentials);
 
   return normalizeAvailability(response);
 };
 
-export const getBolAvailability = async (bolNumber) => {
+export const getBolAvailability = async (bolNumber, credentials = {}) => {
   const response = await portHoustonFetch('/inventory/units', {
     operator: 'POHA',
     predicate: `category = IMPRT and blNbr = ${bolNumber}`,
     fields: DEFAULT_FIELDS,
-  });
+  }, credentials);
 
   return {
     containers: unwrapRecords(response).map((record) => normalizeAvailability(record)),
@@ -172,7 +181,7 @@ export const getBolAvailability = async (bolNumber) => {
   };
 };
 
-export const getGateHistory = async (containerNumber) => {
+export const getGateHistory = async (containerNumber, credentials = {}) => {
   // Port Houston docs map container movement history to GetEquipmentHistory:
   // GET /service/events?predicate=appliedToNaturalKey = <container>.
   // GetGateTransactions exists for transaction number lookup; container lookup should
@@ -182,7 +191,7 @@ export const getGateHistory = async (containerNumber) => {
     facility: 'BPT',
     predicate: `appliedToNaturalKey = ${containerNumber}`,
     fields: EQUIPMENT_HISTORY_FIELDS,
-  });
+  }, credentials);
 
   const events = unwrapRecords(response);
   return {

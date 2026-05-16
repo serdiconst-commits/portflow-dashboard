@@ -24,6 +24,14 @@ const getMimeTypeFromName = (fileName = '') => {
 };
 const getCompanyLogoUrl = (company = {}) =>
   company.logoPath ? `/api/company-logo/${encodeURIComponent(path.basename(company.logoPath))}` : '';
+const getCompanyPayload = (company = {}) => ({
+  id: company.id,
+  name: company.name,
+  email: company.email,
+  logoUrl: getCompanyLogoUrl(company),
+  portHoustonUsername: company.portHoustonUsername || '',
+  portHoustonConfigured: Boolean(company.portHoustonUsername && company.portHoustonPassword),
+});
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -278,6 +286,25 @@ const insertPortCheckLog = ({
     );
   });
 
+const getCompanyPortHoustonCredentials = (companyId) =>
+  new Promise((resolve, reject) => {
+    db.get(
+      `SELECT portHoustonUsername, portHoustonPassword FROM companies WHERE id = ?`,
+      [companyId],
+      (err, company) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        resolve({
+          username: company?.portHoustonUsername || '',
+          password: company?.portHoustonPassword || '',
+        });
+      }
+    );
+  });
+
 const getAuditAccessFilter = (role) => {
   const normalizedRole = normalizeRole(role);
   if (adminRoles.has(normalizedRole)) return { clause: '', params: [] };
@@ -478,7 +505,7 @@ app.get('/api/company', authenticate, (req, res) => {
   const companyId = req.company.companyId;
 
   db.get(
-    `SELECT id, name, email, logoPath FROM companies WHERE id = ?`,
+    `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword FROM companies WHERE id = ?`,
     [companyId],
     (err, company) => {
       if (err) {
@@ -490,12 +517,82 @@ app.get('/api/company', authenticate, (req, res) => {
         return res.status(404).json({ error: 'Company not found' });
       }
 
-      res.json({
-        id: company.id,
-        name: company.name,
-        email: company.email,
-        logoUrl: getCompanyLogoUrl(company),
-      });
+      res.json(getCompanyPayload(company));
+    }
+  );
+});
+
+app.put('/api/company/port-houston', authenticate, requireRoles(adminRoles), (req, res) => {
+  const companyId = req.company.companyId;
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '');
+
+  if (!username) {
+    return res.status(400).json({ error: 'Port Houston username is required.' });
+  }
+
+  db.get(
+    `SELECT portHoustonPassword FROM companies WHERE id = ?`,
+    [companyId],
+    (lookupErr, existingCompany) => {
+      if (lookupErr) {
+        console.error('Port Houston settings lookup error:', lookupErr.message);
+        return res.status(500).json({ error: 'Failed to load Port Houston settings.' });
+      }
+
+      const nextPassword = password || existingCompany?.portHoustonPassword || '';
+
+      if (!nextPassword) {
+        return res.status(400).json({ error: 'Port Houston password is required.' });
+      }
+
+      db.run(
+        `UPDATE companies
+         SET portHoustonUsername = ?, portHoustonPassword = ?
+         WHERE id = ?`,
+        [username, nextPassword, companyId],
+        function (updateErr) {
+          if (updateErr) {
+            console.error('Port Houston settings update error:', updateErr.message);
+            return res.status(500).json({ error: 'Failed to save Port Houston settings.' });
+          }
+
+          db.get(
+            `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword FROM companies WHERE id = ?`,
+            [companyId],
+            (companyErr, company) => {
+              if (companyErr || !company) {
+                console.error('Port Houston company refresh error:', companyErr?.message);
+                return res.status(500).json({ error: 'Settings saved, but profile refresh failed.' });
+              }
+
+              writeAuditLog(req, {
+                action: 'UPDATE_PORT_HOUSTON_SETTINGS',
+                entityType: 'COMPANY',
+                entityId: companyId,
+                entityLabel: company.name,
+                oldValue: null,
+                newValue: {
+                  username,
+                  password: nextPassword ? '[saved]' : '',
+                },
+                changedFields: {
+                  portHoustonUsername: {
+                    oldValue: '',
+                    newValue: username,
+                  },
+                  portHoustonPassword: {
+                    oldValue: '',
+                    newValue: nextPassword ? '[saved]' : '',
+                  },
+                },
+              });
+
+              res.json(getCompanyPayload(company));
+            }
+          );
+        }
+      );
     }
   );
 });
@@ -517,7 +614,7 @@ app.post('/api/company/logo', authenticate, upload.single('logo'), (req, res) =>
       }
 
       db.get(
-        `SELECT id, name, email, logoPath FROM companies WHERE id = ?`,
+        `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword FROM companies WHERE id = ?`,
         [companyId],
         (lookupErr, company) => {
           if (lookupErr || !company) {
@@ -525,12 +622,7 @@ app.post('/api/company/logo', authenticate, upload.single('logo'), (req, res) =>
             return res.status(500).json({ error: 'Logo saved, but profile refresh failed' });
           }
 
-          res.json({
-            id: company.id,
-            name: company.name,
-            email: company.email,
-            logoUrl: getCompanyLogoUrl(company),
-          });
+          res.json(getCompanyPayload(company));
         }
       );
     }
@@ -598,7 +690,8 @@ app.get('/api/port-houston/container/:containerNumber/availability', authenticat
   }
 
   try {
-    const result = await getContainerAvailability(containerNumber);
+    const credentials = await getCompanyPortHoustonCredentials(companyId);
+    const result = await getContainerAvailability(containerNumber, credentials);
     const log = await insertPortCheckLog({
       companyId,
       containerNumber,
@@ -633,7 +726,8 @@ app.get('/api/port-houston/bol/:bolNumber/availability', authenticate, async (re
   }
 
   try {
-    const result = await getBolAvailability(bolNumber);
+    const credentials = await getCompanyPortHoustonCredentials(companyId);
+    const result = await getBolAvailability(bolNumber, credentials);
     const log = await insertPortCheckLog({
       companyId,
       requestType: 'BOL_AVAILABILITY',
@@ -665,7 +759,8 @@ app.get('/api/port-houston/gate/:containerNumber', authenticate, async (req, res
   }
 
   try {
-    const result = await getGateHistory(containerNumber);
+    const credentials = await getCompanyPortHoustonCredentials(companyId);
+    const result = await getGateHistory(containerNumber, credentials);
     const log = await insertPortCheckLog({
       companyId,
       containerNumber,
@@ -714,9 +809,10 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Container number or BOL/reference number is required for Port Houston check.' });
     }
 
-    const availability = containerNumber ? await getContainerAvailability(containerNumber) : null;
-    const bolAvailability = bolNumber ? await getBolAvailability(bolNumber) : null;
-    const gate = containerNumber ? await getGateHistory(containerNumber) : null;
+    const credentials = await getCompanyPortHoustonCredentials(companyId);
+    const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials) : null;
+    const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials) : null;
+    const gate = containerNumber ? await getGateHistory(containerNumber, credentials) : null;
     const response = {
       loadId,
       containerNumber,
@@ -1246,7 +1342,7 @@ app.post('/api/login', (req, res) => {
         );
 
         db.get(
-          `SELECT id, name, email, logoPath FROM companies WHERE id = ?`,
+          `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword FROM companies WHERE id = ?`,
           [user.companyId],
           (companyErr, company) => {
             if (companyErr) {
@@ -1263,14 +1359,7 @@ app.post('/api/login', (req, res) => {
                 companyId: user.companyId || null,
                 driverId: user.driverId || null,
               },
-              company: company
-                ? {
-                    id: company.id,
-                    name: company.name,
-                    email: company.email,
-                    logoUrl: getCompanyLogoUrl(company),
-                  }
-                : null,
+              company: company ? getCompanyPayload(company) : null,
             });
           }
         );
@@ -2686,6 +2775,8 @@ app.post('/api/auth/register', async (req, res) => {
                     name,
                     email,
                     logoUrl: '',
+                    portHoustonUsername: '',
+                    portHoustonConfigured: false,
                   },
                 });
               }
@@ -2733,12 +2824,7 @@ app.post('/api/auth/login', (req, res) => {
 
       res.json({
         token,
-        company: {
-          id: company.id,
-          name: company.name,
-          email: company.email,
-          logoUrl: getCompanyLogoUrl(company),
-        },
+        company: getCompanyPayload(company),
       });
     }
   );

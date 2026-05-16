@@ -1296,6 +1296,55 @@ button:disabled {
   font-size: 14px;
 }
 
+.port-houston-settings {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f9fafb;
+}
+
+.settings-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-row-header div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-row-header span:first-child {
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-row-header strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.settings-status {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-status.success {
+  color: #166534;
+}
+
+.settings-status.error {
+  color: #991b1b;
+}
+
 .audit-panel {
   grid-column: 1 / -1;
 }
