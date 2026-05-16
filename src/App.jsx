@@ -229,6 +229,45 @@ const getDocumentUrl = (doc) => {
   const fileName = filePath.split(/[\\/]/).pop();
   return fileName ? `${API_BASE}/uploads/${encodeURIComponent(fileName)}` : '';
 };
+
+const formatLocationAddress = (location = {}) => {
+  const address = [
+    location.address,
+    location.city,
+    location.state,
+    location.zip,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  return address || location.name || '';
+};
+
+const getLocationOptionLabel = (location = {}) => {
+  const address = formatLocationAddress(location);
+  if (location.name && address && location.name !== address) {
+    return `${location.name} - ${address}`;
+  }
+  return address || location.name || 'Unnamed location';
+};
+
+const isInvalidTokenError = (message = '') =>
+  String(message).toLowerCase().includes('invalid token') ||
+  String(message).toLowerCase().includes('unauthorized');
+
+const handleAuthError = (message) => {
+  if (!isInvalidTokenError(message)) return false;
+
+  localStorage.removeItem('authToken');
+  localStorage.removeItem('currentUser');
+  localStorage.removeItem('company');
+  setAuthToken('');
+  setCurrentUser(null);
+  setCompany(null);
+  setLoginError('Your session expired after the latest update. Please log in again.');
+  alert('Your session expired. Please log in again, then save the address.');
+  return true;
+};
   const calculateSettlement = ({ driverRate, detention, lumper, fuelAdvance }) => {
     const total =
       parseMoney(driverRate) +
@@ -1697,6 +1736,7 @@ const res = await fetch(`${API_BASE}/api/loads`, {
     await fetchSelectedLoadAuditLogs(data.id);
   } catch (error) {
     console.error('Failed to create load:', error);
+    if (handleAuthError(error.message)) return;
     alert(`Failed to create load: ${error.message}`);
   }
 };
@@ -2794,15 +2834,7 @@ const returnLocations = Array.isArray(locations)
 
     await fetchLocations();
 
-    const fullAddress = [
-      newPickupLocation.name,
-      newPickupLocation.address,
-      newPickupLocation.city,
-      newPickupLocation.state,
-      newPickupLocation.zip,
-    ]
-      .filter(Boolean)
-      .join(', ');
+    const fullAddress = formatLocationAddress(newPickupLocation);
 
     setNewLoad((prev) => ({
       ...prev,
@@ -2820,9 +2852,10 @@ const returnLocations = Array.isArray(locations)
       notes: '',
     });
 
-    setShowNewPickupForm(false);
+    setShowNewPickup(false);
   } catch (error) {
     console.error('Error saving pickup location:', error);
+    if (handleAuthError(error.message)) return;
     alert(error.message);
   }
 };
@@ -2833,9 +2866,7 @@ const handleSelectSavedLocation = (field, locationId) => {
 
   setNewLoad((prev) => ({
     ...prev,
-    [field]: [selected.name, selected.address, selected.city, selected.state, selected.zip]
-      .filter(Boolean)
-      .join(', '),
+    [field]: formatLocationAddress(selected),
   }));
 };
 
@@ -2922,16 +2953,18 @@ const handleDriverContainerUpdate = async (loadId) => {
 const saveLocationIfNotExists = async (value, type) => {
   if (!value) return;
 
+  const normalizedValue = String(value).trim().toLowerCase();
   const exists = locations.some(
     (loc) =>
-      loc.name?.toLowerCase() === value.toLowerCase() ||
-      loc.address?.toLowerCase() === value.toLowerCase()
+      loc.name?.toLowerCase() === normalizedValue ||
+      loc.address?.toLowerCase() === normalizedValue ||
+      formatLocationAddress(loc).toLowerCase() === normalizedValue
   );
 
   if (exists) return;
 
   try {
-    await fetch(`${API_BASE}/api/locations`, {
+    const res = await fetch(`${API_BASE}/api/locations`, {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -2944,9 +2977,17 @@ const saveLocationIfNotExists = async (value, type) => {
   }),
 });
 
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save location');
+    }
+
     await fetchLocations();
   } catch (err) {
     console.error('Auto-save location failed:', err);
+    if (handleAuthError(err.message)) return;
+    throw err;
   }
 };
 
@@ -2975,15 +3016,7 @@ const handleSaveNewDeliveryLocation = async () => {
 
     await fetchLocations();
 
-    const fullAddress = [
-      newDeliveryLocation.name,
-      newDeliveryLocation.address,
-      newDeliveryLocation.city,
-      newDeliveryLocation.state,
-      newDeliveryLocation.zip,
-    ]
-      .filter(Boolean)
-      .join(', ');
+    const fullAddress = formatLocationAddress(newDeliveryLocation);
 
     setNewLoad((prev) => ({
       ...prev,
@@ -3004,6 +3037,7 @@ const handleSaveNewDeliveryLocation = async () => {
     setShowNewDeliveryForm(false);
   } catch (error) {
     console.error('Error saving delivery location:', error);
+    if (handleAuthError(error.message)) return;
     alert(error.message);
   }
 };
@@ -4084,7 +4118,7 @@ const refreshLoadsData = async () => {
   <>
 <select
   value={
-    (pickupLocations || []).find((loc) => loc.name === newLoad.pickup)?.id || ''
+    (pickupLocations || []).find((loc) => formatLocationAddress(loc) === newLoad.pickup)?.id || ''
   }
   onChange={(e) => {
     const selectedId = e.target.value;
@@ -4100,14 +4134,14 @@ const refreshLoadsData = async () => {
 
     setNewLoad((prev) => ({
       ...prev,
-      pickup: selectedLocation ? selectedLocation.name : '',
+      pickup: selectedLocation ? formatLocationAddress(selectedLocation) : '',
     }));
   }}
 >
   <option value="">Select saved pickup location</option>
   {(pickupLocations || []).map((loc) => (
     <option key={loc.id} value={loc.id}>
-      {loc.name}
+      {getLocationOptionLabel(loc)}
     </option>
   ))}
 </select>
@@ -4222,7 +4256,7 @@ const refreshLoadsData = async () => {
   <option value="">Select saved delivery location</option>
   {(deliveryLocations || []).map((loc) => (
     <option key={loc.id} value={loc.id}>
-      {loc.name}
+      {getLocationOptionLabel(loc)}
     </option>
   ))}
 </select>
@@ -4240,9 +4274,9 @@ const refreshLoadsData = async () => {
   }
 >
   <option value="">Select return location</option>
-  {(pickupLocations || []).map((loc) => (
+  {(returnLocations || []).map((loc) => (
     <option key={loc.id} value={loc.id}>
-      {loc.name}
+      {getLocationOptionLabel(loc)}
     </option>
   ))}
 </select>
@@ -4298,7 +4332,7 @@ const refreshLoadsData = async () => {
   <option value="">Select saved delivery location</option>
   {(deliveryLocations || []).map((loc) => (
     <option key={loc.id} value={loc.id}>
-      {loc.name}
+      {getLocationOptionLabel(loc)}
     </option>
   ))}
 </select>
@@ -4381,9 +4415,9 @@ const refreshLoadsData = async () => {
 
 <select onChange={(e) => handleSelectSavedLocation('returnLocation', e.target.value)}>
   <option value="">Select return location</option>
-  {(pickupLocations || []).map((loc) => (
+  {(returnLocations || []).map((loc) => (
     <option key={loc.id} value={loc.id}>
-      {loc.name}
+      {getLocationOptionLabel(loc)}
     </option>
   ))}
 </select>
