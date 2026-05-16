@@ -1354,6 +1354,13 @@ button:disabled {
   gap: 10px;
 }
 
+.terminal-credential-title div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
 .terminal-credential-title h4 {
   margin: 0;
   font-size: 14px;

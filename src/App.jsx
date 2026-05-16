@@ -521,7 +521,7 @@ const [portHoustonSettingsForm, setPortHoustonSettingsForm] = useState(
   buildPortHoustonCredentialForm(savedCompany || {})
 );
 const [portHoustonSettingsStatus, setPortHoustonSettingsStatus] = useState('');
-const [portHoustonSettingsSaving, setPortHoustonSettingsSaving] = useState(false);
+const [portHoustonSettingsSaving, setPortHoustonSettingsSaving] = useState('');
 
 const getCompanyLogoSrc = () => {
   if (!company?.logoUrl) return '';
@@ -1128,11 +1128,14 @@ const handleCompanyLogoUpload = async (e) => {
   }
 };
 
-const handleSavePortHoustonSettings = async (e) => {
-  e.preventDefault();
+const handleSavePortHoustonSettings = async (group) => {
+  const groupCredentials = group.rows.reduce((credentials, row) => {
+    credentials[row.key] = portHoustonSettingsForm[row.key] || { username: '', password: '' };
+    return credentials;
+  }, {});
 
   try {
-    setPortHoustonSettingsSaving(true);
+    setPortHoustonSettingsSaving(group.terminal);
     setPortHoustonSettingsStatus('');
 
     const res = await fetch(`${API_BASE}/api/company/port-houston`, {
@@ -1141,7 +1144,7 @@ const handleSavePortHoustonSettings = async (e) => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
       },
-      body: JSON.stringify({ credentials: portHoustonSettingsForm }),
+      body: JSON.stringify({ credentials: groupCredentials }),
     });
 
     const data = await res.json().catch(() => ({}));
@@ -1153,12 +1156,12 @@ const handleSavePortHoustonSettings = async (e) => {
     setCompany(data);
     localStorage.setItem('company', JSON.stringify(data));
     setPortHoustonSettingsForm(buildPortHoustonCredentialForm(data));
-    setPortHoustonSettingsStatus('Port Houston credentials saved.');
+    setPortHoustonSettingsStatus(`${group.terminal} credentials saved.`);
   } catch (error) {
     console.error('Failed to save Port Houston settings:', error);
-    setPortHoustonSettingsStatus(error.message);
+    setPortHoustonSettingsStatus(`${group.terminal}: ${error.message}`);
   } finally {
-    setPortHoustonSettingsSaving(false);
+    setPortHoustonSettingsSaving('');
   }
 };
 
@@ -6364,7 +6367,7 @@ const refreshLoadsData = async () => {
             />
           </label>
         </div>
-        <form className="port-houston-settings" onSubmit={handleSavePortHoustonSettings}>
+        <div className="port-houston-settings">
           <div className="settings-row-header">
             <div>
               <span>Terminal Credentials</span>
@@ -6379,8 +6382,22 @@ const refreshLoadsData = async () => {
             {portHoustonCredentialGroups.map((group) => (
               <div key={group.terminal} className="terminal-credential-group">
                 <div className="terminal-credential-title">
-                  <h4>{group.terminal}</h4>
-                  <span>Credentials Required</span>
+                  <div>
+                    <h4>{group.terminal}</h4>
+                    <span>
+                      {group.rows.some((row) => company?.portHoustonCredentials?.[row.key]?.configured)
+                        ? 'Credentials saved'
+                        : 'Credentials Required'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={() => handleSavePortHoustonSettings(group)}
+                    disabled={portHoustonSettingsSaving === group.terminal}
+                  >
+                    {portHoustonSettingsSaving === group.terminal ? 'Saving...' : 'Save'}
+                  </button>
                 </div>
 
                 {group.rows.map((row) => {
@@ -6427,16 +6444,12 @@ const refreshLoadsData = async () => {
               </div>
             ))}
           </div>
-
-          <button type="submit" className="primary-btn" disabled={portHoustonSettingsSaving}>
-            {portHoustonSettingsSaving ? 'Saving...' : 'Save Terminal Credentials'}
-          </button>
           {portHoustonSettingsStatus && (
             <p className={portHoustonSettingsStatus.includes('saved') ? 'settings-status success' : 'settings-status error'}>
               {portHoustonSettingsStatus}
             </p>
           )}
-        </form>
+        </div>
         <div className="detail-box">
           <span>Current User</span>
           <strong>{currentUser?.name || 'Not available'}</strong>
