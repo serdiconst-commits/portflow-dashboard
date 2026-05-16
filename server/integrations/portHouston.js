@@ -7,6 +7,7 @@ const DEFAULT_FIELDS = [
   'line',
   'category',
   'freightKind',
+  'routing.pod1Id',
   'stopFlags',
   'impediments',
   'lastFreeDay',
@@ -130,6 +131,7 @@ const portHoustonFetch = async (path, query = {}, credentials = {}) => {
 const unwrapRecords = (response) => {
   if (Array.isArray(response)) return response;
   if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.content)) return response.content;
   if (Array.isArray(response?.items)) return response.items;
   if (Array.isArray(response?.results)) return response.results;
   if (Array.isArray(response?.units)) return response.units;
@@ -151,7 +153,7 @@ const normalizeAvailability = (response) => {
 
   return {
     available: records.length > 0 && (!Array.isArray(impediments) || impediments.length === 0),
-    terminal: getFirstValue(unit, ['scope.facility_id', 'facility', 'facilityId', 'terminal']),
+    terminal: getFirstValue(unit, ['scope.facility_id', 'facility', 'facilityId', 'terminal', 'routing.pod1Id']),
     roadImpediments: impediments,
     lastFreeDay: getFirstValue(unit, ['lastFreeDay', 'lfd']),
     raw: response,
@@ -161,7 +163,7 @@ const normalizeAvailability = (response) => {
 export const getContainerAvailability = async (containerNumber, credentials = {}) => {
   const response = await portHoustonFetch('/inventory/units/', {
     operator: 'POHA',
-    predicate: `unitId = ${containerNumber}`,
+    predicate: `unitId=${containerNumber}`,
     fields: DEFAULT_FIELDS,
   }, credentials);
 
@@ -171,7 +173,7 @@ export const getContainerAvailability = async (containerNumber, credentials = {}
 export const getBolAvailability = async (bolNumber, credentials = {}) => {
   const response = await portHoustonFetch('/inventory/units', {
     operator: 'POHA',
-    predicate: `category = IMPRT and blNbr = ${bolNumber}`,
+    predicate: `category=IMPRT and blNbr=${bolNumber}`,
     fields: DEFAULT_FIELDS,
   }, credentials);
 
