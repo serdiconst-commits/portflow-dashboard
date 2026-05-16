@@ -86,25 +86,25 @@ const loadPresets = [
     pickup: 'Bayport Container Terminal',
     returnLocation: 'Bayport Container Terminal',
     status: 'Dispatched',
-    availabilityStatus: 'Available',
+    availabilityStatus: 'Not Available',
   },
   {
     name: 'Barbours Cut Import',
     pickup: 'Barbours Cut Terminal',
     returnLocation: 'Barbours Cut Terminal',
     status: 'Dispatched',
-    availabilityStatus: 'Available',
+    availabilityStatus: 'Not Available',
   },
   {
     name: 'Yard Move',
     status: 'Dispatched',
-    availabilityStatus: 'Available',
+    availabilityStatus: 'Not Available',
     dropType: 'Yard',
   },
   {
     name: 'Export Load',
     status: 'Dispatched',
-    availabilityStatus: 'Available',
+    availabilityStatus: 'Not Available',
     containerNumber: '',
   },
 ];
@@ -346,7 +346,7 @@ const getMissingDriverDocuments = (load) => {
     rate: '',
     driverRate: '',
     status: 'Dispatched',
-    availabilityStatus: 'Available',
+    availabilityStatus: 'Not Available',
     paperwork: 'Pending',
     detention: '$0.00',
     lumper: '$0.00',
@@ -1694,7 +1694,7 @@ const handleAddLoad = async (e) => {
       sealNumber: newLoad.sealNumber || '',
       containerNumber: newLoad.containerNumber || '',
       bookingNumber: newLoad.bookingNumber || '',
-      availabilityStatus: newLoad.availabilityStatus || 'Available',
+      availabilityStatus: newLoad.availabilityStatus || 'Not Available',
       documents: [],
       paperwork: getPaperworkStatusFromDocuments([]),
     };
@@ -2022,12 +2022,14 @@ const handleQuickStatusChange = async (e) => {
   if (!selectedLoad) return;
 
  const newStatus = e.target.value;
+ const isAvailabilityStatus = ['Available', 'Not Available'].includes(newStatus);
 
 const updatedLoad = {
   ...selectedLoad,
-  status: newStatus,
+  status: isAvailabilityStatus ? selectedLoad.status : newStatus,
+  availabilityStatus: isAvailabilityStatus ? newStatus : selectedLoad.availabilityStatus,
   dropDateTime:
-    newStatus === 'Dropped'
+    !isAvailabilityStatus && newStatus === 'Dropped'
       ? new Date().toISOString()
       : selectedLoad.dropDateTime || '',
 };
@@ -4482,7 +4484,7 @@ const refreshLoadsData = async () => {
   <label>Availability</label>
 <select
   name="availabilityStatus"
-  value={newLoad.availabilityStatus || 'Available'}
+  value={newLoad.availabilityStatus || 'Not Available'}
   onChange={handleInputChange}
 >
   <option value="Available">Available</option>
@@ -5128,7 +5130,11 @@ const refreshLoadsData = async () => {
                           <label htmlFor="quick-status-select">Quick Status Change</label>
                           <select
                             id="quick-status-select"
-                            value={selectedLoad.status}
+                            value={
+                              ['Available', 'Not Available'].includes(selectedLoad.availabilityStatus)
+                                ? selectedLoad.availabilityStatus
+                                : selectedLoad.status
+                            }
                             onChange={handleQuickStatusChange}
                             className="quick-driver-select"
                           >
@@ -5137,9 +5143,26 @@ const refreshLoadsData = async () => {
                             <option value="Dropped">Dropped</option>
                             <option value="Delivered">Delivered</option>
                             <option value="Available">Available</option>
-    <option value="Not Available">Not Available</option>
+                            <option value="Not Available">Not Available</option>
                           </select>
                         </div>
+                      </div>
+
+                      <div className="port-check-box">
+                        <div className="documents-header">
+                          <h4>Port Houston Container Availability</h4>
+                          <button
+                            type="button"
+                            className="primary-btn"
+                            onClick={() => handleCheckPortHouston(selectedLoad)}
+                            disabled={portHoustonCheckingLoadId === selectedLoad.id}
+                          >
+                            {portHoustonCheckingLoadId === selectedLoad.id ? 'Checking...' : 'Check Port Houston'}
+                          </button>
+                        </div>
+                        <p className="documents-empty">
+                          Current availability status: <strong>{selectedLoad.availabilityStatus || 'Not Available'}</strong>
+                        </p>
                       </div>
 
                       <div className="details-grid">
@@ -5159,6 +5182,7 @@ const refreshLoadsData = async () => {
 </div>
                         <div className="detail-box"><span>Truck</span><strong>{selectedLoad.truck}</strong></div>
                         <div className="detail-box"><span>Status</span><strong>{selectedLoad.status}</strong></div>
+                        <div className="detail-box"><span>Availability</span><strong>{selectedLoad.availabilityStatus || 'Not Available'}</strong></div>
                         <div className="detail-box"><span>Pick Up Location</span><strong>{selectedLoad.pickup}</strong></div>
                         <div className="detail-box"><span>Delivery Location</span><strong>{selectedLoad.delivery}</strong></div>
                         <div className="detail-box"><span>Return Location</span><strong>{selectedLoad.returnLocation}</strong></div>
