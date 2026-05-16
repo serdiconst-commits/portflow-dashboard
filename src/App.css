@@ -1331,6 +1331,61 @@ button:disabled {
   font-size: 14px;
 }
 
+.terminal-credentials-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.terminal-credential-group {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.terminal-credential-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.terminal-credential-title h4 {
+  margin: 0;
+  font-size: 14px;
+  color: #111827;
+}
+
+.terminal-credential-title span,
+.terminal-credential-label span {
+  color: #991b1b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.terminal-credential-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.terminal-credential-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.terminal-credential-label strong {
+  color: #111827;
+  font-size: 13px;
+}
+
 .settings-status {
   margin: 0;
   font-size: 13px;
@@ -1343,6 +1398,12 @@ button:disabled {
 
 .settings-status.error {
   color: #991b1b;
+}
+
+@media (max-width: 900px) {
+  .terminal-credential-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .audit-panel {

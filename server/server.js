@@ -24,13 +24,65 @@ const getMimeTypeFromName = (fileName = '') => {
 };
 const getCompanyLogoUrl = (company = {}) =>
   company.logoPath ? `/api/company-logo/${encodeURIComponent(path.basename(company.logoPath))}` : '';
+const portHoustonCredentialKeys = [
+  'bayportContainerTracking',
+  'bayportAppointmentScheduling',
+  'barboursCutContainerTracking',
+  'barboursCutAppointmentScheduling',
+  'bnsfHouston',
+  'upHouston',
+];
+const parsePortHoustonCredentials = (company = {}) => {
+  let parsed = {};
+  try {
+    parsed = company.portHoustonCredentialsJson ? JSON.parse(company.portHoustonCredentialsJson) : {};
+  } catch {
+    parsed = {};
+  }
+
+  const credentials = portHoustonCredentialKeys.reduce((result, key) => {
+    result[key] = {
+      username: String(parsed?.[key]?.username || '').trim(),
+      password: String(parsed?.[key]?.password || ''),
+    };
+    return result;
+  }, {});
+
+  if (company.portHoustonUsername || company.portHoustonPassword) {
+    const legacy = {
+      username: company.portHoustonUsername || '',
+      password: company.portHoustonPassword || '',
+    };
+    if (!credentials.bayportContainerTracking.username && !credentials.bayportContainerTracking.password) {
+      credentials.bayportContainerTracking = legacy;
+    }
+    if (!credentials.barboursCutContainerTracking.username && !credentials.barboursCutContainerTracking.password) {
+      credentials.barboursCutContainerTracking = legacy;
+    }
+  }
+
+  return credentials;
+};
+const getSanitizedPortHoustonCredentials = (company = {}) => {
+  const credentials = parsePortHoustonCredentials(company);
+  return Object.fromEntries(
+    portHoustonCredentialKeys.map((key) => [
+      key,
+      {
+        username: credentials[key]?.username || '',
+        configured: Boolean(credentials[key]?.username && credentials[key]?.password),
+      },
+    ])
+  );
+};
 const getCompanyPayload = (company = {}) => ({
   id: company.id,
   name: company.name,
   email: company.email,
   logoUrl: getCompanyLogoUrl(company),
   portHoustonUsername: company.portHoustonUsername || '',
-  portHoustonConfigured: Boolean(company.portHoustonUsername && company.portHoustonPassword),
+  portHoustonConfigured: Object.values(getSanitizedPortHoustonCredentials(company)).some((item) => item.configured),
+  portHoustonCredentials: getSanitizedPortHoustonCredentials(company),
 });
 import multer from 'multer';
 import path from 'path';
@@ -286,10 +338,39 @@ const insertPortCheckLog = ({
     );
   });
 
-const getCompanyPortHoustonCredentials = (companyId) =>
+const getPreferredPortHoustonCredentialKey = (terminal = '') => {
+  const normalized = String(terminal || '').toLowerCase();
+  if (normalized.includes('barbours') || normalized.includes('barbour')) {
+    return 'barboursCutContainerTracking';
+  }
+  if (normalized.includes('bayport')) {
+    return 'bayportContainerTracking';
+  }
+  return '';
+};
+
+const pickPortHoustonCredentials = (credentials = {}, preferredKey = '') => {
+  const order = [
+    preferredKey,
+    'bayportContainerTracking',
+    'barboursCutContainerTracking',
+    'bayportAppointmentScheduling',
+    'barboursCutAppointmentScheduling',
+    'bnsfHouston',
+    'upHouston',
+  ].filter(Boolean);
+
+  const key = order.find(
+    (credentialKey) => credentials[credentialKey]?.username && credentials[credentialKey]?.password
+  );
+
+  return key ? credentials[key] : {};
+};
+
+const getCompanyPortHoustonCredentials = (companyId, terminal = '') =>
   new Promise((resolve, reject) => {
     db.get(
-      `SELECT portHoustonUsername, portHoustonPassword FROM companies WHERE id = ?`,
+      `SELECT portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
       [companyId],
       (err, company) => {
         if (err) {
@@ -297,10 +378,12 @@ const getCompanyPortHoustonCredentials = (companyId) =>
           return;
         }
 
-        resolve({
-          username: company?.portHoustonUsername || '',
-          password: company?.portHoustonPassword || '',
-        });
+        resolve(
+          pickPortHoustonCredentials(
+            parsePortHoustonCredentials(company || {}),
+            getPreferredPortHoustonCredentialKey(terminal)
+          )
+        );
       }
     );
   });
@@ -505,7 +588,7 @@ app.get('/api/company', authenticate, (req, res) => {
   const companyId = req.company.companyId;
 
   db.get(
-    `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword FROM companies WHERE id = ?`,
+    `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
     [companyId],
     (err, company) => {
       if (err) {
@@ -524,15 +607,21 @@ app.get('/api/company', authenticate, (req, res) => {
 
 app.put('/api/company/port-houston', authenticate, requireRoles(adminRoles), (req, res) => {
   const companyId = req.company.companyId;
-  const username = String(req.body.username || '').trim();
-  const password = String(req.body.password || '');
-
-  if (!username) {
-    return res.status(400).json({ error: 'Port Houston username is required.' });
-  }
+  const submittedCredentials = req.body.credentials && typeof req.body.credentials === 'object'
+    ? req.body.credentials
+    : {
+        bayportContainerTracking: {
+          username: req.body.username,
+          password: req.body.password,
+        },
+        barboursCutContainerTracking: {
+          username: req.body.username,
+          password: req.body.password,
+        },
+      };
 
   db.get(
-    `SELECT portHoustonPassword FROM companies WHERE id = ?`,
+    `SELECT portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
     [companyId],
     (lookupErr, existingCompany) => {
       if (lookupErr) {
@@ -540,17 +629,35 @@ app.put('/api/company/port-houston', authenticate, requireRoles(adminRoles), (re
         return res.status(500).json({ error: 'Failed to load Port Houston settings.' });
       }
 
-      const nextPassword = password || existingCompany?.portHoustonPassword || '';
+      const existingCredentials = parsePortHoustonCredentials(existingCompany || {});
+      const nextCredentials = portHoustonCredentialKeys.reduce((result, key) => {
+        const submitted = submittedCredentials[key] || {};
+        result[key] = {
+          username: String(submitted.username ?? existingCredentials[key]?.username ?? '').trim(),
+          password: String(submitted.password || existingCredentials[key]?.password || ''),
+        };
+        return result;
+      }, {});
 
-      if (!nextPassword) {
-        return res.status(400).json({ error: 'Port Houston password is required.' });
-      }
+      const primaryCredentials =
+        pickPortHoustonCredentials(nextCredentials, 'bayportContainerTracking') ||
+        pickPortHoustonCredentials(nextCredentials, 'barboursCutContainerTracking') ||
+        {};
+
+      const configuredCount = Object.values(nextCredentials).filter(
+        (credential) => credential.username && credential.password
+      ).length;
 
       db.run(
         `UPDATE companies
-         SET portHoustonUsername = ?, portHoustonPassword = ?
+         SET portHoustonUsername = ?, portHoustonPassword = ?, portHoustonCredentialsJson = ?
          WHERE id = ?`,
-        [username, nextPassword, companyId],
+        [
+          primaryCredentials.username || '',
+          primaryCredentials.password || '',
+          JSON.stringify(nextCredentials),
+          companyId,
+        ],
         function (updateErr) {
           if (updateErr) {
             console.error('Port Houston settings update error:', updateErr.message);
@@ -558,7 +665,7 @@ app.put('/api/company/port-houston', authenticate, requireRoles(adminRoles), (re
           }
 
           db.get(
-            `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword FROM companies WHERE id = ?`,
+            `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
             [companyId],
             (companyErr, company) => {
               if (companyErr || !company) {
@@ -573,17 +680,12 @@ app.put('/api/company/port-houston', authenticate, requireRoles(adminRoles), (re
                 entityLabel: company.name,
                 oldValue: null,
                 newValue: {
-                  username,
-                  password: nextPassword ? '[saved]' : '',
+                  configuredCount,
                 },
                 changedFields: {
-                  portHoustonUsername: {
+                  portHoustonCredentials: {
                     oldValue: '',
-                    newValue: username,
-                  },
-                  portHoustonPassword: {
-                    oldValue: '',
-                    newValue: nextPassword ? '[saved]' : '',
+                    newValue: `${configuredCount} credential set${configuredCount === 1 ? '' : 's'} saved`,
                   },
                 },
               });
@@ -614,7 +716,7 @@ app.post('/api/company/logo', authenticate, upload.single('logo'), (req, res) =>
       }
 
       db.get(
-        `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword FROM companies WHERE id = ?`,
+        `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
         [companyId],
         (lookupErr, company) => {
           if (lookupErr || !company) {
@@ -809,7 +911,10 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Container number or BOL/reference number is required for Port Houston check.' });
     }
 
-    const credentials = await getCompanyPortHoustonCredentials(companyId);
+    const credentials = await getCompanyPortHoustonCredentials(
+      companyId,
+      `${load.pickup || ''} ${load.returnLocation || ''}`
+    );
     const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials) : null;
     const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials) : null;
     const gate = containerNumber ? await getGateHistory(containerNumber, credentials) : null;
@@ -1342,7 +1447,7 @@ app.post('/api/login', (req, res) => {
         );
 
         db.get(
-          `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword FROM companies WHERE id = ?`,
+          `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
           [user.companyId],
           (companyErr, company) => {
             if (companyErr) {

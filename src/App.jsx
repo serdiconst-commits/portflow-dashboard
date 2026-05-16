@@ -431,6 +431,42 @@ const getAddressPartsFromPlace = (place) => {
 
 const savedUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
 const savedCompany = JSON.parse(localStorage.getItem('company') || 'null');
+const portHoustonCredentialGroups = [
+  {
+    terminal: 'BAYPORT TERMINAL',
+    rows: [
+      { key: 'bayportContainerTracking', label: 'Container Tracking' },
+      { key: 'bayportAppointmentScheduling', label: 'Appointment Scheduling' },
+    ],
+  },
+  {
+    terminal: 'BARBOURS CUT TERMINALS',
+    rows: [
+      { key: 'barboursCutContainerTracking', label: 'Container Tracking' },
+      { key: 'barboursCutAppointmentScheduling', label: 'Appointment Scheduling' },
+    ],
+  },
+  {
+    terminal: 'BNSF HOUSTON',
+    rows: [{ key: 'bnsfHouston', label: 'Rail Login' }],
+  },
+  {
+    terminal: 'UP HOUSTON',
+    rows: [{ key: 'upHouston', label: 'Rail Login' }],
+  },
+];
+const buildPortHoustonCredentialForm = (source = {}) => {
+  const credentials = source.portHoustonCredentials || {};
+  return portHoustonCredentialGroups.reduce((form, group) => {
+    group.rows.forEach((row) => {
+      form[row.key] = {
+        username: credentials[row.key]?.username || '',
+        password: '',
+      };
+    });
+    return form;
+  }, {});
+};
 
 const [activeView, setActiveView] = useState(
   isDriverApp || savedUser?.role === 'driver' ? 'driver' : getDefaultViewForRole(savedUser?.role)
@@ -481,10 +517,9 @@ const [selectedLoadAuditLogs, setSelectedLoadAuditLogs] = useState([]);
 const [driverContainerByLoad, setDriverContainerByLoad] = useState({});
 const [portHoustonChecksByLoad, setPortHoustonChecksByLoad] = useState({});
 const [portHoustonCheckingLoadId, setPortHoustonCheckingLoadId] = useState('');
-const [portHoustonSettingsForm, setPortHoustonSettingsForm] = useState({
-  username: savedCompany?.portHoustonUsername || '',
-  password: '',
-});
+const [portHoustonSettingsForm, setPortHoustonSettingsForm] = useState(
+  buildPortHoustonCredentialForm(savedCompany || {})
+);
 const [portHoustonSettingsStatus, setPortHoustonSettingsStatus] = useState('');
 const [portHoustonSettingsSaving, setPortHoustonSettingsSaving] = useState(false);
 
@@ -497,12 +532,8 @@ const getCompanyLogoSrc = () => {
 };
 
 useEffect(() => {
-  setPortHoustonSettingsForm((prev) => ({
-    ...prev,
-    username: company?.portHoustonUsername || '',
-    password: '',
-  }));
-}, [company?.portHoustonUsername]);
+  setPortHoustonSettingsForm(buildPortHoustonCredentialForm(company || {}));
+}, [company?.portHoustonCredentials]);
 
 const handleLogin = async (e) => {
   e.preventDefault();
@@ -1110,7 +1141,7 @@ const handleSavePortHoustonSettings = async (e) => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
       },
-      body: JSON.stringify(portHoustonSettingsForm),
+      body: JSON.stringify({ credentials: portHoustonSettingsForm }),
     });
 
     const data = await res.json().catch(() => ({}));
@@ -1121,10 +1152,7 @@ const handleSavePortHoustonSettings = async (e) => {
 
     setCompany(data);
     localStorage.setItem('company', JSON.stringify(data));
-    setPortHoustonSettingsForm({
-      username: data.portHoustonUsername || '',
-      password: '',
-    });
+    setPortHoustonSettingsForm(buildPortHoustonCredentialForm(data));
     setPortHoustonSettingsStatus('Port Houston credentials saved.');
   } catch (error) {
     console.error('Failed to save Port Houston settings:', error);
@@ -6339,35 +6367,69 @@ const refreshLoadsData = async () => {
         <form className="port-houston-settings" onSubmit={handleSavePortHoustonSettings}>
           <div className="settings-row-header">
             <div>
-              <span>Port Houston Login</span>
-              <strong>{company?.portHoustonConfigured ? 'Credentials saved' : 'Not configured'}</strong>
+              <span>Terminal Credentials</span>
+              <strong>{company?.portHoustonConfigured ? 'Credentials saved' : 'Credentials Required'}</strong>
             </div>
             <span className={company?.portHoustonConfigured ? 'status-pill active' : 'status-pill inactive'}>
               {company?.portHoustonConfigured ? 'Active' : 'Missing'}
             </span>
           </div>
-          <input
-            type="text"
-            placeholder="Port Houston username"
-            value={portHoustonSettingsForm.username}
-            onChange={(e) =>
-              setPortHoustonSettingsForm((prev) => ({ ...prev, username: e.target.value }))
-            }
-            autoComplete="username"
-            required
-          />
-          <input
-            type="password"
-            placeholder={company?.portHoustonConfigured ? 'New password (leave blank to keep current)' : 'Port Houston password'}
-            value={portHoustonSettingsForm.password}
-            onChange={(e) =>
-              setPortHoustonSettingsForm((prev) => ({ ...prev, password: e.target.value }))
-            }
-            autoComplete="current-password"
-            required={!company?.portHoustonConfigured}
-          />
+
+          <div className="terminal-credentials-list">
+            {portHoustonCredentialGroups.map((group) => (
+              <div key={group.terminal} className="terminal-credential-group">
+                <div className="terminal-credential-title">
+                  <h4>{group.terminal}</h4>
+                  <span>Credentials Required</span>
+                </div>
+
+                {group.rows.map((row) => {
+                  const configured = company?.portHoustonCredentials?.[row.key]?.configured;
+                  return (
+                    <div key={row.key} className="terminal-credential-row">
+                      <div className="terminal-credential-label">
+                        <strong>{row.label}</strong>
+                        <span>{configured ? 'Credentials saved' : 'Credentials Required'}</span>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Enter Login"
+                        value={portHoustonSettingsForm[row.key]?.username || ''}
+                        onChange={(e) =>
+                          setPortHoustonSettingsForm((prev) => ({
+                            ...prev,
+                            [row.key]: {
+                              ...(prev[row.key] || {}),
+                              username: e.target.value,
+                            },
+                          }))
+                        }
+                        autoComplete="username"
+                      />
+                      <input
+                        type="password"
+                        placeholder="Enter Password"
+                        value={portHoustonSettingsForm[row.key]?.password || ''}
+                        onChange={(e) =>
+                          setPortHoustonSettingsForm((prev) => ({
+                            ...prev,
+                            [row.key]: {
+                              ...(prev[row.key] || {}),
+                              password: e.target.value,
+                            },
+                          }))
+                        }
+                        autoComplete="current-password"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+
           <button type="submit" className="primary-btn" disabled={portHoustonSettingsSaving}>
-            {portHoustonSettingsSaving ? 'Saving...' : 'Save Port Houston Login'}
+            {portHoustonSettingsSaving ? 'Saving...' : 'Save Terminal Credentials'}
           </button>
           {portHoustonSettingsStatus && (
             <p className={portHoustonSettingsStatus.includes('saved') ? 'settings-status success' : 'settings-status error'}>

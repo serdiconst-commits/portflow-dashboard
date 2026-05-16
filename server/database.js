@@ -211,6 +211,11 @@ db.run(`ALTER TABLE companies ADD COLUMN portHoustonPassword TEXT`, (err) => {
     console.error('Error adding portHoustonPassword column to companies:', err.message);
   }
 });
+db.run(`ALTER TABLE companies ADD COLUMN portHoustonCredentialsJson TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding portHoustonCredentialsJson column to companies:', err.message);
+  }
+});
 db.run(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
