@@ -194,6 +194,16 @@ const getDriverLabel = (driverValue) => {
   return String(driverValue || '').trim() || 'No driver assigned';
 };
 
+const getLoadQuickStatus = (load = {}) => {
+  if (['Available', 'Not Available'].includes(load.availabilityStatus)) {
+    return load.availabilityStatus;
+  }
+  return load.status || '';
+};
+
+const getLoadQuickStatusKey = (load = {}) =>
+  String(getLoadQuickStatus(load) || '').trim().toLowerCase();
+
 const normalizeDriverForStorage = (driverValue) => {
   const raw = String(driverValue || '').trim();
   if (!raw) return '';
@@ -474,11 +484,11 @@ const [activeView, setActiveView] = useState(
 
 const [loadsData, setLoadsData] = useState([]);
 const availableLoads = loadsData.filter(
-  (load) => (load.status || '').trim().toLowerCase() === 'available'
+  (load) => getLoadQuickStatusKey(load) === 'available'
 );
 
 const notAvailableLoads = loadsData.filter(
-  (load) => (load.status || '').trim().toLowerCase() === 'not available'
+  (load) => getLoadQuickStatusKey(load) === 'not available'
 );
 
 const [selectedPresetName, setSelectedPresetName] = useState('');
@@ -1661,19 +1671,19 @@ useEffect(() => {
 
 
 const dispatchedLoads = loadsData.filter(
-  (load) => (load.status || '').trim().toLowerCase() === 'dispatched'
+  (load) => getLoadQuickStatusKey(load) === 'dispatched'
 );
 
 const inTransitLoads = loadsData.filter(
-  (load) => (load.status || '').trim().toLowerCase() === 'in transit'
+  (load) => getLoadQuickStatusKey(load) === 'in transit'
 );
 
 const droppedLoads = loadsData.filter(
-  (load) => (load.status || '').trim().toLowerCase() === 'dropped'
+  (load) => getLoadQuickStatusKey(load) === 'dropped'
 );
 
 const deliveredLoads = loadsData.filter(
-  (load) => (load.status || '').trim().toLowerCase() === 'delivered'
+  (load) => getLoadQuickStatusKey(load) === 'delivered'
 );
 
 const lfdLoads = loadsData.filter(
@@ -1705,7 +1715,7 @@ const filteredLoads = loadsData.filter((load) => {
     (load.containerNumber || '').toLowerCase().includes(term);
 
   const matchesStatus =
-    statusFilter === 'All' || load.status === statusFilter;
+    statusFilter === 'All' || getLoadQuickStatus(load) === statusFilter;
 
   const matchesPaperwork =
     paperworkFilter === 'All' || load.paperwork === paperworkFilter;
@@ -3276,29 +3286,29 @@ const baseFilteredLoadsData =
     ? loadsData.filter((load) => load.lfd || load.lastFreeDay)
     : dashboardFilter === 'available'
     ? loadsData.filter(
-        (load) => (load.status || '').trim().toLowerCase() === 'available'
+        (load) => getLoadQuickStatusKey(load) === 'available'
       )
     : dashboardFilter === 'not-available'
     ? loadsData.filter(
-        (load) => (load.status || '').trim().toLowerCase() === 'not available'
+        (load) => getLoadQuickStatusKey(load) === 'not available'
       )
     : dashboardFilter === 'dispatched'
     ? loadsData.filter(
-        (load) => (load.status || '').trim().toLowerCase() === 'dispatched'
+        (load) => getLoadQuickStatusKey(load) === 'dispatched'
       )
     : dashboardFilter === 'in-transit'
     ? loadsData.filter(
-        (load) => (load.status || '').trim().toLowerCase() === 'in transit'
+        (load) => getLoadQuickStatusKey(load) === 'in transit'
       )
 
           : dashboardFilter === 'dropped'
     ? loadsData.filter(
-        (load) => (load.status || '').trim().toLowerCase() === 'dropped'
+        (load) => getLoadQuickStatusKey(load) === 'dropped'
       )
 
     : dashboardFilter === 'delivered'
     ? loadsData.filter(
-        (load) => (load.status || '').trim().toLowerCase() === 'delivered'
+        (load) => getLoadQuickStatusKey(load) === 'delivered'
       )
     : loadsData;
     const normalizedSearchTerm = String(searchTerm || '').trim().toLowerCase();
@@ -4720,9 +4730,7 @@ const refreshLoadsData = async () => {
                     </thead>
                     <tbody>
                       {filteredLoadsData.map((load) => {
-                        const displayStatus = ['Available', 'Not Available'].includes(load.availabilityStatus)
-                          ? load.availabilityStatus
-                          : load.status;
+                        const displayStatus = getLoadQuickStatus(load);
                         const hasPod = load.documents?.some(
                           (doc) => (doc.category || '').trim().toUpperCase() === 'POD'
                         );

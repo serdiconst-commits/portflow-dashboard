@@ -335,6 +335,16 @@ button {
   color: #1f2937;
 }
 
+.sheet-status.available {
+  background: #6aa84f;
+  color: #0f172a;
+}
+
+.sheet-status.not-available {
+  background: #ff0000;
+  color: #ffffff;
+}
+
 .sheet-status.in-transit {
   background: #9fc5e8;
   color: #172a41;
