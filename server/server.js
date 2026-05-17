@@ -1728,7 +1728,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           l.rate || 0,
           l.driverRate || 0,
           l.status || 'Pending',
-          l.availabilityStatus || 'Available',
+          l.availabilityStatus ?? '',
           l.paperwork || '',
           l.detention || 0,
           l.lumper || 0,

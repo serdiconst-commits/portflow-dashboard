@@ -2159,7 +2159,7 @@ const handleQuickStatusChange = async (e) => {
 const updatedLoad = {
   ...selectedLoad,
   status: isAvailabilityStatus ? selectedLoad.status : newStatus,
-  availabilityStatus: isAvailabilityStatus ? newStatus : selectedLoad.availabilityStatus,
+  availabilityStatus: isAvailabilityStatus ? newStatus : '',
   dropDateTime:
     !isAvailabilityStatus && newStatus === 'Dropped'
       ? new Date().toISOString()
@@ -5268,11 +5268,7 @@ const refreshLoadsData = async () => {
                           <label htmlFor="quick-status-select">Quick Status Change</label>
                           <select
                             id="quick-status-select"
-                            value={
-                              ['Available', 'Not Available'].includes(selectedLoad.availabilityStatus)
-                                ? selectedLoad.availabilityStatus
-                                : selectedLoad.status
-                            }
+                            value={getLoadQuickStatus(selectedLoad)}
                             onChange={handleQuickStatusChange}
                             className="quick-driver-select"
                           >
