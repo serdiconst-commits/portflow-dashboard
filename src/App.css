@@ -1361,6 +1361,14 @@ button:disabled {
   min-width: 0;
 }
 
+.terminal-credential-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .terminal-credential-title h4 {
   margin: 0;
   font-size: 14px;

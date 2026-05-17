@@ -1165,6 +1165,43 @@ const handleSavePortHoustonSettings = async (group) => {
   }
 };
 
+const handleClearPortHoustonSettings = async (group) => {
+  const groupCredentials = group.rows.reduce((credentials, row) => {
+    credentials[row.key] = { clear: true };
+    return credentials;
+  }, {});
+
+  try {
+    setPortHoustonSettingsSaving(group.terminal);
+    setPortHoustonSettingsStatus('');
+
+    const res = await fetch(`${API_BASE}/api/company/port-houston`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ credentials: groupCredentials }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to clear Port Houston settings');
+    }
+
+    setCompany(data);
+    localStorage.setItem('company', JSON.stringify(data));
+    setPortHoustonSettingsForm(buildPortHoustonCredentialForm(data));
+    setPortHoustonSettingsStatus(`${group.terminal} credentials cleared.`);
+  } catch (error) {
+    console.error('Failed to clear Port Houston settings:', error);
+    setPortHoustonSettingsStatus(`${group.terminal}: ${error.message}`);
+  } finally {
+    setPortHoustonSettingsSaving('');
+  }
+};
+
 const parseAuditJson = (value, fallback) => {
   if (!value) return fallback;
   if (typeof value !== 'string') return value;
@@ -6390,14 +6427,24 @@ const refreshLoadsData = async () => {
                         : 'Credentials Required'}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="secondary-btn"
-                    onClick={() => handleSavePortHoustonSettings(group)}
-                    disabled={portHoustonSettingsSaving === group.terminal}
-                  >
-                    {portHoustonSettingsSaving === group.terminal ? 'Saving...' : 'Save'}
-                  </button>
+                  <div className="terminal-credential-actions">
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      onClick={() => handleClearPortHoustonSettings(group)}
+                      disabled={portHoustonSettingsSaving === group.terminal}
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      onClick={() => handleSavePortHoustonSettings(group)}
+                      disabled={portHoustonSettingsSaving === group.terminal}
+                    >
+                      {portHoustonSettingsSaving === group.terminal ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
                 </div>
 
                 {group.rows.map((row) => {

@@ -632,10 +632,12 @@ app.put('/api/company/port-houston', authenticate, requireRoles(adminRoles), (re
       const existingCredentials = parsePortHoustonCredentials(existingCompany || {});
       const nextCredentials = portHoustonCredentialKeys.reduce((result, key) => {
         const submitted = submittedCredentials[key] || {};
-        result[key] = {
-          username: String(submitted.username ?? existingCredentials[key]?.username ?? '').trim(),
-          password: String(submitted.password || existingCredentials[key]?.password || ''),
-        };
+        result[key] = submitted.clear
+          ? { username: '', password: '' }
+          : {
+              username: String(submitted.username ?? existingCredentials[key]?.username ?? '').trim(),
+              password: String(submitted.password || existingCredentials[key]?.password || ''),
+            };
         return result;
       }, {});
 
