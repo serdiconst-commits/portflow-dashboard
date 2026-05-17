@@ -2173,8 +2173,13 @@ const updatedLoad = {
       throw new Error(errorData.error || 'Failed to update status');
     }
 
-    await fetchLoads();
-    await fetchSelectedLoadAuditLogs(updatedLoad.id);
+    const data = await res.json();
+    setLoadsData((prevLoads) =>
+      prevLoads.map((load) => (load.id === data.id ? data : load))
+    );
+    setSelectedLoad(data);
+    setEditingLoad((prev) => (prev?.id === data.id ? data : prev));
+    await fetchSelectedLoadAuditLogs(data.id);
   } catch (error) {
     console.error('Failed to update status:', error);
   }
@@ -4715,6 +4720,9 @@ const refreshLoadsData = async () => {
                     </thead>
                     <tbody>
                       {filteredLoadsData.map((load) => {
+                        const displayStatus = ['Available', 'Not Available'].includes(load.availabilityStatus)
+                          ? load.availabilityStatus
+                          : load.status;
                         const hasPod = load.documents?.some(
                           (doc) => (doc.category || '').trim().toUpperCase() === 'POD'
                         );
@@ -4762,8 +4770,8 @@ const refreshLoadsData = async () => {
                             <td>{load.appointmentTime || '-'}</td>
                             <td>{load.driver ? getDriverLabel(load.driver) : 'Not Assigned'}</td>
                             <td>
-                              <span className={`sheet-status ${String(load.status || '').toLowerCase().replace(/\s/g, '-')}`}>
-                                {load.status || '-'}
+                              <span className={`sheet-status ${String(displayStatus || '').toLowerCase().replace(/\s/g, '-')}`}>
+                                {displayStatus || '-'}
                               </span>
                             </td>
                             <td>{load.referenceNumber || '-'}</td>
