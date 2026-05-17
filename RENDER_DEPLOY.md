@@ -30,6 +30,16 @@ JWT_SECRET=<long random secret>
 
 Do not set `PORT` manually on Render. Render provides it.
 
+## Driver Browser Access
+
+Drivers can use Safari on iPhone without an App Store iOS app:
+
+```text
+https://portflow-dashboard.onrender.com/driver
+```
+
+Open the URL in Safari, log in with a driver account, then use Share -> Add to Home Screen for app-like access. Android remains on the Capacitor app flow.
+
 ## Port Houston
 
 To enable the Port Houston check button, set these Render environment values after Port Houston/Navis API access is approved:

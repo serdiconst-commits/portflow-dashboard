@@ -10,6 +10,14 @@ The driver portal is currently inside `src/App.jsx` behind:
 activeView === 'driver' && currentUser?.role === 'driver'
 ```
 
+Drivers can also use the browser driver portal at:
+
+```text
+https://portflow-dashboard.onrender.com/driver
+```
+
+On iPhone, open that URL in Safari, log in with a driver account, then use Share -> Add to Home Screen to keep it on the phone like an app. This uses the same driver-only guard as the Android build; non-driver accounts are rejected from the driver portal.
+
 The mobile build sets:
 
 ```env

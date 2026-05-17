@@ -7,7 +7,8 @@ export default function App() {
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 const APP_PORTAL = import.meta.env.VITE_APP_PORTAL || 'web';
-const isDriverApp = APP_PORTAL === 'driver';
+const isDriverWebPath = typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/driver';
+const isDriverApp = APP_PORTAL === 'driver' || isDriverWebPath;
 
 const [driverForm, setDriverForm] = useState({
   id: '',
