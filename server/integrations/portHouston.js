@@ -39,17 +39,17 @@ const getConfig = (credentials = {}) => ({
   authUrl: process.env.PORT_HOUSTON_AUTH_URL || DEFAULT_AUTH_URL,
   apiKey: process.env.PORT_HOUSTON_API_KEY || '',
   clientId:
-    credentials.clientId ||
-    credentials.username ||
     process.env.PORT_HOUSTON_CLIENT_ID ||
     process.env.PORT_HOUSTON_USERNAME ||
+    credentials.clientId ||
+    credentials.username ||
     '',
   clientSecret:
-    credentials.clientSecret ||
-    credentials.password ||
     process.env.PORT_HOUSTON_CLIENT_SECRET ||
     process.env.PORT_HOUSTON_API_KEY ||
     process.env.PORT_HOUSTON_PASSWORD ||
+    credentials.clientSecret ||
+    credentials.password ||
     '',
 });
 
