@@ -31,27 +31,42 @@ const normalizeEnabled = (value) => String(value || '').trim().toLowerCase() ===
 
 const trimSlash = (value = '') => String(value).replace(/\/+$/, '');
 
-const getConfig = (credentials = {}) => ({
-  enabled:
-    normalizeEnabled(process.env.PORT_HOUSTON_ENABLED) ||
-    Boolean((credentials.clientId || credentials.username) && (credentials.clientSecret || credentials.password)),
-  apiBase: trimSlash(process.env.PORT_HOUSTON_API_BASE || DEFAULT_API_BASE),
-  authUrl: process.env.PORT_HOUSTON_AUTH_URL || DEFAULT_AUTH_URL,
-  apiKey: process.env.PORT_HOUSTON_API_KEY || '',
-  clientId:
-    process.env.PORT_HOUSTON_CLIENT_ID ||
-    process.env.PORT_HOUSTON_USERNAME ||
-    credentials.clientId ||
-    credentials.username ||
-    '',
-  clientSecret:
+const maskValue = (value = '') => {
+  const text = String(value || '');
+  if (!text) return '';
+  if (text.length <= 4) return '*'.repeat(text.length);
+  return `${text.slice(0, 3)}...${text.slice(-3)}`;
+};
+
+const getConfig = (credentials = {}) => {
+  const envClientId = process.env.PORT_HOUSTON_CLIENT_ID || process.env.PORT_HOUSTON_USERNAME || '';
+  const envClientSecret =
     process.env.PORT_HOUSTON_CLIENT_SECRET ||
     process.env.PORT_HOUSTON_API_KEY ||
     process.env.PORT_HOUSTON_PASSWORD ||
-    credentials.clientSecret ||
-    credentials.password ||
-    '',
-});
+    '';
+  const credentialClientId = credentials.clientId || credentials.username || '';
+  const credentialClientSecret = credentials.clientSecret || credentials.password || '';
+  const clientId = envClientId || credentialClientId;
+  const clientSecret = envClientSecret || credentialClientSecret;
+
+  return {
+    enabled:
+      normalizeEnabled(process.env.PORT_HOUSTON_ENABLED) ||
+      Boolean(credentialClientId && credentialClientSecret),
+    apiBase: trimSlash(process.env.PORT_HOUSTON_API_BASE || DEFAULT_API_BASE),
+    authUrl: process.env.PORT_HOUSTON_AUTH_URL || DEFAULT_AUTH_URL,
+    apiKey: process.env.PORT_HOUSTON_API_KEY || '',
+    clientId,
+    clientSecret,
+    diagnostics: {
+      clientId: maskValue(clientId),
+      clientIdSource: envClientId ? 'Render environment' : credentialClientId ? 'terminal credentials' : 'missing',
+      clientSecretSource: envClientSecret ? 'Render environment' : credentialClientSecret ? 'terminal credentials' : 'missing',
+      clientSecretLength: String(clientSecret || '').length,
+    },
+  };
+};
 
 const assertConfigured = (config) => {
   if (!config.enabled) {
@@ -88,6 +103,7 @@ const requestToken = async (config) => {
     const error = new Error(data.error_description || data.error || 'Failed to authenticate with Port Houston API.');
     error.status = res.status || 502;
     error.response = data;
+    error.diagnostics = config.diagnostics;
     throw error;
   }
 

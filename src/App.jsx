@@ -1968,7 +1968,10 @@ const handleCheckPortHouston = async (load) => {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      throw new Error(data.error || 'Failed to check Port Houston');
+      const diagnosticText = data.diagnostics
+        ? ` Using client ID ${data.diagnostics.clientId || 'missing'} from ${data.diagnostics.clientIdSource || 'unknown source'}; secret from ${data.diagnostics.clientSecretSource || 'unknown source'} (${data.diagnostics.clientSecretLength || 0} characters).`
+        : '';
+      throw new Error(`${data.error || 'Failed to check Port Houston'}${diagnosticText}`);
     }
 
     setPortHoustonChecksByLoad((prev) => ({

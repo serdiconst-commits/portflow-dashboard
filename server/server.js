@@ -817,7 +817,7 @@ app.get('/api/port-houston/container/:containerNumber/availability', authenticat
       response: { error: error.message, code: error.code, details: error.response },
       checkedByUserId: req.user?.id || '',
     }).catch((logErr) => console.error('Port Houston log error:', logErr.message));
-    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR' });
+    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR', diagnostics: error.diagnostics });
   }
 });
 
@@ -850,7 +850,7 @@ app.get('/api/port-houston/bol/:bolNumber/availability', authenticate, async (re
       response: { error: error.message, code: error.code, details: error.response },
       checkedByUserId: req.user?.id || '',
     }).catch((logErr) => console.error('Port Houston log error:', logErr.message));
-    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR' });
+    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR', diagnostics: error.diagnostics });
   }
 });
 
@@ -885,7 +885,7 @@ app.get('/api/port-houston/gate/:containerNumber', authenticate, async (req, res
       response: { error: error.message, code: error.code, details: error.response },
       checkedByUserId: req.user?.id || '',
     }).catch((logErr) => console.error('Port Houston log error:', logErr.message));
-    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR' });
+    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR', diagnostics: error.diagnostics });
   }
 });
 
@@ -980,7 +980,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       response: { error: error.message, code: error.code, details: error.response },
       checkedByUserId: req.user?.id || '',
     }).catch((logErr) => console.error('Port Houston log error:', logErr.message));
-    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR' });
+    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR', diagnostics: error.diagnostics });
   }
 });
 
