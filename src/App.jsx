@@ -150,6 +150,18 @@ const normalizeDocType = (type) => {
   });
 }; 
 
+const normalizeDateTimeInputValue = (value) => {
+  if (!value) return '';
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)) return text;
+
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text.slice(0, 16);
+
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
 const formatDateTime = (value) => {
   if (!value) return '—';
 
@@ -4546,10 +4558,11 @@ const refreshLoadsData = async () => {
   </div>
 )}
 
+<label>Appointment Time</label>
 <input
   type="datetime-local"
   name="appointmentTime"
-  value={newLoad.appointmentTime || ''}
+  value={normalizeDateTimeInputValue(newLoad.appointmentTime)}
   onChange={handleInputChange}
 />
 
@@ -4776,7 +4789,7 @@ const refreshLoadsData = async () => {
                             <td>{load.shipLine || '-'}</td>
                             <td>{shortLocation(load.pickup)}</td>
                             <td>{shortLocation(load.delivery)}</td>
-                            <td>{load.appointmentTime || '-'}</td>
+                            <td>{formatAppointmentTime(load.appointmentTime)}</td>
                             <td>{load.driver ? getDriverLabel(load.driver) : 'Not Assigned'}</td>
                             <td>
                               <span className={`sheet-status ${String(displayStatus || '').toLowerCase().replace(/\s/g, '-')}`}>
@@ -4873,7 +4886,7 @@ const refreshLoadsData = async () => {
   </p>
 <p>🚢 <strong>Ship Line:</strong><br /> {load.shipLine || '-'}</p>
  <p>📅 <strong>Appointment:</strong><br />
-    {load.appointmentTime || '-'}
+    {formatAppointmentTime(load.appointmentTime)}
   </p>
 
 <div className="load-field">
@@ -5170,10 +5183,11 @@ const refreshLoadsData = async () => {
                       <input type="text" name="truck" placeholder="Truck" value={editingLoad.truck} onChange={handleEditInputChange} readOnly />
                       <input type="text" name="pickup" placeholder="Pickup" value={editingLoad.pickup} onChange={handleEditInputChange} />
                       <input type="text" name="delivery" placeholder="Delivery" value={editingLoad.delivery} onChange={handleEditInputChange} />
+                      <label>Appointment Time</label>
                       <input
   type="datetime-local"
   name="appointmentTime"
-  value={editingLoad?.appointmentTime || ''}
+  value={normalizeDateTimeInputValue(editingLoad?.appointmentTime)}
   onChange={handleEditInputChange}
 />
 
@@ -5316,10 +5330,10 @@ const refreshLoadsData = async () => {
   <strong>{getDriverLabel(selectedLoad.driver)}</strong>
 </div>
                         <div className="detail-box"><span>Truck</span><strong>{selectedLoad.truck}</strong></div>
-                        <div className="detail-box"><span>Status</span><strong>{selectedLoad.status}</strong></div>
                         <div className="detail-box"><span>Availability</span><strong>{selectedLoad.availabilityStatus || 'Not Available'}</strong></div>
                         <div className="detail-box"><span>Pick Up Location</span><strong>{selectedLoad.pickup}</strong></div>
                         <div className="detail-box"><span>Delivery Location</span><strong>{selectedLoad.delivery}</strong></div>
+                        <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedLoad.appointmentTime)}</strong></div>
                         <div className="detail-box"><span>Return Location</span><strong>{selectedLoad.returnLocation}</strong></div>
                         <div className="detail-box">
   <span>Drop Type</span>
