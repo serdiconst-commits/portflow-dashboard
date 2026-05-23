@@ -4608,19 +4608,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   ))}
 </select>
 
-<input
-  ref={pickupInputRef}
-  type="text"
-  placeholder="Search pickup address"
-  value={newLoad.pickup || ''}
-  onChange={(e) =>
-    setNewLoad((prev) => ({
-      ...prev,
-      pickup: e.target.value,
-    }))
-  }
-/>
-
     <button
       type="button"
       className="secondary-btn compact-btn"
@@ -4694,17 +4681,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
 {showLocationEditor && (
   <div style={{ marginBottom: '12px' }}>
-    <input
-      type="text"
-      placeholder="Edit Pickup"
-      value={newLoad.pickup}
-      onChange={(e) =>
-        setNewLoad((prev) => ({
-          ...prev,
-          pickup: e.target.value,
-        }))
-      }
-    />
 <div style={{ marginTop: '15px' }}>
   <h4>Saved Locations</h4>
 
@@ -4741,8 +4717,22 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 )}
 
 
+<label>Delivery Location</label>
+<select
+  value={
+    (deliveryLocations || []).find((loc) => formatLocationAddress(loc) === newLoad.delivery)?.id || ''
+  }
+  onChange={(e) => {
+    const selectedId = e.target.value;
 
-<select onChange={(e) => handleSelectSavedLocation('delivery', e.target.value)}>
+    if (!selectedId) {
+      setNewLoad((prev) => ({ ...prev, delivery: '' }));
+      return;
+    }
+
+    handleSelectSavedLocation('delivery', selectedId);
+  }}
+>
   <option value="">Select saved delivery location</option>
   {(deliveryLocations || []).map((loc) => (
     <option key={loc.id} value={loc.id}>
@@ -4750,15 +4740,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </option>
   ))}
 </select>
-
-<input
-  ref={deliveryInputRef}
-  type="text"
-  name="delivery"
-  placeholder="Search delivery address"
-  value={newLoad.delivery || ''}
-  onChange={handleInputChange}
-/>
 
 <div className="inline-action-row location-action-row">
   <button
@@ -4847,7 +4828,22 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   onChange={handleInputChange}
 />
 
-<select onChange={(e) => handleSelectSavedLocation('returnLocation', e.target.value)}>
+<label>Return Location</label>
+<select
+  value={
+    (returnLocations || []).find((loc) => formatLocationAddress(loc) === newLoad.returnLocation)?.id || ''
+  }
+  onChange={(e) => {
+    const selectedId = e.target.value;
+
+    if (!selectedId) {
+      setNewLoad((prev) => ({ ...prev, returnLocation: '' }));
+      return;
+    }
+
+    handleSelectSavedLocation('returnLocation', selectedId);
+  }}
+>
   <option value="">Select return location</option>
   {(returnLocations || []).map((loc) => (
     <option key={loc.id} value={loc.id}>
@@ -4855,19 +4851,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </option>
   ))}
 </select>
-
-<input
-  ref={returnInputRef}
-  type="text"
-  placeholder="Search return address"
-  value={newLoad.returnLocation || ''}
-  onChange={(e) =>
-    setNewLoad((prev) => ({
-      ...prev,
-      returnLocation: e.target.value,
-    }))
-  }
-/>
 
 <label>LFD</label>
 <input
