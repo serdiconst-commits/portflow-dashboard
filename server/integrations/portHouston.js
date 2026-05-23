@@ -31,6 +31,12 @@ const normalizeEnabled = (value) => String(value || '').trim().toLowerCase() ===
 
 const trimSlash = (value = '') => String(value).replace(/\/+$/, '');
 
+const normalizeCredentialValue = (value = '') => {
+  const trimmed = String(value || '').trim();
+  const quoteMatch = trimmed.match(/^(['"])(.*)\1$/);
+  return quoteMatch ? quoteMatch[2].trim() : trimmed;
+};
+
 const maskValue = (value = '') => {
   const text = String(value || '');
   if (!text) return '';
@@ -39,14 +45,17 @@ const maskValue = (value = '') => {
 };
 
 const getConfig = (credentials = {}) => {
-  const envClientId = process.env.PORT_HOUSTON_CLIENT_ID || process.env.PORT_HOUSTON_USERNAME || '';
-  const envClientSecret =
+  const rawEnvClientId = process.env.PORT_HOUSTON_CLIENT_ID || process.env.PORT_HOUSTON_USERNAME || '';
+  const rawEnvClientSecret =
     process.env.PORT_HOUSTON_CLIENT_SECRET ||
     process.env.PORT_HOUSTON_API_KEY ||
     process.env.PORT_HOUSTON_PASSWORD ||
     '';
-  const credentialClientId = credentials.clientId || credentials.username || '';
-  const credentialClientSecret = credentials.clientSecret || credentials.password || '';
+  const envClientId = normalizeCredentialValue(rawEnvClientId);
+  const envClientSecret =
+    normalizeCredentialValue(rawEnvClientSecret);
+  const credentialClientId = normalizeCredentialValue(credentials.clientId || credentials.username || '');
+  const credentialClientSecret = normalizeCredentialValue(credentials.clientSecret || credentials.password || '');
   const clientId = envClientId || credentialClientId;
   const clientSecret = envClientSecret || credentialClientSecret;
 
