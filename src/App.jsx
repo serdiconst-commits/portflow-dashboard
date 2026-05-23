@@ -3192,9 +3192,17 @@ const handleSaveNewDeliveryLocation = async () => {
       throw new Error(data.error || 'Failed to save delivery location');
     }
 
-    await fetchLocations();
+    const savedLocation = {
+      ...payload,
+      id: data.id,
+      companyId: company?.id || currentUser?.companyId || '',
+    };
+    const fullAddress = formatLocationAddress(savedLocation);
 
-    const fullAddress = formatLocationAddress(newDeliveryLocation);
+    setLocations((prev) => {
+      const withoutDuplicate = prev.filter((location) => location.id !== savedLocation.id);
+      return [...withoutDuplicate, savedLocation];
+    });
 
     setNewLoad((prev) => ({
       ...prev,
@@ -4317,9 +4325,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     ))}
   </select>
 </div>
-  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+  <div className="inline-action-row">
     <button
       type="button"
+      className="secondary-btn compact-btn"
       onClick={() => setShowCustomerEditor((prev) => !prev)}
     >
       {showCustomerEditor ? 'Close Customer Editor' : 'Edit Customer'}
@@ -4327,6 +4336,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
     <button
       type="button"
+      className="primary-btn compact-btn"
       onClick={() => {
         setCustomerForm(emptyCustomer);
         setEditingCustomerId(null);
@@ -4401,7 +4411,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         }
       />
 
-      <button type="button" onClick={handleSaveCustomer}>
+      <button type="button" className="primary-btn compact-btn" onClick={handleSaveCustomer}>
         {editingCustomerId ? 'Save Customer' : 'Create Customer'}
       </button>
     </div>
@@ -4613,6 +4623,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
     <button
       type="button"
+      className="secondary-btn compact-btn"
       onClick={() => setShowNewPickup(true)}
     >
       + New Pickup
@@ -4667,24 +4678,19 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       }
     />
 
-    <button type="button" onClick={handleSaveNewPickupLocation}>
+    <button type="button" className="primary-btn compact-btn" onClick={handleSaveNewPickupLocation}>
       Save Pickup Location
     </button>
 
     <button
       type="button"
+      className="secondary-btn compact-btn"
       onClick={() => setShowNewPickup(false)}
     >
       Use Saved Pickup
     </button>
   </div>
 )}
-<button
-  type="button"
-  onClick={() => setShowLocationEditor((prev) => !prev)}
->
-  {showLocationEditor ? 'Close Location Editor' : 'Edit Locations'}
-</button>
 
 {showLocationEditor && (
   <div style={{ marginBottom: '12px' }}>
@@ -4699,50 +4705,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         }))
       }
     />
-
-    <select
-  onChange={(e) =>
-    handleSelectSavedLocation('delivery', e.target.value)
-  }
->
-  <option value="">Select saved delivery location</option>
-  {(deliveryLocations || []).map((loc) => (
-    <option key={loc.id} value={loc.id}>
-      {getLocationOptionLabel(loc)}
-    </option>
-  ))}
-</select>
-
-<input
-  type="text"
-  name="delivery"
-  value={newLoad.delivery || ''}
-  onChange={handleInputChange}
-/>
-    
-<select
-  onChange={(e) =>
-    handleSelectSavedLocation('returnLocation', e.target.value)
-  }
->
-  <option value="">Select return location</option>
-  {(returnLocations || []).map((loc) => (
-    <option key={loc.id} value={loc.id}>
-      {getLocationOptionLabel(loc)}
-    </option>
-  ))}
-</select>
-
-<input
-  type="text"
-  value={newLoad.returnLocation || ''}
-  onChange={(e) =>
-    setNewLoad((prev) => ({
-      ...prev,
-      returnLocation: e.target.value,
-    }))
-  }
-/>
 <div style={{ marginTop: '15px' }}>
   <h4>Saved Locations</h4>
 
@@ -4766,8 +4728,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
         <button
           type="button"
+          className="secondary-btn compact-btn danger-btn"
           onClick={() => handleDeleteLocation(loc.id)}
-          style={{ marginTop: '5px' }}
         >
           Delete
         </button>
@@ -4798,12 +4760,23 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   onChange={handleInputChange}
 />
 
-<button
-  type="button"
-  onClick={() => setShowNewDeliveryForm((prev) => !prev)}
->
-  {showNewDeliveryForm ? 'Cancel New Delivery' : '+ New Delivery'}
-</button>
+<div className="inline-action-row location-action-row">
+  <button
+    type="button"
+    className="secondary-btn compact-btn"
+    onClick={() => setShowNewDeliveryForm((prev) => !prev)}
+  >
+    {showNewDeliveryForm ? 'Cancel New Delivery' : '+ New Delivery'}
+  </button>
+
+  <button
+    type="button"
+    className="secondary-btn compact-btn"
+    onClick={() => setShowLocationEditor((prev) => !prev)}
+  >
+    {showLocationEditor ? 'Close Locations' : 'Edit Locations'}
+  </button>
+</div>
 {showNewDeliveryForm && (
   <div style={{ marginBottom: '10px' }}>
     <input
@@ -4852,7 +4825,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       }
     />
 
-    <button type="button" onClick={handleSaveNewDeliveryLocation}>
+    <button type="button" className="primary-btn compact-btn" onClick={handleSaveNewDeliveryLocation}>
       Save Delivery Location
     </button>
   </div>

@@ -465,6 +465,32 @@ button {
   cursor: pointer;
 }
 
+.compact-btn {
+  min-height: 40px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.inline-action-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.location-action-row {
+  grid-column: 1 / -1;
+}
+
+.danger-btn {
+  color: #991b1b;
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
