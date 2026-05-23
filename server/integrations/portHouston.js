@@ -93,30 +93,67 @@ const assertConfigured = (config) => {
   }
 };
 
-const requestToken = async (config) => {
-  const body = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-  });
-
+const requestTokenWithBodyCredentials = async (config) => {
   const res = await fetch(config.authUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+    }),
   });
 
   const data = await res.json().catch(() => ({}));
 
-  if (!res.ok || !data.access_token) {
-    const error = new Error(data.error_description || data.error || 'Failed to authenticate with Port Houston API.');
-    error.status = res.status || 502;
-    error.response = data;
-    error.diagnostics = config.diagnostics;
-    throw error;
+  return { res, data, authMethod: 'form body' };
+};
+
+const requestTokenWithBasicAuth = async (config) => {
+  const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
+  const res = await fetch(config.authUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+    }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  return { res, data, authMethod: 'basic auth' };
+};
+
+const requestToken = async (config) => {
+  const attempts = [
+    await requestTokenWithBodyCredentials(config),
+  ];
+
+  if (!attempts[0].res.ok || !attempts[0].data.access_token) {
+    attempts.push(await requestTokenWithBasicAuth(config));
   }
 
-  return data.access_token;
+  const successfulAttempt = attempts.find((attempt) => attempt.res.ok && attempt.data.access_token);
+  if (successfulAttempt) {
+    return successfulAttempt.data.access_token;
+  }
+
+  const lastAttempt = attempts.at(-1);
+  const error = new Error(
+    lastAttempt.data.error_description ||
+      lastAttempt.data.error ||
+      'Failed to authenticate with Port Houston API.'
+  );
+  error.status = lastAttempt.res.status || 502;
+  error.response = lastAttempt.data;
+  error.diagnostics = {
+    ...config.diagnostics,
+    authMethodsTried: attempts.map((attempt) => attempt.authMethod).join(', '),
+  };
+  throw error;
 };
 
 const portHoustonFetch = async (path, query = {}, credentials = {}) => {
