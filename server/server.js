@@ -142,8 +142,11 @@ const normalizeDriverAssignment = (companyId, value, callback) => {
   db.get(
     `SELECT id FROM drivers
      WHERE companyId = ?
-       AND TRIM(LOWER(name)) = TRIM(LOWER(?))`,
-    [companyId, cleaned],
+       AND (
+         TRIM(LOWER(id)) = TRIM(LOWER(?))
+         OR TRIM(LOWER(name)) = TRIM(LOWER(?))
+       )`,
+    [companyId, cleaned, cleaned],
     (err, driver) => {
       if (err) {
         callback(err);

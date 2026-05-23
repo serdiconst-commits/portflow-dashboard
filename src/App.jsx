@@ -4,7 +4,26 @@ import SignatureCanvas from 'react-signature-canvas';
 import './App.css';
 
 export default function App() {
-const API_BASE = import.meta.env.VITE_API_BASE || '';
+const rawApiBase = import.meta.env.VITE_API_BASE || '';
+const API_BASE = (() => {
+  if (!rawApiBase) return '';
+  if (typeof window === 'undefined') return rawApiBase.replace(/\/$/, '');
+
+  try {
+    const apiUrl = new URL(rawApiBase);
+    const localApiHosts = new Set(['localhost', '127.0.0.1']);
+    const browserHost = window.location.hostname;
+
+    if (localApiHosts.has(apiUrl.hostname) && !localApiHosts.has(browserHost)) {
+      apiUrl.hostname = browserHost;
+      return apiUrl.toString().replace(/\/$/, '');
+    }
+
+    return rawApiBase.replace(/\/$/, '');
+  } catch {
+    return rawApiBase.replace(/\/$/, '');
+  }
+})();
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 const APP_PORTAL = import.meta.env.VITE_APP_PORTAL || 'web';
 const isDriverWebPath = typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/driver';
@@ -418,6 +437,7 @@ const newDeliveryAutocompleteRef = useRef(null);
 const [uploadDocType, setUploadDocType] = useState({});
 const [uploadFileByLoad, setUploadFileByLoad] = useState({});
 const [dashboardFilter, setDashboardFilter] = useState('all');
+const [driverMobileTab, setDriverMobileTab] = useState('active');
 
 const getAddressPartsFromPlace = (place) => {
   let street = '';
@@ -3383,6 +3403,280 @@ const refreshLoadsData = async () => {
     console.error('Error refreshing loads:', error);
   }
 };
+
+const driverActiveLoads = (loadsData || []).filter((load) => {
+  const status = String(load.status || '').trim().toLowerCase();
+  return driverMatchesCurrentUser(load.driver, currentUser) && status !== 'delivered';
+});
+
+const driverCompletedLoads = (loadsData || []).filter((load) => {
+  const status = String(load.status || '').trim().toLowerCase();
+  return driverMatchesCurrentUser(load.driver, currentUser) && status === 'delivered';
+});
+
+const driverNeedsDocsLoads = driverActiveLoads.filter((load) => !hasRequiredDriverDocuments(load));
+const driverVisibleLoads =
+  driverMobileTab === 'paperwork'
+    ? driverNeedsDocsLoads
+    : driverMobileTab === 'completed'
+    ? driverCompletedLoads
+    : driverActiveLoads;
+
+const getDriverStatusClass = (status) =>
+  String(status || 'assigned')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-');
+
+const DriverLoadCard = ({ load }) => {
+  const selectedFile = uploadFileByLoad[load.id];
+  const missingDocuments = getMissingDriverDocuments(load);
+  const paperworkComplete = hasRequiredDriverDocuments(load);
+
+  return (
+    <article className="driver-load-card">
+      <div className="driver-load-card-header">
+        <div>
+          <span className="driver-card-kicker">Load {load.id}</span>
+          <h3>{load.referenceNumber || load.poNumber || load.bookingNumber || 'No reference'}</h3>
+        </div>
+        <span className={`driver-status-pill status-${getDriverStatusClass(load.status)}`}>
+          {load.status || 'Assigned'}
+        </span>
+      </div>
+
+      <div className="driver-info-grid">
+        <div className="driver-info-item wide">
+          <span>Pickup</span>
+          {load.pickup ? (
+            <a href={getGoogleMapsLink(load.pickup)} target="_blank" rel="noopener noreferrer">
+              {load.pickup}
+            </a>
+          ) : (
+            <strong>-</strong>
+          )}
+        </div>
+        <div className="driver-info-item wide">
+          <span>Delivery</span>
+          {load.delivery ? (
+            <a href={getGoogleMapsLink(load.delivery)} target="_blank" rel="noopener noreferrer">
+              {load.delivery}
+            </a>
+          ) : (
+            <strong>-</strong>
+          )}
+        </div>
+        <div className="driver-info-item">
+          <span>Appointment</span>
+          <strong>{formatAppointmentTime(load.appointmentTime)}</strong>
+        </div>
+        <div className="driver-info-item">
+          <span>Container</span>
+          <strong>{load.containerNumber || '-'}</strong>
+        </div>
+        <div className="driver-info-item">
+          <span>Size</span>
+          <strong>{load.containerSize || '-'}</strong>
+        </div>
+        <div className="driver-info-item">
+          <span>Pay</span>
+          <strong>{load.driverRate ? formatMoney(parseMoney(load.driverRate)) : '-'}</strong>
+        </div>
+        <div className="driver-info-item">
+          <span>Reservation</span>
+          <strong>{load.reservationNumber || '-'}</strong>
+        </div>
+        <div className="driver-info-item">
+          <span>Return</span>
+          <strong>{load.returnNumber || '-'}</strong>
+        </div>
+      </div>
+
+      {load.returnLocation && (
+        <a
+          className="driver-map-link"
+          href={getGoogleMapsLink(load.returnLocation)}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Open return location
+        </a>
+      )}
+
+      <div className="driver-container-update">
+        <label htmlFor={`container-${load.id}`}>Container Number</label>
+        <input
+          id={`container-${load.id}`}
+          type="text"
+          placeholder={load.containerNumber ? 'Update container number' : 'Enter container number'}
+          value={driverContainerByLoad[load.id] ?? ''}
+          onChange={(e) =>
+            setDriverContainerByLoad((prev) => ({
+              ...prev,
+              [load.id]: e.target.value,
+            }))
+          }
+        />
+        <button type="button" onClick={() => handleDriverContainerUpdate(load.id)}>
+          Save Container
+        </button>
+      </div>
+
+      <div className="driver-status-actions" aria-label="Load status actions">
+        <button type="button" onClick={() => handleDriverStatusUpdate(load.id, 'In Transit')}>
+          Start
+        </button>
+        <button type="button" onClick={() => handleDriverStatusUpdate(load.id, 'Dropped')}>
+          Dropped
+        </button>
+        <button
+          type="button"
+          onClick={() => handleDriverStatusUpdate(load.id, 'Delivered')}
+          disabled={!paperworkComplete}
+        >
+          Complete
+        </button>
+      </div>
+
+      <section className="driver-paperwork-panel">
+        <div className="driver-paperwork-header">
+          <div>
+            <span>Paperwork</span>
+            <strong>{paperworkComplete ? 'Ready to complete' : `Missing ${missingDocuments.join(', ')}`}</strong>
+          </div>
+          <span className={paperworkComplete ? 'status-pill active' : 'status-pill inactive'}>
+            {paperworkComplete ? 'Done' : 'Needed'}
+          </span>
+        </div>
+
+        <select
+          value={uploadDocType[load.id] || 'POD'}
+          onChange={(e) =>
+            setUploadDocType((prev) => ({
+              ...prev,
+              [load.id]: e.target.value,
+            }))
+          }
+        >
+          <option value="POD">POD</option>
+          <option value="IN EIR">IN EIR</option>
+          <option value="OUT EIR">OUT EIR</option>
+          <option value="OTHER">Other</option>
+        </select>
+
+        <div className="driver-upload-actions">
+          <label className="driver-upload-label" htmlFor={`scan-${load.id}`}>
+            Scan
+          </label>
+          <input
+            id={`scan-${load.id}`}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="driver-native-file-input"
+            onChange={(e) =>
+              setUploadFileByLoad((prev) => ({
+                ...prev,
+                [load.id]: e.target.files?.[0] || null,
+              }))
+            }
+          />
+
+          <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
+            File
+          </label>
+          <input
+            id={`upload-${load.id}`}
+            type="file"
+            accept="image/*,.pdf"
+            className="driver-native-file-input"
+            onChange={(e) =>
+              setUploadFileByLoad((prev) => ({
+                ...prev,
+                [load.id]: e.target.files?.[0] || null,
+              }))
+            }
+          />
+        </div>
+
+        <p className="driver-upload-name">{selectedFile?.name || 'No document selected'}</p>
+
+        <button type="button" className="driver-upload-submit" onClick={() => handleDriverDocumentUpload(load.id)}>
+          Upload Document
+        </button>
+      </section>
+    </article>
+  );
+};
+
+if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') {
+  return (
+    <main className="driver-mobile-shell">
+      <header className="driver-app-header">
+        <div>
+          <span className="driver-app-eyebrow">PortFlow Driver</span>
+          <h1>{currentUser?.name || 'Driver'}</h1>
+          <p>{currentUser?.email}</p>
+        </div>
+        <button type="button" onClick={handleLogout} aria-label="Log out">
+          Exit
+        </button>
+      </header>
+
+      <section className="driver-metrics-row" aria-label="Driver load summary">
+        <div>
+          <span>Active</span>
+          <strong>{driverActiveLoads.length}</strong>
+        </div>
+        <div>
+          <span>In Transit</span>
+          <strong>{driverInTransitLoads}</strong>
+        </div>
+        <div>
+          <span>Done</span>
+          <strong>{driverDeliveredLoads}</strong>
+        </div>
+      </section>
+
+      <nav className="driver-tab-bar" aria-label="Driver load tabs">
+        <button
+          type="button"
+          className={driverMobileTab === 'active' ? 'active' : ''}
+          onClick={() => setDriverMobileTab('active')}
+        >
+          Active
+        </button>
+        <button
+          type="button"
+          className={driverMobileTab === 'paperwork' ? 'active' : ''}
+          onClick={() => setDriverMobileTab('paperwork')}
+        >
+          Paperwork
+        </button>
+        <button
+          type="button"
+          className={driverMobileTab === 'completed' ? 'active' : ''}
+          onClick={() => setDriverMobileTab('completed')}
+        >
+          Completed
+        </button>
+      </nav>
+
+      {driverVisibleLoads.length === 0 ? (
+        <section className="driver-empty-state">
+          <strong>No loads here.</strong>
+          <p>{driverMobileTab === 'paperwork' ? 'Paperwork is caught up.' : 'Assigned loads will appear here.'}</p>
+        </section>
+      ) : (
+        <div className="driver-load-list">
+          {driverVisibleLoads.map((load) => (
+            <DriverLoadCard key={load.id} load={load} />
+          ))}
+        </div>
+      )}
+    </main>
+  );
+}
 
     if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') {
   return (
