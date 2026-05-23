@@ -5036,6 +5036,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     <thead>
                       <tr>
                         <th>Date</th>
+                        <th>Broker</th>
                         <th>Container</th>
                         <th>Booking #</th>
                         <th>Size</th>
@@ -5080,6 +5081,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             }}
                           >
                             <td>{load.loadDate || '-'}</td>
+                            <td>{load.customer || '-'}</td>
                             <td>
                               <button
                                 type="button"
