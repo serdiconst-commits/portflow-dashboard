@@ -152,6 +152,12 @@ const requestToken = async (config) => {
   error.diagnostics = {
     ...config.diagnostics,
     authMethodsTried: attempts.map((attempt) => attempt.authMethod).join(', '),
+    authAttempts: attempts.map((attempt) => ({
+      method: attempt.authMethod,
+      status: attempt.res.status,
+      error: attempt.data?.error || '',
+      errorDescription: attempt.data?.error_description || '',
+    })),
   };
   throw error;
 };

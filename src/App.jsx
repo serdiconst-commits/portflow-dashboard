@@ -2018,7 +2018,7 @@ const handleCheckPortHouston = async (load) => {
 
     if (!res.ok) {
       const diagnosticText = data.diagnostics
-        ? ` Using client ID ${data.diagnostics.clientId || 'missing'} from ${data.diagnostics.clientIdSource || 'unknown source'}; secret from ${data.diagnostics.clientSecretSource || 'unknown source'} (${data.diagnostics.clientSecretLength || 0} characters).`
+        ? ` Using client ID ${data.diagnostics.clientId || 'missing'} from ${data.diagnostics.clientIdSource || 'unknown source'}; secret from ${data.diagnostics.clientSecretSource || 'unknown source'} (${data.diagnostics.clientSecretLength || 0} characters).${data.diagnostics.authMethodsTried ? ` Auth methods tried: ${data.diagnostics.authMethodsTried}.` : ''}${data.diagnostics.authAttempts?.length ? ` Auth responses: ${data.diagnostics.authAttempts.map((attempt) => `${attempt.method} ${attempt.status}`).join(', ')}.` : ''}`
         : '';
       throw new Error(`${data.error || 'Failed to check Port Houston'}${diagnosticText}`);
     }
