@@ -1697,8 +1697,11 @@ useEffect(() => {
 
   const paperworkAlerts = loadsData.filter((load) => load.paperwork);
 
+const isDeliveredLoad = (load) => getLoadQuickStatusKey(load) === 'delivered';
+const hasLastFreeDay = (load) => Boolean(String(load.lfd || load.lastFreeDay || '').trim());
+
  const lfdCount = (loadsData || []).filter(
-  (load) => (load.lastFreeDay || '').trim() !== ''
+  (load) => hasLastFreeDay(load) && !isDeliveredLoad(load)
 ).length;
 
 
@@ -1720,7 +1723,7 @@ const deliveredLoads = loadsData.filter(
 );
 
 const lfdLoads = loadsData.filter(
-  (load) => (load.lastFreeDay || '').trim() !== ''
+  (load) => hasLastFreeDay(load) && !isDeliveredLoad(load)
 );
 
 const summaryCards = [
@@ -3316,7 +3319,7 @@ return (
 
 const baseFilteredLoadsData =
   dashboardFilter === 'lfd'
-    ? loadsData.filter((load) => load.lfd || load.lastFreeDay)
+    ? loadsData.filter((load) => hasLastFreeDay(load) && !isDeliveredLoad(load))
     : dashboardFilter === 'available'
     ? loadsData.filter(
         (load) => getLoadQuickStatusKey(load) === 'available'
