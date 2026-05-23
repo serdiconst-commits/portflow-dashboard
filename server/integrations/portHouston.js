@@ -56,8 +56,8 @@ const getConfig = (credentials = {}) => {
     normalizeCredentialValue(rawEnvClientSecret);
   const credentialClientId = normalizeCredentialValue(credentials.clientId || credentials.username || '');
   const credentialClientSecret = normalizeCredentialValue(credentials.clientSecret || credentials.password || '');
-  const clientId = envClientId || credentialClientId;
-  const clientSecret = envClientSecret || credentialClientSecret;
+  const clientId = credentialClientId || envClientId;
+  const clientSecret = credentialClientSecret || envClientSecret;
 
   return {
     enabled:
@@ -70,8 +70,8 @@ const getConfig = (credentials = {}) => {
     clientSecret,
     diagnostics: {
       clientId: maskValue(clientId),
-      clientIdSource: envClientId ? 'Render environment' : credentialClientId ? 'terminal credentials' : 'missing',
-      clientSecretSource: envClientSecret ? 'Render environment' : credentialClientSecret ? 'terminal credentials' : 'missing',
+      clientIdSource: credentialClientId ? 'terminal credentials' : envClientId ? 'Render environment' : 'missing',
+      clientSecretSource: credentialClientSecret ? 'terminal credentials' : envClientSecret ? 'Render environment' : 'missing',
       clientSecretLength: String(clientSecret || '').length,
     },
   };
