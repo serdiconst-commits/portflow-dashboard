@@ -330,6 +330,7 @@ db.run(`
   pickup TEXT,
   delivery TEXT,
   appointmentTime TEXT,
+  eta TEXT,
   returnLocation TEXT,
   dropType TEXT,
 dropLocation TEXT,
@@ -431,6 +432,12 @@ db.run(`ALTER TABLE loads ADD COLUMN bookingNumber TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN appointmentTime TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding appointmentTime column:', err.message);
+  }
+});
+
+db.run(`ALTER TABLE loads ADD COLUMN eta TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding eta column:', err.message);
   }
 });
 

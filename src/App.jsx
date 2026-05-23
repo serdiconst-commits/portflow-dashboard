@@ -381,6 +381,7 @@ const getMissingDriverDocuments = (load) => {
     containerNumber: '',
     bookingNumber: '',
     appointmentTime: '',
+    eta: '',
     chassisNumber: '',
     sealNumber: '',
     containerSize: '',
@@ -1858,7 +1859,8 @@ const handleAddLoad = async (e) => {
      chassisNumber: newLoad.chassisNumber || '',
       sealNumber: newLoad.sealNumber || '',
       containerNumber: newLoad.containerNumber || '',
-      bookingNumber: newLoad.bookingNumber || '',
+    bookingNumber: newLoad.bookingNumber || '',
+      eta: newLoad.eta || '',
       availabilityStatus: newLoad.availabilityStatus || 'Not Available',
       documents: [],
       paperwork: getPaperworkStatusFromDocuments([]),
@@ -1924,6 +1926,7 @@ const handleUpdateLoad = async (e) => {
     referenceNumber: editingLoad.referenceNumber || '',
     pod: editingLoad.pod || '',
     loadDate: editingLoad.loadDate || getTodayDate(),
+    eta: editingLoad.eta || '',
     truck: editingLoad.truck || getDriverTruck(editingLoad.driver),
     rate: editingLoad.rate || '$0.00',
     driverRate: editingLoad.driverRate || '$0.00',
@@ -4863,6 +4866,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   onChange={handleInputChange}
 />
 
+<label>ETA</label>
+<input
+  type="datetime-local"
+  name="eta"
+  value={normalizeDateTimeInputValue(newLoad.eta)}
+  onChange={handleInputChange}
+/>
+
 <select onChange={(e) => handleSelectSavedLocation('returnLocation', e.target.value)}>
   <option value="">Select return location</option>
   {(returnLocations || []).map((loc) => (
@@ -5033,6 +5044,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <th>Delivery</th>
                         <th>Appointment</th>
                         <th>Driver</th>
+                        <th>ETA</th>
                         <th>Status</th>
                         <th>Ref #</th>
                         <th>PO #</th>
@@ -5088,6 +5100,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <td>{shortLocation(load.delivery)}</td>
                             <td>{formatAppointmentTime(load.appointmentTime)}</td>
                             <td>{load.driver ? getDriverLabel(load.driver) : 'Not Assigned'}</td>
+                            <td>{formatAppointmentTime(load.eta)}</td>
                             <td>
                               <span className={`sheet-status ${String(displayStatus || '').toLowerCase().replace(/\s/g, '-')}`}>
                                 {displayStatus || '-'}
@@ -5488,6 +5501,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   onChange={handleEditInputChange}
 />
 
+                      <label>ETA</label>
+                      <input
+  type="datetime-local"
+  name="eta"
+  value={normalizeDateTimeInputValue(editingLoad?.eta)}
+  onChange={handleEditInputChange}
+/>
+
                       <input type="text" name="returnLocation" placeholder="Return Location" value={editingLoad.returnLocation} onChange={handleEditInputChange} />
                       <select
   name="dropType"
@@ -5631,6 +5652,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="detail-box"><span>Pick Up Location</span><strong>{selectedLoad.pickup}</strong></div>
                         <div className="detail-box"><span>Delivery Location</span><strong>{selectedLoad.delivery}</strong></div>
                         <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedLoad.appointmentTime)}</strong></div>
+                        <div className="detail-box"><span>ETA</span><strong>{formatAppointmentTime(selectedLoad.eta)}</strong></div>
                         <div className="detail-box"><span>Return Location</span><strong>{selectedLoad.returnLocation}</strong></div>
                         <div className="detail-box">
   <span>Drop Type</span>
