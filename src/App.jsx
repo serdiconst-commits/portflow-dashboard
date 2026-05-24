@@ -7055,7 +7055,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       <form className="load-form admin-form" onSubmit={handleSaveDriver}>
         <input
           type="text"
-          placeholder="Driver ID (optional, auto-generated)"
+          placeholder="Driver ID (optional, auto DRV-001)"
           value={driverForm.id}
           onChange={(e) =>
             setDriverForm((prev) => ({ ...prev, id: e.target.value }))

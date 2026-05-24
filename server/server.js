@@ -195,6 +195,18 @@ const getNextDriverId = (companyId, callback) => {
   );
 };
 
+const normalizeDriverIdInput = (value = '') => {
+  const raw = String(value || '').trim().toUpperCase();
+  if (!raw) return '';
+
+  const numberMatch = raw.match(/^(?:DRV[-\s]*)?(\d+)$/);
+  if (numberMatch) {
+    return `DRV-${String(Number.parseInt(numberMatch[1], 10)).padStart(3, '0')}`;
+  }
+
+  return raw;
+};
+
 const attachDocumentsToLoads = (loads, callback) => {
   if (!Array.isArray(loads) || loads.length === 0) {
     callback(null, []);
@@ -2068,7 +2080,12 @@ app.post('/api/drivers', authenticate, async (req, res) => {
   };
 
   if (id) {
-    createDriver(String(id).trim().toUpperCase(), false);
+    const normalizedDriverId = normalizeDriverIdInput(id);
+    if (!/^DRV-\d{3,}$/.test(normalizedDriverId)) {
+      return res.status(400).json({ error: 'Driver ID must be like DRV-001.' });
+    }
+
+    createDriver(normalizedDriverId, false);
     return;
   }
 
