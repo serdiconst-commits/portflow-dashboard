@@ -466,6 +466,10 @@ const [uploadDocType, setUploadDocType] = useState({});
 const [uploadFileByLoad, setUploadFileByLoad] = useState({});
 const uploadFileRef = useRef({});
 const [driverUploadStatusByLoad, setDriverUploadStatusByLoad] = useState({});
+const [driverCameraLoadId, setDriverCameraLoadId] = useState('');
+const [driverCameraError, setDriverCameraError] = useState('');
+const driverCameraVideoRef = useRef(null);
+const driverCameraStreamRef = useRef(null);
 const [dashboardFilter, setDashboardFilter] = useState('all');
 const [driverMobileTab, setDriverMobileTab] = useState('active');
 const [driverTrackingEnabled, setDriverTrackingEnabled] = useState(false);
@@ -769,6 +773,101 @@ const handleDriverUploadFileChange = (loadId, file, source = 'camera') => {
     [loadId]: `Ready: ${file.name || 'camera photo'} (${file.type || 'photo'}, ${file.size || 0} bytes)`,
   }));
 };
+
+const stopDriverCameraStream = () => {
+  if (driverCameraStreamRef.current) {
+    driverCameraStreamRef.current.getTracks().forEach((track) => track.stop());
+  }
+  driverCameraStreamRef.current = null;
+};
+
+const closeDriverCamera = () => {
+  stopDriverCameraStream();
+  setDriverCameraLoadId('');
+  setDriverCameraError('');
+};
+
+const openDriverCamera = (loadId) => {
+  setDriverCameraLoadId(loadId);
+  setDriverCameraError('');
+};
+
+const captureDriverCameraPhoto = () => {
+  const loadId = driverCameraLoadId;
+  const video = driverCameraVideoRef.current;
+  if (!loadId || !video || !video.videoWidth || !video.videoHeight) {
+    setDriverCameraError('Camera is not ready yet. Wait a second and try Capture again.');
+    return;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const context = canvas.getContext('2d');
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  canvas.toBlob(
+    (blob) => {
+      if (!blob) {
+        setDriverCameraError('Could not save the camera photo. Please try again.');
+        return;
+      }
+
+      const file = new File([blob], `driver-photo-${loadId}-${Date.now()}.jpg`, {
+        type: 'image/jpeg',
+        lastModified: Date.now(),
+      });
+
+      handleDriverUploadFileChange(loadId, file, 'PortFlow camera');
+      closeDriverCamera();
+    },
+    'image/jpeg',
+    0.9
+  );
+};
+
+useEffect(() => {
+  if (!driverCameraLoadId) return;
+
+  let cancelled = false;
+
+  const startCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setDriverCameraError('This phone browser does not allow in-app camera access.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+        },
+        audio: false,
+      });
+
+      if (cancelled) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      driverCameraStreamRef.current = stream;
+      if (driverCameraVideoRef.current) {
+        driverCameraVideoRef.current.srcObject = stream;
+        await driverCameraVideoRef.current.play();
+      }
+    } catch (error) {
+      console.error('Driver camera failed:', error);
+      setDriverCameraError(`Camera blocked or unavailable: ${error.message}`);
+    }
+  };
+
+  startCamera();
+
+  return () => {
+    cancelled = true;
+    stopDriverCameraStream();
+  };
+}, [driverCameraLoadId]);
 
 
 const [searchTerm, setSearchTerm] = useState('');
@@ -3932,20 +4031,9 @@ const DriverLoadCard = ({ load }) => {
         </select>
 
         <div className="driver-upload-actions">
-          <label className="driver-upload-label" htmlFor={`scan-${load.id}`}>
+          <button type="button" className="driver-upload-label driver-camera-button" onClick={() => openDriverCamera(load.id)}>
             Take Photo
-          </label>
-          <input
-            id={`scan-${load.id}`}
-            type="file"
-            accept="image/*"
-            className="driver-native-file-input"
-            onClick={(e) => {
-              e.currentTarget.value = '';
-            }}
-            onInput={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'photo picker')}
-            onChange={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'photo picker')}
-          />
+          </button>
 
           <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
             File
@@ -3987,6 +4075,22 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           Exit
         </button>
       </header>
+
+      {driverCameraLoadId && (
+        <section className="driver-camera-modal" aria-label="PortFlow camera">
+          <div className="driver-camera-box">
+            <div className="driver-camera-header">
+              <strong>Take Document Photo</strong>
+              <button type="button" onClick={closeDriverCamera}>Close</button>
+            </div>
+            <video ref={driverCameraVideoRef} autoPlay playsInline muted />
+            {driverCameraError && <p className="driver-camera-error">{driverCameraError}</p>}
+            <button type="button" className="driver-camera-capture" onClick={captureDriverCameraPhoto}>
+              Capture Photo
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="driver-metrics-row" aria-label="Driver load summary">
         <div>

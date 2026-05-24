@@ -415,9 +415,18 @@ button {
 }
 
 .driver-upload-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
   color: #111827;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 14px;
+  text-align: center;
 }
 
 .driver-native-file-input {
@@ -443,6 +452,78 @@ button {
   font-size: 12px;
   font-weight: 800;
   overflow-wrap: anywhere;
+}
+
+.driver-camera-button {
+  width: 100%;
+  cursor: pointer;
+}
+
+.driver-camera-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.82);
+}
+
+.driver-camera-box {
+  width: min(100%, 520px);
+  padding: 14px;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.driver-camera-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.driver-camera-header strong {
+  color: #111827;
+  font-size: 16px;
+}
+
+.driver-camera-header button {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #e5e7eb;
+  color: #111827;
+  font-weight: 900;
+}
+
+.driver-camera-box video {
+  display: block;
+  width: 100%;
+  max-height: 68vh;
+  border-radius: 12px;
+  background: #020617;
+  object-fit: contain;
+}
+
+.driver-camera-capture {
+  width: 100%;
+  margin-top: 12px;
+  border: none;
+  border-radius: 12px;
+  background: #0f62fe;
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.driver-camera-error {
+  margin: 10px 0 0;
+  color: #991b1b;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .driver-container-update {
