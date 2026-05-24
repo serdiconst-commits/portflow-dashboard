@@ -10,8 +10,8 @@ const customerPacketOrder = [
   'Rate Confirmation',
   'BOL',
   'POD',
-  'Out EIR',
-  'In EIR',
+  'OUT EIR',
+  'IN EIR',
   'Lumper Receipt',
   'Scale Ticket',
 ];
@@ -22,6 +22,11 @@ const getMimeTypeFromName = (fileName = '') => {
   if (lower.endsWith('.png')) return 'image/png';
   return 'application/octet-stream';
 };
+const normalizePacketCategory = (value = '') =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, ' ');
 const getCompanyLogoUrl = (company = {}) =>
   company.logoPath ? `/api/company-logo/${encodeURIComponent(path.basename(company.logoPath))}` : '';
 const portHoustonCredentialKeys = [
@@ -2264,9 +2269,24 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
         }
 
         try {
-          const orderedDocs = customerPacketOrder
-            .map((category) => docs.find((doc) => doc.category === category))
-            .filter(Boolean);
+          const docsByCategory = (docs || []).reduce((groups, doc) => {
+            const key = normalizePacketCategory(doc.category || doc.type || 'OTHER');
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(doc);
+            return groups;
+          }, {});
+
+          const orderedDocs = [];
+          customerPacketOrder.forEach((category) => {
+            const key = normalizePacketCategory(category);
+            if (docsByCategory[key]?.length) {
+              orderedDocs.push(...docsByCategory[key]);
+              delete docsByCategory[key];
+            }
+          });
+          Object.keys(docsByCategory)
+            .sort()
+            .forEach((key) => orderedDocs.push(...docsByCategory[key]));
 
           if (!orderedDocs.length) {
             return res.status(404).json({

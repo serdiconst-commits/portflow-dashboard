@@ -227,14 +227,14 @@ const getDriverLabel = (driverValue) => {
 };
 
 const getLoadQuickStatus = (load = {}) => {
-  if (['Available', 'Not Available'].includes(load.availabilityStatus)) {
-    return load.availabilityStatus;
-  }
-  return load.status || '';
+  return load.status || load.availabilityStatus || '';
 };
 
 const getLoadQuickStatusKey = (load = {}) =>
   String(getLoadQuickStatus(load) || '').trim().toLowerCase();
+
+const getAvailabilityStatusKey = (load = {}) =>
+  String(load.availabilityStatus || '').trim().toLowerCase();
 
 const normalizeDriverForStorage = (driverValue) => {
   const raw = String(driverValue || '').trim();
@@ -560,11 +560,11 @@ const [activeView, setActiveView] = useState(
 
 const [loadsData, setLoadsData] = useState([]);
 const availableLoads = loadsData.filter(
-  (load) => getLoadQuickStatusKey(load) === 'available'
+  (load) => getAvailabilityStatusKey(load) === 'available'
 );
 
 const notAvailableLoads = loadsData.filter(
-  (load) => getLoadQuickStatusKey(load) === 'not available'
+  (load) => getAvailabilityStatusKey(load) === 'not available'
 );
 
 const [selectedPresetName, setSelectedPresetName] = useState('');
@@ -3578,11 +3578,11 @@ const baseFilteredLoadsData =
     ? loadsData.filter((load) => hasAppointment(load) && !isCompletedLoad(load))
     : dashboardFilter === 'available'
     ? loadsData.filter(
-        (load) => getLoadQuickStatusKey(load) === 'available'
+        (load) => getAvailabilityStatusKey(load) === 'available'
       )
     : dashboardFilter === 'not-available'
     ? loadsData.filter(
-        (load) => getLoadQuickStatusKey(load) === 'not available'
+        (load) => getAvailabilityStatusKey(load) === 'not available'
       )
     : dashboardFilter === 'dispatched'
     ? loadsData.filter(
