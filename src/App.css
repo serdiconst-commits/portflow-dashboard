@@ -1358,6 +1358,22 @@ td {
   flex-wrap: wrap;
 }
 
+.customer-pdf-btn {
+  min-height: 42px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #dc2626;
+  color: #ffffff;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(220, 38, 38, 0.22);
+}
+
+.customer-pdf-btn:hover {
+  background: #b91c1c;
+}
+
 .document-type-select,
 .document-row-select {
   padding: 10px 12px;

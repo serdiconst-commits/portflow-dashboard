@@ -227,7 +227,18 @@ const getDriverLabel = (driverValue) => {
 };
 
 const getLoadQuickStatus = (load = {}) => {
-  return load.status || load.availabilityStatus || '';
+  const operationalStatus = String(load.status || '').trim();
+  const operationalKey = operationalStatus.toLowerCase();
+
+  if (['in transit', 'dropped', 'delivered', 'completed'].includes(operationalKey)) {
+    return operationalStatus;
+  }
+
+  if (['Available', 'Not Available'].includes(load.availabilityStatus)) {
+    return load.availabilityStatus;
+  }
+
+  return operationalStatus || '';
 };
 
 const getLoadQuickStatusKey = (load = {}) =>
@@ -6311,6 +6322,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <div className="documents-toolbar">
                             <button
   type="button"
+  className="customer-pdf-btn"
   onClick={async () => {
   try {
     const res = await fetch(
