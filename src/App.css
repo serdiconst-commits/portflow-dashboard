@@ -485,6 +485,18 @@ button {
   grid-column: 1 / -1;
 }
 
+.location-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.location-delete-btn {
+  min-width: 42px;
+  justify-content: center;
+}
+
 .danger-btn {
   color: #991b1b;
   border-color: #fecaca;

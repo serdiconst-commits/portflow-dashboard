@@ -3373,16 +3373,24 @@ const viewFilteredLoadsData =
 const filteredLoadsData = viewFilteredLoadsData.filter((load) => {
   if (!normalizedSearchTerm) return true;
   const loadName = String(load.name || '').trim().toLowerCase();
+  const loadCustomer = String(load.customer || '').trim().toLowerCase();
+  const loadDriver = String(getDriverLabel(load.driver) || load.driver || '').trim().toLowerCase();
   const loadReference = String(load.referenceNumber || '').trim().toLowerCase();
+  const loadPo = String(load.poNumber || '').trim().toLowerCase();
   const loadContainer = String(load.containerNumber || '').trim().toLowerCase();
   const loadBooking = String(load.bookingNumber || '').trim().toLowerCase();
   return (
     loadName.includes(normalizedSearchTerm) ||
+    loadCustomer.includes(normalizedSearchTerm) ||
+    loadDriver.includes(normalizedSearchTerm) ||
     loadReference.includes(normalizedSearchTerm) ||
+    loadPo.includes(normalizedSearchTerm) ||
     loadContainer.includes(normalizedSearchTerm) ||
     loadBooking.includes(normalizedSearchTerm)
   );
 });
+const selectedDeliveryLocationId =
+  (deliveryLocations || []).find((loc) => formatLocationAddress(loc) === newLoad.delivery)?.id || '';
 const activeLoads = filteredLoadsData.length;
 
 const driverInTransitLoads = filteredLoadsData.filter(
@@ -4718,28 +4726,42 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
 
 <label>Delivery Location</label>
-<select
-  value={
-    (deliveryLocations || []).find((loc) => formatLocationAddress(loc) === newLoad.delivery)?.id || ''
-  }
-  onChange={(e) => {
-    const selectedId = e.target.value;
+<div className="location-select-row">
+  <select
+    value={selectedDeliveryLocationId}
+    onChange={(e) => {
+      const selectedId = e.target.value;
 
-    if (!selectedId) {
+      if (!selectedId) {
+        setNewLoad((prev) => ({ ...prev, delivery: '' }));
+        return;
+      }
+
+      handleSelectSavedLocation('delivery', selectedId);
+    }}
+  >
+    <option value="">Select saved delivery location</option>
+    {(deliveryLocations || []).map((loc) => (
+      <option key={loc.id} value={loc.id}>
+        {getLocationOptionLabel(loc)}
+      </option>
+    ))}
+  </select>
+  <button
+    type="button"
+    className="secondary-btn compact-btn danger-btn location-delete-btn"
+    onClick={async () => {
+      if (!selectedDeliveryLocationId) return;
+      await handleDeleteLocation(selectedDeliveryLocationId);
       setNewLoad((prev) => ({ ...prev, delivery: '' }));
-      return;
-    }
-
-    handleSelectSavedLocation('delivery', selectedId);
-  }}
->
-  <option value="">Select saved delivery location</option>
-  {(deliveryLocations || []).map((loc) => (
-    <option key={loc.id} value={loc.id}>
-      {getLocationOptionLabel(loc)}
-    </option>
-  ))}
-</select>
+    }}
+    disabled={!selectedDeliveryLocationId}
+    title="Delete selected delivery location"
+    aria-label="Delete selected delivery location"
+  >
+    X
+  </button>
+</div>
 
 <div className="inline-action-row location-action-row">
   <button
@@ -4966,7 +4988,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <div className="filters-bar">
                 <input
                   type="text"
-                  placeholder="Search by container#, PO#, Driver, or reference#"
+                  placeholder="Search by container#, PO#, driver, customer, or reference#"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="search-input"
