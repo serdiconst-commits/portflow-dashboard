@@ -421,6 +421,12 @@ button {
   padding: 24px;
 }
 
+@media (min-width: 1001px) {
+  .app-shell {
+    min-width: 1280px;
+  }
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -507,16 +513,14 @@ button {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
-  margin: 0 -24px 24px;
-  padding: 0 24px 24px;
+  margin-bottom: 24px;
 }
 
 .summary-card {
   background: white;
-  border-radius: 0;
+  border-radius: 14px;
   padding: 20px;
-  box-shadow: none;
-  border: 1px solid #e5e7eb;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
 }
 
 .summary-card span {

@@ -4197,10 +4197,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 </select>
   </div>
 )}
-
-    <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px' }}>
-      <button onClick={handleLogout}>Logout</button>
-    </div>
       <header className="topbar">
         <div className="brand-block">
           {getCompanyLogoSrc() && (
@@ -4289,6 +4285,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   {showForm ? 'Close Form' : '+ Add New Load'}
 </button>
           )}
+          <button type="button" className="secondary-btn" onClick={handleLogout}>
+            Logout
+          </button>
         </div>
       </header>
 
