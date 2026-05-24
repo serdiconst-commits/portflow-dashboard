@@ -2453,6 +2453,10 @@ const updatedLoad = {
 
 const handleSaveDropDetails = async () => {
   if (!selectedLoad?.id) return;
+  if (!String(selectedLoad.dropLocation || '').trim()) {
+    alert('Please select where the container was dropped.');
+    return;
+  }
 
   const updatedLoad = {
     ...selectedLoad,
@@ -2482,6 +2486,7 @@ const handleSaveDropDetails = async () => {
     );
     await fetchLoads();
     await fetchSelectedLoadAuditLogs(data.id);
+    alert('Drop details saved.');
   } catch (error) {
     console.error('Failed to save drop details:', error);
     alert(`Failed to save drop details: ${error.message}`);
@@ -6149,9 +6154,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             </label>
                             <label>
                               <span>Drop Location</span>
-                              <input
-                                type="text"
-                                placeholder="Where was the container dropped?"
+                              <select
                                 value={selectedLoad.dropLocation || ''}
                                 onChange={(e) =>
                                   setSelectedLoad((prev) => ({
@@ -6159,7 +6162,17 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                     dropLocation: e.target.value,
                                   }))
                                 }
-                              />
+                              >
+                                <option value="">Select delivery location</option>
+                                {(deliveryLocations || []).map((loc) => {
+                                  const address = formatLocationAddress(loc);
+                                  return (
+                                    <option key={loc.id} value={address}>
+                                      {getLocationOptionLabel(loc)}
+                                    </option>
+                                  );
+                                })}
+                              </select>
                             </label>
                           </div>
                         </div>
