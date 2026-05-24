@@ -464,6 +464,8 @@ const newDeliveryAddressInputRef = useRef(null);
 const newDeliveryAutocompleteRef = useRef(null);
 const [uploadDocType, setUploadDocType] = useState({});
 const [uploadFileByLoad, setUploadFileByLoad] = useState({});
+const uploadFileRef = useRef({});
+const [driverUploadStatusByLoad, setDriverUploadStatusByLoad] = useState({});
 const [dashboardFilter, setDashboardFilter] = useState('all');
 const [driverMobileTab, setDriverMobileTab] = useState('active');
 const [driverTrackingEnabled, setDriverTrackingEnabled] = useState(false);
@@ -700,7 +702,7 @@ const handleRegister = async (e) => {
 };
 const handleDriverDocumentUpload = async (loadId) => {
   try {
-    const file = uploadFileByLoad[loadId];
+    const file = uploadFileByLoad[loadId] || uploadFileRef.current[loadId];
     const category = uploadDocType[loadId] || 'POD';
 
     if (!file) {
@@ -732,12 +734,37 @@ const handleDriverDocumentUpload = async (loadId) => {
       ...prev,
       [loadId]: null,
     }));
+    delete uploadFileRef.current[loadId];
+    setDriverUploadStatusByLoad((prev) => ({
+      ...prev,
+      [loadId]: '',
+    }));
 
     await fetchLoads();
   } catch (error) {
     console.error('Upload error:', error);
     alert(`Failed to upload document: ${error.message}`);
   }
+};
+
+const handleDriverUploadFileChange = (loadId, file, source = 'camera') => {
+  if (!file) {
+    setDriverUploadStatusByLoad((prev) => ({
+      ...prev,
+      [loadId]: `No file received from ${source}. Please try again.`,
+    }));
+    return;
+  }
+
+  uploadFileRef.current[loadId] = file;
+  setUploadFileByLoad((prev) => ({
+    ...prev,
+    [loadId]: file,
+  }));
+  setDriverUploadStatusByLoad((prev) => ({
+    ...prev,
+    [loadId]: `Ready: ${file.name || 'camera photo'} (${file.type || 'photo'}, ${file.size || 0} bytes)`,
+  }));
 };
 
 
@@ -3765,7 +3792,8 @@ const getDriverStatusClass = (status) =>
     .replace(/\s+/g, '-');
 
 const DriverLoadCard = ({ load }) => {
-  const selectedFile = uploadFileByLoad[load.id];
+  const selectedFile = uploadFileByLoad[load.id] || uploadFileRef.current[load.id];
+  const uploadStatus = driverUploadStatusByLoad[load.id];
   const missingDocuments = getMissingDriverDocuments(load);
   const paperworkComplete = hasRequiredDriverDocuments(load);
 
@@ -3910,12 +3938,11 @@ const DriverLoadCard = ({ load }) => {
             accept="image/*"
             capture="environment"
             className="driver-native-file-input"
-            onChange={(e) =>
-              setUploadFileByLoad((prev) => ({
-                ...prev,
-                [load.id]: e.target.files?.[0] || null,
-              }))
-            }
+            onClick={(e) => {
+              e.currentTarget.value = '';
+            }}
+            onInput={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'camera')}
+            onChange={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'camera')}
           />
 
           <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
@@ -3926,16 +3953,16 @@ const DriverLoadCard = ({ load }) => {
             type="file"
             accept="image/*,.pdf"
             className="driver-native-file-input"
-            onChange={(e) =>
-              setUploadFileByLoad((prev) => ({
-                ...prev,
-                [load.id]: e.target.files?.[0] || null,
-              }))
-            }
+            onClick={(e) => {
+              e.currentTarget.value = '';
+            }}
+            onInput={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'file picker')}
+            onChange={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'file picker')}
           />
         </div>
 
         <p className="driver-upload-name">{selectedFile?.name || 'No document selected'}</p>
+        {uploadStatus && <p className="driver-upload-debug">{uploadStatus}</p>}
 
         <button type="button" className="driver-upload-submit" onClick={() => handleDriverDocumentUpload(load.id)}>
           Upload Document
@@ -4399,12 +4426,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       accept="image/*"
       capture="environment"
       className="driver-native-file-input"
-      onChange={(e) =>
-        setUploadFileByLoad((prev) => ({
-          ...prev,
-          [load.id]: e.target.files?.[0] || null,
-        }))
-      }
+      onClick={(e) => {
+        e.currentTarget.value = '';
+      }}
+      onInput={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'camera')}
+      onChange={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'camera')}
     />
 
     <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
@@ -4415,18 +4441,20 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       type="file"
       accept="image/*,.pdf"
       className="driver-native-file-input"
-      onChange={(e) =>
-        setUploadFileByLoad((prev) => ({
-          ...prev,
-          [load.id]: e.target.files?.[0] || null,
-        }))
-      }
+      onClick={(e) => {
+        e.currentTarget.value = '';
+      }}
+      onInput={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'file picker')}
+      onChange={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'file picker')}
     />
   </div>
 
   <p className="driver-upload-name">
-    {uploadFileByLoad[load.id]?.name || 'No document selected'}
+    {(uploadFileByLoad[load.id] || uploadFileRef.current[load.id])?.name || 'No document selected'}
   </p>
+  {driverUploadStatusByLoad[load.id] && (
+    <p className="driver-upload-debug">{driverUploadStatusByLoad[load.id]}</p>
+  )}
 
   <button
     type="button"

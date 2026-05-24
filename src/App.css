@@ -437,6 +437,14 @@ button {
   overflow-wrap: anywhere;
 }
 
+.driver-upload-debug {
+  margin: 6px 0 0;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .driver-container-update {
   display: grid;
   grid-template-columns: 1fr;
