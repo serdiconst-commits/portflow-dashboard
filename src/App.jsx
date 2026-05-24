@@ -1763,6 +1763,15 @@ const isCompletedLoad = (load) => ['delivered', 'completed'].includes(getLoadQui
 const isDeliveredLoad = isCompletedLoad;
 const hasLastFreeDay = (load) => Boolean(String(load.lfd || load.lastFreeDay || '').trim());
 const hasAppointment = (load) => Boolean(String(load.appointmentTime || '').trim());
+const hasAssignedDriver = (load) => {
+  const rawDriver = String(load?.driver || '').trim();
+  return Boolean(rawDriver && !/^(-+\s*)?(no driver|assign later|select driver|not assigned)$/i.test(rawDriver));
+};
+
+const isDriverAssignedDispatchLoad = (load) => {
+  const status = String(load?.status || '').trim().toLowerCase();
+  return hasAssignedDriver(load) && !['in transit', 'dropped', 'delivered', 'completed'].includes(status);
+};
 
  const lfdCount = (loadsData || []).filter(
   (load) => hasLastFreeDay(load) && !isDeliveredLoad(load)
@@ -1771,7 +1780,7 @@ const hasAppointment = (load) => Boolean(String(load.appointmentTime || '').trim
 
 
 const dispatchedLoads = loadsData.filter(
-  (load) => getLoadQuickStatusKey(load) === 'dispatched'
+  (load) => isDriverAssignedDispatchLoad(load)
 );
 
 const inTransitLoads = loadsData.filter(
@@ -3448,7 +3457,7 @@ const baseFilteredLoadsData =
       )
     : dashboardFilter === 'dispatched'
     ? loadsData.filter(
-        (load) => getLoadQuickStatusKey(load) === 'dispatched'
+        (load) => isDriverAssignedDispatchLoad(load)
       )
     : dashboardFilter === 'in-transit'
     ? loadsData.filter(
