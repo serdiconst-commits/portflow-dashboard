@@ -464,6 +464,7 @@ const newDeliveryAddressInputRef = useRef(null);
 const newDeliveryAutocompleteRef = useRef(null);
 const [uploadDocType, setUploadDocType] = useState({});
 const [uploadFileByLoad, setUploadFileByLoad] = useState({});
+const [driverScanByLoad, setDriverScanByLoad] = useState({});
 const [dashboardFilter, setDashboardFilter] = useState('all');
 const [driverMobileTab, setDriverMobileTab] = useState('active');
 const [driverTrackingEnabled, setDriverTrackingEnabled] = useState(false);
@@ -732,12 +733,231 @@ const handleDriverDocumentUpload = async (loadId) => {
       ...prev,
       [loadId]: null,
     }));
+    setDriverScanByLoad((prev) => {
+      const current = prev[loadId];
+      if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl);
+      const next = { ...prev };
+      delete next[loadId];
+      return next;
+    });
 
     await fetchLoads();
   } catch (error) {
     console.error('Upload error:', error);
     alert(`Failed to upload document: ${error.message}`);
   }
+};
+
+const getImageScanFile = (file, mode = 'scanner') =>
+  new Promise((resolve, reject) => {
+    const imageUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(imageUrl);
+
+      const maxSize = 1800;
+      const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+      const sourceWidth = Math.max(1, Math.round(image.width * scale));
+      const sourceHeight = Math.max(1, Math.round(image.height * scale));
+      const sourceCanvas = document.createElement('canvas');
+      const sourceContext = sourceCanvas.getContext('2d', { willReadFrequently: true });
+
+      sourceCanvas.width = sourceWidth;
+      sourceCanvas.height = sourceHeight;
+      sourceContext.drawImage(image, 0, 0, sourceWidth, sourceHeight);
+
+      const sourceData = sourceContext.getImageData(0, 0, sourceWidth, sourceHeight);
+      const data = sourceData.data;
+      const cornerSamples = [
+        [0, 0],
+        [sourceWidth - 1, 0],
+        [0, sourceHeight - 1],
+        [sourceWidth - 1, sourceHeight - 1],
+      ];
+      const background = cornerSamples.reduce(
+        (sum, [x, y]) => {
+          const index = (y * sourceWidth + x) * 4;
+          sum.r += data[index];
+          sum.g += data[index + 1];
+          sum.b += data[index + 2];
+          return sum;
+        },
+        { r: 0, g: 0, b: 0 }
+      );
+
+      background.r /= cornerSamples.length;
+      background.g /= cornerSamples.length;
+      background.b /= cornerSamples.length;
+
+      let minX = sourceWidth;
+      let minY = sourceHeight;
+      let maxX = 0;
+      let maxY = 0;
+      const stride = Math.max(2, Math.round(Math.min(sourceWidth, sourceHeight) / 260));
+
+      for (let y = 0; y < sourceHeight; y += stride) {
+        for (let x = 0; x < sourceWidth; x += stride) {
+          const index = (y * sourceWidth + x) * 4;
+          const r = data[index];
+          const g = data[index + 1];
+          const b = data[index + 2];
+          const brightness = (r + g + b) / 3;
+          const backgroundDiff =
+            Math.abs(r - background.r) + Math.abs(g - background.g) + Math.abs(b - background.b);
+
+          if (backgroundDiff > 58 || brightness < 210) {
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+          }
+        }
+      }
+
+      const hasCrop =
+        minX < maxX &&
+        minY < maxY &&
+        (maxX - minX) * (maxY - minY) > sourceWidth * sourceHeight * 0.18;
+      const padding = Math.round(Math.min(sourceWidth, sourceHeight) * 0.025);
+      const cropX = hasCrop ? Math.max(0, minX - padding) : 0;
+      const cropY = hasCrop ? Math.max(0, minY - padding) : 0;
+      const cropWidth = hasCrop ? Math.min(sourceWidth - cropX, maxX - minX + padding * 2) : sourceWidth;
+      const cropHeight = hasCrop ? Math.min(sourceHeight - cropY, maxY - minY + padding * 2) : sourceHeight;
+
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      canvas.width = cropWidth;
+      canvas.height = cropHeight;
+      context.drawImage(sourceCanvas, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+      if (mode === 'scanner') {
+        const imageData = context.getImageData(0, 0, cropWidth, cropHeight);
+        const pixels = imageData.data;
+
+        for (let i = 0; i < pixels.length; i += 4) {
+          const gray = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
+          const boosted = gray > 176 ? 255 : gray < 118 ? 0 : gray * 1.18;
+          pixels[i] = boosted;
+          pixels[i + 1] = boosted;
+          pixels[i + 2] = boosted;
+        }
+
+        context.putImageData(imageData, 0, 0);
+      }
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error('Unable to prepare scanner image'));
+            return;
+          }
+
+          const baseName = file.name.replace(/\.[^.]+$/, '') || 'driver-document';
+          resolve(
+            new File([blob], `${baseName}-${mode}.jpg`, {
+              type: 'image/jpeg',
+              lastModified: Date.now(),
+            })
+          );
+        },
+        'image/jpeg',
+        0.9
+      );
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(imageUrl);
+      reject(new Error('Unable to read this image'));
+    };
+
+    image.src = imageUrl;
+  });
+
+const isDriverImageFile = (file) =>
+  Boolean(file?.type?.startsWith('image/') || /\.(jpg|jpeg|png|webp|heic|heif)$/i.test(file?.name || ''));
+
+const handleDriverScanMode = async (loadId, mode, sourceFile) => {
+  if (!sourceFile) return;
+
+  setUploadFileByLoad((prev) => ({
+    ...prev,
+    [loadId]: sourceFile,
+  }));
+  setDriverScanByLoad((prev) => ({
+    ...prev,
+    [loadId]: {
+      ...(prev[loadId] || {}),
+      sourceFile,
+      mode,
+      isProcessing: true,
+    },
+  }));
+
+  try {
+    const outputFile = isDriverImageFile(sourceFile)
+      ? await getImageScanFile(sourceFile, mode)
+      : sourceFile;
+    const previewUrl = isDriverImageFile(outputFile) ? URL.createObjectURL(outputFile) : '';
+
+    setUploadFileByLoad((prev) => ({
+      ...prev,
+      [loadId]: outputFile,
+    }));
+    setDriverScanByLoad((prev) => {
+      if (prev[loadId]?.previewUrl) URL.revokeObjectURL(prev[loadId].previewUrl);
+      return {
+        ...prev,
+        [loadId]: {
+          sourceFile,
+          mode,
+          previewUrl,
+          isProcessing: false,
+        },
+      };
+    });
+  } catch (error) {
+    console.error('Scan processing failed:', error);
+    setDriverScanByLoad((prev) => ({
+      ...prev,
+      [loadId]: {
+        ...(prev[loadId] || {}),
+        isProcessing: false,
+        error: 'Scanner preview was not available, but the original photo is ready to upload.',
+      },
+    }));
+    setUploadFileByLoad((prev) => ({
+      ...prev,
+      [loadId]: sourceFile,
+    }));
+  }
+};
+
+const handleDriverFileSelected = (loadId, file) => {
+  if (!file) return;
+
+  setUploadFileByLoad((prev) => ({
+    ...prev,
+    [loadId]: file,
+  }));
+
+  if (!isDriverImageFile(file)) {
+    setDriverScanByLoad((prev) => {
+      if (prev[loadId]?.previewUrl) URL.revokeObjectURL(prev[loadId].previewUrl);
+      return {
+        ...prev,
+        [loadId]: {
+          sourceFile: file,
+          mode: 'file',
+          previewUrl: '',
+          isProcessing: false,
+        },
+      };
+    });
+    return;
+  }
+
+  handleDriverScanMode(loadId, 'scanner', file);
 };
 
 
@@ -3766,6 +3986,7 @@ const getDriverStatusClass = (status) =>
 
 const DriverLoadCard = ({ load }) => {
   const selectedFile = uploadFileByLoad[load.id];
+  const scanDraft = driverScanByLoad[load.id];
   const missingDocuments = getMissingDriverDocuments(load);
   const paperworkComplete = hasRequiredDriverDocuments(load);
 
@@ -3910,12 +4131,7 @@ const DriverLoadCard = ({ load }) => {
             accept="image/*"
             capture="environment"
             className="driver-native-file-input"
-            onChange={(e) =>
-              setUploadFileByLoad((prev) => ({
-                ...prev,
-                [load.id]: e.target.files?.[0] || null,
-              }))
-            }
+            onChange={(e) => handleDriverFileSelected(load.id, e.target.files?.[0] || null)}
           />
 
           <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
@@ -3926,14 +4142,44 @@ const DriverLoadCard = ({ load }) => {
             type="file"
             accept="image/*,.pdf"
             className="driver-native-file-input"
-            onChange={(e) =>
-              setUploadFileByLoad((prev) => ({
-                ...prev,
-                [load.id]: e.target.files?.[0] || null,
-              }))
-            }
+            onChange={(e) => handleDriverFileSelected(load.id, e.target.files?.[0] || null)}
           />
         </div>
+
+        {scanDraft && (
+          <div className="driver-scan-preview">
+            <div className="driver-scan-preview-header">
+              <strong>Scanner Preview</strong>
+              <span>{scanDraft.isProcessing ? 'Preparing...' : scanDraft.mode === 'scanner' ? 'Scanner B/W' : 'Natural'}</span>
+            </div>
+            {scanDraft.previewUrl ? (
+              <img src={scanDraft.previewUrl} alt="Document scan preview" />
+            ) : (
+              <p>{scanDraft.sourceFile?.name || 'Document selected'}</p>
+            )}
+            {scanDraft.error && <p className="driver-scan-error">{scanDraft.error}</p>}
+            {scanDraft.sourceFile?.type?.startsWith('image/') && (
+              <div className="driver-scan-modes">
+                <button
+                  type="button"
+                  className={scanDraft.mode === 'scanner' ? 'active' : ''}
+                  disabled={scanDraft.isProcessing}
+                  onClick={() => handleDriverScanMode(load.id, 'scanner', scanDraft.sourceFile)}
+                >
+                  Scanner B/W
+                </button>
+                <button
+                  type="button"
+                  className={scanDraft.mode === 'natural' ? 'active' : ''}
+                  disabled={scanDraft.isProcessing}
+                  onClick={() => handleDriverScanMode(load.id, 'natural', scanDraft.sourceFile)}
+                >
+                  Natural
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         <p className="driver-upload-name">{selectedFile?.name || 'No document selected'}</p>
 

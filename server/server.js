@@ -503,14 +503,16 @@ const upload = multer({
       'image/jpeg',
       'image/png',
       'image/webp',
+      'image/heic',
+      'image/heif',
     ]);
 
-    if (allowed.has(file.mimetype)) {
+    if (allowed.has(file.mimetype) || /\.(heic|heif)$/i.test(file.originalname || '')) {
       cb(null, true);
       return;
     }
 
-    cb(new Error('Only PDF, JPG, PNG, and WebP files are allowed.'));
+    cb(new Error('Only PDF, JPG, PNG, WebP, HEIC, and HEIF files are allowed.'));
   },
 });
 
@@ -2515,7 +2517,7 @@ app.post('/api/loads/:id/documents', authenticate, upload.array('files'), async 
 
       const isImage =
         savedMimeType.startsWith('image/') ||
-        /\.(jpg|jpeg|png|webp)$/i.test(f.originalname);
+        /\.(jpg|jpeg|png|webp|heic|heif)$/i.test(f.originalname);
 
       // 👉 CONVERT IMAGE TO PDF
       if (isImage) {
@@ -2534,11 +2536,46 @@ app.post('/api/loads/:id/documents', authenticate, upload.array('files'), async 
             .toBuffer();
         } catch (scanErr) {
           console.error('Document scan cleanup failed, using original image:', scanErr.message);
-          imageBuffer = await sharp(f.path)
-            .rotate()
-            .resize({ width: 1700, height: 2200, fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 90 })
-            .toBuffer();
+          try {
+            imageBuffer = await sharp(f.path)
+              .rotate()
+              .resize({ width: 1700, height: 2200, fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 90 })
+              .toBuffer();
+          } catch (fallbackErr) {
+            console.error('Document image conversion failed, keeping original upload:', fallbackErr.message);
+            imageBuffer = null;
+          }
+        }
+
+        if (!imageBuffer) {
+          const originalSize = fs.existsSync(savedPath)
+            ? `${(fs.statSync(savedPath).size / 1024).toFixed(1)} KB`
+            : `${f.size || 0} bytes`;
+          docs.push({
+            id,
+            name: savedName,
+            size: originalSize,
+            type: savedMimeType,
+            category,
+            url: `/uploads/${path.basename(savedPath)}`,
+          });
+
+          db.run(
+            `INSERT INTO documents (id, loadId, name, size, type, category, filePath, uploadedAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              id,
+              loadId,
+              savedName,
+              originalSize,
+              savedMimeType,
+              category,
+              savedPath,
+              new Date().toISOString(),
+            ]
+          );
+          continue;
         }
         const jpgImage = await pdfDoc.embedJpg(imageBuffer);
 
