@@ -4140,11 +4140,15 @@ const DriverLoadCard = ({ load }) => {
           <input
             id={`scan-${load.id}`}
             type="file"
-            accept="image/*,.heic,.heif"
+            accept="image/*"
             capture="environment"
             className="driver-native-file-input"
-            onInput={(e) => handleDriverFileSelected(load.id, e.currentTarget.files?.[0] || null)}
-            onChange={(e) => handleDriverFileSelected(load.id, e.currentTarget.files?.[0] || null)}
+            onChange={(e) =>
+              setUploadFileByLoad((prev) => ({
+                ...prev,
+                [load.id]: e.target.files?.[0] || null,
+              }))
+            }
           />
 
           <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
@@ -4153,55 +4157,16 @@ const DriverLoadCard = ({ load }) => {
           <input
             id={`upload-${load.id}`}
             type="file"
-            accept="image/*,.pdf,.heic,.heif"
+            accept="image/*,.pdf"
             className="driver-native-file-input"
-            onInput={(e) => handleDriverFileSelected(load.id, e.currentTarget.files?.[0] || null)}
-            onChange={(e) => handleDriverFileSelected(load.id, e.currentTarget.files?.[0] || null)}
+            onChange={(e) =>
+              setUploadFileByLoad((prev) => ({
+                ...prev,
+                [load.id]: e.target.files?.[0] || null,
+              }))
+            }
           />
         </div>
-
-        {scanDraft && (
-          <div className="driver-scan-preview">
-            <div className="driver-scan-preview-header">
-              <strong>Scanner Preview</strong>
-              <span>
-                {scanDraft.isProcessing
-                  ? 'Preparing...'
-                  : scanDraft.mode === 'scanner'
-                  ? 'Scanner B/W'
-                  : scanDraft.mode === 'natural'
-                  ? 'Natural'
-                  : 'Photo ready'}
-              </span>
-            </div>
-            {scanDraft.previewUrl ? (
-              <img src={scanDraft.previewUrl} alt="Document scan preview" />
-            ) : (
-              <p>{scanDraft.sourceFile?.name || 'Document selected'}</p>
-            )}
-            {scanDraft.error && <p className="driver-scan-error">{scanDraft.error}</p>}
-            {isDriverImageFile(scanDraft.sourceFile) && (
-              <div className="driver-scan-modes">
-                <button
-                  type="button"
-                  className={scanDraft.mode === 'scanner' ? 'active' : ''}
-                  disabled={scanDraft.isProcessing}
-                  onClick={() => handleDriverScanMode(load.id, 'scanner', scanDraft.sourceFile)}
-                >
-                  Scanner B/W
-                </button>
-                <button
-                  type="button"
-                  className={scanDraft.mode === 'natural' ? 'active' : ''}
-                  disabled={scanDraft.isProcessing}
-                  onClick={() => handleDriverScanMode(load.id, 'natural', scanDraft.sourceFile)}
-                >
-                  Natural
-                </button>
-              </div>
-            )}
-          </div>
-        )}
 
         <p className="driver-upload-name">{selectedFile?.name || 'No document selected'}</p>
 
