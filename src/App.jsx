@@ -4163,12 +4163,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   return (
   <div className="app-shell">
      {fullAccessRoles.has(getNormalizedRole(currentUser?.role)) && (
-     <div className="view-toggle">
-      <button type="button" onClick={() => setUserRole('driver')}>
+     <div className="view-toggle portal-toggle">
+      <button type="button" className="toggle-btn" onClick={() => setUserRole('driver')}>
         Driver View
       </button>
 
-      <button type="button" onClick={() => setUserRole('dispatcher')}>
+      <button type="button" className="toggle-btn" onClick={() => setUserRole('dispatcher')}>
         Dispatcher View
       </button>
     </div>
