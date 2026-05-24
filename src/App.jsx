@@ -1698,8 +1698,10 @@ useEffect(() => {
 
   const paperworkAlerts = loadsData.filter((load) => load.paperwork);
 
-const isDeliveredLoad = (load) => getLoadQuickStatusKey(load) === 'delivered';
+const isCompletedLoad = (load) => ['delivered', 'completed'].includes(getLoadQuickStatusKey(load));
+const isDeliveredLoad = isCompletedLoad;
 const hasLastFreeDay = (load) => Boolean(String(load.lfd || load.lastFreeDay || '').trim());
+const hasAppointment = (load) => Boolean(String(load.appointmentTime || '').trim());
 
  const lfdCount = (loadsData || []).filter(
   (load) => hasLastFreeDay(load) && !isDeliveredLoad(load)
@@ -1727,11 +1729,16 @@ const lfdLoads = loadsData.filter(
   (load) => hasLastFreeDay(load) && !isDeliveredLoad(load)
 );
 
+const appointmentLoads = loadsData.filter(
+  (load) => hasAppointment(load) && !isCompletedLoad(load)
+);
+
 const summaryCards = [
   { title: 'Dispatched', value: dispatchedLoads.length, filter: 'dispatched' },
   { title: 'In Transit', value: inTransitLoads.length, filter: 'in-transit' },
   { title: 'Dropped', value: droppedLoads.length, filter: 'dropped' },
   { title: 'Delivered', value: deliveredLoads.length, filter: 'delivered' },
+  { title: 'Appointments', value: appointmentLoads.length, filter: 'appointments' },
   { title: 'LFD', value: lfdLoads.length, filter: 'lfd' },
   { title: 'Available', value: availableLoads.length, filter: 'available' },
   { title: 'Not Available', value: notAvailableLoads.length, filter: 'not-available' },
@@ -3368,6 +3375,8 @@ return (
 const baseFilteredLoadsData =
   dashboardFilter === 'lfd'
     ? loadsData.filter((load) => hasLastFreeDay(load) && !isDeliveredLoad(load))
+    : dashboardFilter === 'appointments'
+    ? loadsData.filter((load) => hasAppointment(load) && !isCompletedLoad(load))
     : dashboardFilter === 'available'
     ? loadsData.filter(
         (load) => getLoadQuickStatusKey(load) === 'available'

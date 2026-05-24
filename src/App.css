@@ -423,7 +423,7 @@ button {
 
 @media (min-width: 1001px) {
   .app-shell {
-    min-width: 1840px;
+    min-width: 1740px;
   }
 }
 
@@ -542,7 +542,7 @@ button {
 
 @media (min-width: 1001px) {
   .dashboard-grid {
-    grid-template-columns: minmax(1120px, 1.1fr) minmax(620px, 0.9fr);
+    grid-template-columns: minmax(1120px, 1fr) minmax(520px, 0.65fr);
   }
 }
 
@@ -2044,6 +2044,10 @@ button:disabled {
 
 .card-lfd {
   border-left: 5px solid #f97316;
+}
+
+.card-appointments {
+  border-left: 5px solid #06b6d4;
 }
 .active-summary-card {
   border: 2px solid #2563eb;
