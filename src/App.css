@@ -507,14 +507,16 @@ button {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
-  margin-bottom: 24px;
+  margin: 0 -24px 24px;
+  padding: 0 24px 24px;
 }
 
 .summary-card {
   background: white;
-  border-radius: 14px;
+  border-radius: 0;
   padding: 20px;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  box-shadow: none;
+  border: 1px solid #e5e7eb;
 }
 
 .summary-card span {
@@ -558,6 +560,11 @@ button {
   margin: 0;
 }
 
+.compact-header {
+  align-items: flex-start;
+  gap: 12px;
+}
+
 .panel-subtitle {
   margin: 4px 0 0;
   color: #6b7280;
@@ -576,8 +583,45 @@ button {
   margin-bottom: 2px;
 }
 
+.drop-details-panel {
+  grid-column: 1 / -1;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid #fcd34d;
+  background: #fffbeb;
+}
+
+.drop-details-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(240px, 1fr);
+  gap: 12px;
+}
+
+.drop-details-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #4b5563;
+}
+
+.drop-details-grid input,
+.drop-details-grid select {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  font: inherit;
+}
+
 @media (max-width: 700px) {
   .load-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .drop-details-grid {
     grid-template-columns: 1fr;
   }
 }

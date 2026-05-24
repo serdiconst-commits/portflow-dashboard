@@ -2234,6 +2234,43 @@ const updatedLoad = {
   }
 };
 
+const handleSaveDropDetails = async () => {
+  if (!selectedLoad?.id) return;
+
+  const updatedLoad = {
+    ...selectedLoad,
+    status: 'Dropped',
+    dropDateTime: selectedLoad.dropDateTime || new Date().toISOString(),
+  };
+
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${updatedLoad.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(updatedLoad),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to save drop details');
+    }
+
+    const data = await res.json();
+    setSelectedLoad(data);
+    setLoadsData((prevLoads) =>
+      prevLoads.map((load) => (load.id === data.id ? data : load))
+    );
+    await fetchLoads();
+    await fetchSelectedLoadAuditLogs(data.id);
+  } catch (error) {
+    console.error('Failed to save drop details:', error);
+    alert(`Failed to save drop details: ${error.message}`);
+  }
+};
+
 const handleDocumentUpload = async (e) => {
   const files = Array.from(e.target.files || []);
   if (!files.length || !selectedLoad) return;
@@ -3366,7 +3403,7 @@ const viewFilteredLoadsData =
         const status = String(load.status || '').trim().toLowerCase();
         const matchesDriver = driverMatchesCurrentUser(load.driver, currentUser);
 
-        return matchesDriver && status !== 'delivered';
+        return matchesDriver && !['delivered', 'dropped'].includes(status);
       })
     : baseFilteredLoadsData;
 
@@ -3428,7 +3465,7 @@ const refreshLoadsData = async () => {
 
 const driverActiveLoads = (loadsData || []).filter((load) => {
   const status = String(load.status || '').trim().toLowerCase();
-  return driverMatchesCurrentUser(load.driver, currentUser) && status !== 'delivered';
+  return driverMatchesCurrentUser(load.driver, currentUser) && !['delivered', 'dropped'].includes(status);
 });
 
 const driverCompletedLoads = (loadsData || []).filter((load) => {
@@ -5594,6 +5631,53 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           </select>
                         </div>
                       </div>
+
+                      {getLoadQuickStatusKey(selectedLoad) === 'dropped' && (
+                        <div className="drop-details-panel">
+                          <div className="panel-header compact-header">
+                            <div>
+                              <h3>Drop Details</h3>
+                              <p className="panel-subtitle">Record where dispatch wants the container tracked after the driver drops it.</p>
+                            </div>
+                            <button type="button" className="primary-btn compact-btn" onClick={handleSaveDropDetails}>
+                              Save Drop
+                            </button>
+                          </div>
+
+                          <div className="drop-details-grid">
+                            <label>
+                              <span>Drop Type</span>
+                              <select
+                                value={selectedLoad.dropType || ''}
+                                onChange={(e) =>
+                                  setSelectedLoad((prev) => ({
+                                    ...prev,
+                                    dropType: e.target.value,
+                                  }))
+                                }
+                              >
+                                <option value="">Select Drop Type</option>
+                                <option value="Customer">Customer</option>
+                                <option value="Yard">Yard</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>Drop Location</span>
+                              <input
+                                type="text"
+                                placeholder="Where was the container dropped?"
+                                value={selectedLoad.dropLocation || ''}
+                                onChange={(e) =>
+                                  setSelectedLoad((prev) => ({
+                                    ...prev,
+                                    dropLocation: e.target.value,
+                                  }))
+                                }
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="port-check-box">
                         <div className="documents-header">
