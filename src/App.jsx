@@ -656,6 +656,9 @@ const handleLogin = async (e) => {
     }
 
     setLoginError('');
+    window.setTimeout(() => {
+      window.location.reload();
+    }, 80);
   } catch (error) {
     console.error('Login failed:', error);
     setLoginError(error.message);
@@ -3930,19 +3933,18 @@ const DriverLoadCard = ({ load }) => {
 
         <div className="driver-upload-actions">
           <label className="driver-upload-label" htmlFor={`scan-${load.id}`}>
-            Scan
+            Take Photo
           </label>
           <input
             id={`scan-${load.id}`}
             type="file"
             accept="image/*"
-            capture="environment"
             className="driver-native-file-input"
             onClick={(e) => {
               e.currentTarget.value = '';
             }}
-            onInput={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'camera')}
-            onChange={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'camera')}
+            onInput={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'photo picker')}
+            onChange={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'photo picker')}
           />
 
           <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
@@ -4418,19 +4420,18 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
   <div className="driver-upload-actions">
     <label className="driver-upload-label" htmlFor={`scan-${load.id}`}>
-      Scan with Camera
+      Take Photo
     </label>
     <input
       id={`scan-${load.id}`}
       type="file"
       accept="image/*"
-      capture="environment"
       className="driver-native-file-input"
       onClick={(e) => {
         e.currentTarget.value = '';
       }}
-      onInput={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'camera')}
-      onChange={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'camera')}
+      onInput={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'photo picker')}
+      onChange={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'photo picker')}
     />
 
     <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
