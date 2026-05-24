@@ -4036,13 +4036,13 @@ const DriverLoadCard = ({ load }) => {
           </button>
 
           <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
-            File
+            Choose File
           </label>
           <input
             id={`upload-${load.id}`}
             type="file"
             accept="image/*,.pdf"
-            className="driver-native-file-input"
+            className="driver-native-file-input driver-hidden-file-input"
             onClick={(e) => {
               e.currentTarget.value = '';
             }}

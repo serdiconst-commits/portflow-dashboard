@@ -439,6 +439,16 @@ button {
   color: #111827;
 }
 
+.driver-hidden-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 1px !important;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .driver-upload-name {
   margin: 10px 0 0;
   color: #4b5563;
