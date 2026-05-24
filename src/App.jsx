@@ -4042,12 +4042,10 @@ const DriverLoadCard = ({ load }) => {
             id={`upload-${load.id}`}
             type="file"
             accept="image/*,.pdf"
-            className="driver-native-file-input driver-hidden-file-input"
-            onClick={(e) => {
-              e.currentTarget.value = '';
-            }}
-            onInput={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'file picker')}
-            onChange={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'file picker')}
+            className="driver-native-file-input"
+            onChange={(e) =>
+              handleDriverUploadFileChange(load.id, e.target.files?.[0] || null, 'file picker')
+            }
           />
         </div>
 
@@ -4546,11 +4544,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       type="file"
       accept="image/*,.pdf"
       className="driver-native-file-input"
-      onClick={(e) => {
-        e.currentTarget.value = '';
-      }}
-      onInput={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'file picker')}
-      onChange={(e) => handleDriverUploadFileChange(load.id, e.currentTarget.files?.[0] || null, 'file picker')}
+      onChange={(e) =>
+        handleDriverUploadFileChange(load.id, e.target.files?.[0] || null, 'file picker')
+      }
     />
   </div>
 
