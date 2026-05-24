@@ -3509,55 +3509,71 @@ const handleSelectedLoadCustomerChange = (e) => {
 
 if (!authToken) {
 return (
-    <div className={isDriverApp ? 'driver-mobile-login' : ''} style={{ maxWidth: '400px', margin: '80px auto', padding: '24px' }}>
-      <h2>
-        {isDriverApp
-          ? 'PortFlow Driver'
-          : authMode === 'register'
-          ? 'Create PortFlow Account'
-          : 'PortFlow Login'}
-      </h2>
+    <div className={isDriverApp ? 'driver-mobile-login' : 'auth-shell'}>
+      <div className={isDriverApp ? '' : 'auth-card'}>
+        {!isDriverApp && (
+          <div className="auth-brand">
+            <img src="/portflow-icon-192.png" alt="PortFlow" />
+            <div>
+              <span>PortFlow</span>
+              <strong>{authMode === 'register' ? 'Create company access' : 'Dispatcher login'}</strong>
+            </div>
+          </div>
+        )}
 
-      <form onSubmit={!isDriverApp && authMode === 'register' ? handleRegister : handleLogin}>
+        <h2>
+          {isDriverApp
+            ? 'PortFlow Driver'
+            : authMode === 'register'
+            ? 'Create PortFlow Account'
+            : 'Welcome Back'}
+        </h2>
+
+        {!isDriverApp && (
+          <p className="auth-subtitle">
+            {authMode === 'register'
+              ? 'Set up the first dispatch account for your company.'
+              : 'Sign in to manage loads, drivers, documents, and dispatch updates.'}
+          </p>
+        )}
+
+      <form className={isDriverApp ? '' : 'auth-form'} onSubmit={!isDriverApp && authMode === 'register' ? handleRegister : handleLogin}>
         {!isDriverApp && authMode === 'register' && (
-          <div style={{ marginBottom: '12px' }}>
+          <div className="auth-field">
             <label>Company Name</label>
             <input
               type="text"
               value={registerName}
               onChange={(e) => setRegisterName(e.target.value)}
-              style={{ width: '100%', padding: '10px', marginTop: '4px' }}
             />
           </div>
         )}
 
-        <div style={{ marginBottom: '12px' }}>
+        <div className={isDriverApp ? '' : 'auth-field'}>
           <label>Email</label>
           <input
             type="email"
             value={loginEmail}
             onChange={(e) => setLoginEmail(e.target.value)}
-            style={{ width: '100%', padding: '10px', marginTop: '4px' }}
           />
         </div>
 
-        <div style={{ marginBottom: '12px' }}>
+        <div className={isDriverApp ? '' : 'auth-field'}>
           <label>Password</label>
           <input
             type="password"
             value={loginPassword}
             onChange={(e) => setLoginPassword(e.target.value)}
-            style={{ width: '100%', padding: '10px', marginTop: '4px' }}
           />
         </div>
 
         {loginError && (
-          <p style={{ color: 'red', marginBottom: '12px' }}>
+          <p className={isDriverApp ? 'driver-login-error' : 'auth-error'}>
             {loginError}
           </p>
         )}
 
-        <button type="submit" style={{ width: '100%', padding: '10px' }}>
+        <button type="submit" className={isDriverApp ? '' : 'auth-primary-btn'}>
           {authMode === 'register' ? 'Create Account' : 'Log In'}
         </button>
       </form>
@@ -3569,19 +3585,14 @@ return (
             setLoginError('');
             setAuthMode(authMode === 'register' ? 'login' : 'register');
           }}
-          style={{
-            width: '100%',
-            padding: '10px',
-            marginTop: '10px',
-            background: 'transparent',
-            border: '1px solid #d1d5db',
-          }}
+          className="auth-secondary-btn"
         >
           {authMode === 'register'
             ? 'Already have an account? Log in'
             : 'Create first company account'}
         </button>
       )}
+      </div>
     </div>
   );
 }
