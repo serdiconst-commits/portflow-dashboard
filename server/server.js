@@ -536,6 +536,7 @@ const authenticate = (req, res, next) => {
 const normalizeRole = (role) => String(role || '').trim().toLowerCase();
 const adminRoles = new Set(['admin', 'owner', 'carrier']);
 const staffRoles = new Set(['dispatcher', 'payroll', 'admin', 'manager']);
+const dispatchLocationRoles = new Set(['dispatcher', 'manager', ...adminRoles]);
 const requireRoles = (allowedRoles) => (req, res, next) => {
   const role = normalizeRole(req.user?.role);
   if (allowedRoles.has(role)) {
@@ -1856,6 +1857,115 @@ app.get('/api/drivers', authenticate, (req, res) => {
       }
 
       res.json(rows);
+    }
+  );
+});
+
+app.get('/api/driver-locations', authenticate, requireRoles(dispatchLocationRoles), (req, res) => {
+  const companyId = req.company.companyId;
+
+  db.all(
+    `SELECT
+       dl.*,
+       d.name AS driverName,
+       d.truck AS truck,
+       d.phone AS phone
+     FROM driver_locations dl
+     LEFT JOIN drivers d
+       ON d.id = dl.driverId
+      AND d.companyId = dl.companyId
+     WHERE dl.companyId = ?
+     ORDER BY dl.updatedAt DESC`,
+    [companyId],
+    (err, rows = []) => {
+      if (err) {
+        console.error('Error fetching driver locations:', err.message);
+        return res.status(500).json({ error: err.message });
+      }
+
+      res.json(rows);
+    }
+  );
+});
+
+app.post('/api/driver-location', authenticate, (req, res) => {
+  const role = normalizeRole(req.user?.role);
+  const companyId = req.company.companyId;
+  const driverId = String(req.user?.driverId || '').trim();
+
+  if (role !== 'driver' || !driverId) {
+    return res.status(403).json({ error: 'Only driver accounts can share location.' });
+  }
+
+  const latitude = Number(req.body?.latitude);
+  const longitude = Number(req.body?.longitude);
+  const accuracy = req.body?.accuracy == null ? null : Number(req.body.accuracy);
+  const heading = req.body?.heading == null ? null : Number(req.body.heading);
+  const speed = req.body?.speed == null ? null : Number(req.body.speed);
+  const source = String(req.body?.source || 'driver-phone').slice(0, 40);
+
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return res.status(400).json({ error: 'A valid phone location is required.' });
+  }
+
+  const updatedAt = new Date().toISOString();
+
+  db.run(
+    `INSERT INTO driver_locations (
+       driverId,
+       companyId,
+       userId,
+       latitude,
+       longitude,
+       accuracy,
+       heading,
+       speed,
+       source,
+       updatedAt
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(driverId) DO UPDATE SET
+       companyId = excluded.companyId,
+       userId = excluded.userId,
+       latitude = excluded.latitude,
+       longitude = excluded.longitude,
+       accuracy = excluded.accuracy,
+       heading = excluded.heading,
+       speed = excluded.speed,
+       source = excluded.source,
+       updatedAt = excluded.updatedAt`,
+    [
+      driverId,
+      companyId,
+      req.user?.userId || req.user?.id || '',
+      latitude,
+      longitude,
+      Number.isFinite(accuracy) ? accuracy : null,
+      Number.isFinite(heading) ? heading : null,
+      Number.isFinite(speed) ? speed : null,
+      source,
+      updatedAt,
+    ],
+    (err) => {
+      if (err) {
+        console.error('Error saving driver location:', err.message);
+        return res.status(500).json({ error: err.message });
+      }
+
+      res.json({
+        success: true,
+        driverId,
+        latitude,
+        longitude,
+        accuracy: Number.isFinite(accuracy) ? accuracy : null,
+        updatedAt,
+      });
     }
   );
 });

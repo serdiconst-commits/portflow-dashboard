@@ -47,6 +47,24 @@ db.run(`
     isActive INTEGER DEFAULT 1
   )
 `);
+db.run(`
+  CREATE TABLE IF NOT EXISTS driver_locations (
+    driverId TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    userId TEXT,
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    accuracy REAL,
+    heading REAL,
+    speed REAL,
+    source TEXT,
+    updatedAt TEXT NOT NULL
+  )
+`);
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_driver_locations_company_updated
+  ON driver_locations(companyId, updatedAt)
+`);
 // DEFAULT DRIVERS
 const defaultDrivers = [
   ['DRV-001', 'Juan Driver', 'juan@portflow.com', '1234', '104', '', 'COMP-001', 1],

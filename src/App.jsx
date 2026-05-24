@@ -261,6 +261,33 @@ const getGoogleMapsLink = (address) => {
   if (!address) return '#';
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
 };
+const getGoogleMapsCoordinateLink = (latitude, longitude) =>
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
+
+const formatRelativeTime = (value) => {
+  if (!value) return 'No update yet';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
+
+  if (diffMinutes < 1) return 'Just now';
+  if (diffMinutes === 1) return '1 min ago';
+  if (diffMinutes < 60) return `${diffMinutes} min ago`;
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours === 1) return '1 hr ago';
+  if (diffHours < 24) return `${diffHours} hrs ago`;
+
+  return date.toLocaleString([], {
+    month: '2-digit',
+    day: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
 
 const getDocumentUrl = (doc) => {
   if (!doc) return '';
@@ -439,6 +466,15 @@ const [uploadDocType, setUploadDocType] = useState({});
 const [uploadFileByLoad, setUploadFileByLoad] = useState({});
 const [dashboardFilter, setDashboardFilter] = useState('all');
 const [driverMobileTab, setDriverMobileTab] = useState('active');
+const [driverTrackingEnabled, setDriverTrackingEnabled] = useState(false);
+const [driverTrackingStatus, setDriverTrackingStatus] = useState('Location sharing is off.');
+const [driverTrackingHelp, setDriverTrackingHelp] = useState('');
+const [driverLastLocation, setDriverLastLocation] = useState(null);
+const driverWatchRef = useRef(null);
+const [liveDriverLocations, setLiveDriverLocations] = useState([]);
+const driverMapRef = useRef(null);
+const driverMapInstanceRef = useRef(null);
+const driverMapMarkersRef = useRef({});
 
 const getAddressPartsFromPlace = (place) => {
   let street = '';
@@ -1351,6 +1387,29 @@ setLoadsData(loadsWithPaperwork);
     console.error('Error loading loads:', error);
   }
 };
+
+const fetchDriverLocations = async () => {
+  if (!authToken || !roleCanAccessView(currentUser?.role, 'dispatch')) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/driver-locations`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+      cache: 'no-store',
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to fetch driver locations');
+    }
+
+    setLiveDriverLocations(Array.isArray(data) ? data : []);
+  } catch (error) {
+    console.error('Error loading driver locations:', error);
+  }
+};
   const fetchCustomers = async () => {
   if (!authToken) return;
 
@@ -1483,6 +1542,7 @@ useEffect(() => {
   fetchLocations();
   fetchDrivers();
   fetchCompanyProfile();
+  fetchDriverLocations();
 }, [authToken]);
 
 useEffect(() => {
@@ -1490,6 +1550,7 @@ useEffect(() => {
 
   const interval = setInterval(() => {
     fetchLoads();
+    fetchDriverLocations();
   }, 5000);
 
   return () => clearInterval(interval);
@@ -3472,6 +3533,125 @@ const refreshLoadsData = async () => {
   }
 };
 
+const sendDriverLocation = async (position) => {
+  if (!authToken || currentUser?.role !== 'driver') return;
+
+  const payload = {
+    latitude: position.coords.latitude,
+    longitude: position.coords.longitude,
+    accuracy: position.coords.accuracy,
+    heading: position.coords.heading,
+    speed: position.coords.speed,
+    source: isDriverApp ? 'android-driver-app' : 'driver-web',
+  };
+
+  setDriverLastLocation({
+    ...payload,
+    updatedAt: new Date().toISOString(),
+  });
+
+  try {
+    const res = await fetch(`${API_BASE}/api/driver-location`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to share location');
+    }
+
+    setDriverTrackingStatus(`Tracking on • ${formatRelativeTime(data.updatedAt)}`);
+  } catch (error) {
+    console.error('Failed to share driver location:', error);
+    setDriverTrackingStatus(`Tracking paused: ${error.message}`);
+  }
+};
+
+const stopDriverTracking = () => {
+  if (driverWatchRef.current && navigator.geolocation) {
+    navigator.geolocation.clearWatch(driverWatchRef.current);
+  }
+
+  driverWatchRef.current = null;
+  setDriverTrackingEnabled(false);
+  setDriverTrackingStatus('Location sharing is off.');
+  setDriverTrackingHelp('');
+};
+
+const startDriverTracking = () => {
+  if (!navigator.geolocation) {
+    setDriverTrackingStatus('This phone does not support location sharing.');
+    setDriverTrackingHelp('');
+    return;
+  }
+
+  if (typeof window !== 'undefined' && !window.isSecureContext) {
+    setDriverTrackingEnabled(false);
+    setDriverTrackingStatus('iPhone requires the secure HTTPS driver link to allow location.');
+    setDriverTrackingHelp('Open https://portflow-dashboard.onrender.com/driver on the phone, then tap Start again.');
+    return;
+  }
+
+  setDriverTrackingStatus('Requesting phone location permission...');
+  setDriverTrackingHelp('When the iPhone popup appears, tap Allow While Using App or Allow.');
+  setDriverTrackingEnabled(true);
+
+  const trackingOptions = {
+    enableHighAccuracy: true,
+    maximumAge: 15000,
+    timeout: 20000,
+  };
+
+  const handleTrackingError = (error) => {
+    if (driverWatchRef.current && navigator.geolocation) {
+      navigator.geolocation.clearWatch(driverWatchRef.current);
+    }
+
+    driverWatchRef.current = null;
+    setDriverTrackingEnabled(false);
+    setDriverTrackingStatus(
+      error.code === error.PERMISSION_DENIED
+        ? 'Location permission is blocked for this site.'
+        : `Location unavailable: ${error.message}`
+    );
+    setDriverTrackingHelp(
+      error.code === error.PERMISSION_DENIED
+        ? 'On iPhone: Settings > Privacy & Security > Location Services > Safari Websites > Allow or Ask Next Time. Then reopen PortFlow and tap Start.'
+        : 'Check that Location Services are on, then tap Start again.'
+    );
+  };
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      sendDriverLocation(position);
+      setDriverTrackingHelp('');
+      driverWatchRef.current = navigator.geolocation.watchPosition(
+        (nextPosition) => {
+          sendDriverLocation(nextPosition);
+        },
+        handleTrackingError,
+        trackingOptions
+      );
+    },
+    handleTrackingError,
+    trackingOptions
+  );
+};
+
+useEffect(() => {
+  return () => {
+    if (driverWatchRef.current && navigator.geolocation) {
+      navigator.geolocation.clearWatch(driverWatchRef.current);
+    }
+  };
+}, []);
+
 const driverActiveLoads = (loadsData || []).filter((load) => {
   const status = String(load.status || '').trim().toLowerCase();
   return driverMatchesCurrentUser(load.driver, currentUser) && !['delivered', 'dropped'].includes(status);
@@ -3489,6 +3669,85 @@ const driverVisibleLoads =
     : driverMobileTab === 'completed'
     ? driverCompletedLoads
     : driverActiveLoads;
+
+const activeLoadsByDriver = useMemo(() => {
+  return (loadsData || []).reduce((groups, load) => {
+    const status = String(load.status || '').trim().toLowerCase();
+    if (['delivered', 'completed'].includes(status)) return groups;
+
+    const driverId = normalizeDriverForStorage(load.driver);
+    if (!driverId) return groups;
+
+    groups[driverId] = groups[driverId] || [];
+    groups[driverId].push(load);
+    return groups;
+  }, {});
+}, [loadsData, driversList]);
+
+const trackedDriverLocations = liveDriverLocations
+  .map((location) => ({
+    ...location,
+    latitude: Number(location.latitude),
+    longitude: Number(location.longitude),
+    activeLoads: activeLoadsByDriver[location.driverId] || [],
+  }))
+  .filter((location) => Number.isFinite(location.latitude) && Number.isFinite(location.longitude));
+
+useEffect(() => {
+  if (!driverMapRef.current || !window.google?.maps || trackedDriverLocations.length === 0) return;
+
+  if (!driverMapInstanceRef.current) {
+    driverMapInstanceRef.current = new window.google.maps.Map(driverMapRef.current, {
+      center: {
+        lat: trackedDriverLocations[0].latitude,
+        lng: trackedDriverLocations[0].longitude,
+      },
+      zoom: 11,
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: true,
+    });
+  }
+
+  const bounds = new window.google.maps.LatLngBounds();
+  const activeMarkerIds = new Set();
+
+  trackedDriverLocations.forEach((location) => {
+    const position = { lat: location.latitude, lng: location.longitude };
+    activeMarkerIds.add(location.driverId);
+    bounds.extend(position);
+
+    if (!driverMapMarkersRef.current[location.driverId]) {
+      driverMapMarkersRef.current[location.driverId] = new window.google.maps.Marker({
+        map: driverMapInstanceRef.current,
+        position,
+        label: {
+          text: String(location.driverName || location.driverId || '?').slice(0, 1).toUpperCase(),
+          color: '#ffffff',
+          fontWeight: '800',
+        },
+      });
+    }
+
+    const marker = driverMapMarkersRef.current[location.driverId];
+    marker.setPosition(position);
+    marker.setTitle(`${location.driverName || location.driverId} • ${formatRelativeTime(location.updatedAt)}`);
+  });
+
+  Object.entries(driverMapMarkersRef.current).forEach(([driverId, marker]) => {
+    if (!activeMarkerIds.has(driverId)) {
+      marker.setMap(null);
+      delete driverMapMarkersRef.current[driverId];
+    }
+  });
+
+  if (trackedDriverLocations.length === 1) {
+    driverMapInstanceRef.current.setCenter(bounds.getCenter());
+    driverMapInstanceRef.current.setZoom(12);
+  } else {
+    driverMapInstanceRef.current.fitBounds(bounds, 48);
+  }
+}, [trackedDriverLocations]);
 
 const getDriverStatusClass = (status) =>
   String(status || 'assigned')
@@ -3704,6 +3963,22 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           <span>Done</span>
           <strong>{driverDeliveredLoads}</strong>
         </div>
+      </section>
+
+      <section className="driver-tracking-card">
+        <div>
+          <span>Live tracking</span>
+          <strong>{driverTrackingEnabled ? 'Sharing location' : 'Off'}</strong>
+          <p>{driverLastLocation ? `Last sent ${formatRelativeTime(driverLastLocation.updatedAt)}` : driverTrackingStatus}</p>
+          {driverTrackingHelp && <p className="driver-tracking-help">{driverTrackingHelp}</p>}
+        </div>
+        <button
+          type="button"
+          className={driverTrackingEnabled ? 'tracking-stop-btn' : ''}
+          onClick={driverTrackingEnabled ? stopDriverTracking : startDriverTracking}
+        >
+          {driverTrackingEnabled ? 'Stop' : 'Start'}
+        </button>
       </section>
 
       <nav className="driver-tab-bar" aria-label="Driver load tabs">
@@ -5022,6 +5297,60 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </div>
   ))}
 </section>
+
+          <section className="panel driver-tracking-panel">
+            <div className="panel-header compact-header">
+              <div>
+                <h3>Driver Live Tracking</h3>
+                <p className="panel-subtitle">Drivers appear here after they tap Start in the phone app.</p>
+              </div>
+              <span>{trackedDriverLocations.length} online</span>
+            </div>
+
+            {trackedDriverLocations.length > 0 ? (
+              <div className="driver-tracking-grid">
+                <div className="driver-map-canvas" ref={driverMapRef} aria-label="Driver live map" />
+                <div className="driver-location-list">
+                  {trackedDriverLocations.map((location) => {
+                    const isFresh = Date.now() - new Date(location.updatedAt).getTime() < 10 * 60 * 1000;
+                    const activeLoad = location.activeLoads[0];
+
+                    return (
+                      <article key={location.driverId} className="driver-location-row">
+                        <div>
+                          <strong>{location.driverName || getDriverLabel(location.driverId)}</strong>
+                          <span>
+                            {location.truck ? `Truck ${location.truck}` : 'Truck N/A'} • {formatRelativeTime(location.updatedAt)}
+                          </span>
+                          <span>
+                            {activeLoad
+                              ? `${activeLoad.containerNumber || activeLoad.referenceNumber || activeLoad.id} • ${activeLoad.status || 'Assigned'}`
+                              : 'No active load found'}
+                          </span>
+                        </div>
+                        <div className="driver-location-actions">
+                          <span className={isFresh ? 'live-dot fresh' : 'live-dot stale'}>
+                            {isFresh ? 'Live' : 'Stale'}
+                          </span>
+                          <a
+                            href={getGoogleMapsCoordinateLink(location.latitude, location.longitude)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Open Map
+                          </a>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <p>No driver locations yet. Ask a driver to open the driver app and tap Start under Live tracking.</p>
+              </div>
+            )}
+          </section>
 
           <main className="dashboard-grid">
             <section className="panel">

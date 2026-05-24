@@ -124,6 +124,63 @@ button {
   line-height: 1;
 }
 
+.driver-tracking-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 18px;
+  background: #eff6ff;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.08);
+}
+
+.driver-tracking-card span {
+  display: block;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.driver-tracking-card strong {
+  display: block;
+  margin-top: 3px;
+  color: #111827;
+  font-size: 17px;
+}
+
+.driver-tracking-card p {
+  margin: 3px 0 0;
+  color: #475569;
+  font-size: 12px;
+}
+
+.driver-tracking-card .driver-tracking-help {
+  max-width: 270px;
+  color: #1d4ed8;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.driver-tracking-card button {
+  flex: 0 0 auto;
+  min-width: 74px;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: #2563eb;
+  color: #ffffff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.driver-tracking-card button.tracking-stop-btn {
+  background: #991b1b;
+}
+
 .driver-tab-bar {
   position: sticky;
   top: 0;
@@ -626,12 +683,99 @@ button {
   font: inherit;
 }
 
+.driver-tracking-panel {
+  margin-bottom: 20px;
+}
+
+.driver-tracking-grid {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(320px, 0.55fr);
+  gap: 16px;
+}
+
+.driver-map-canvas {
+  min-height: 360px;
+  border: 1px solid #cbd5e1;
+  background: #e2e8f0;
+}
+
+.driver-location-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.driver-location-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+}
+
+.driver-location-row strong,
+.driver-location-row span {
+  display: block;
+}
+
+.driver-location-row strong {
+  color: #111827;
+}
+
+.driver-location-row span {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.driver-location-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.driver-location-actions a {
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.live-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.live-dot.fresh {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.live-dot.stale {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 @media (max-width: 700px) {
   .load-card-grid {
     grid-template-columns: 1fr;
   }
 
   .drop-details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .driver-tracking-grid {
     grid-template-columns: 1fr;
   }
 }
