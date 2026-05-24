@@ -957,7 +957,19 @@ const handleDriverFileSelected = (loadId, file) => {
     return;
   }
 
-  handleDriverScanMode(loadId, 'scanner', file);
+  const previewUrl = URL.createObjectURL(file);
+  setDriverScanByLoad((prev) => {
+    if (prev[loadId]?.previewUrl) URL.revokeObjectURL(prev[loadId].previewUrl);
+    return {
+      ...prev,
+      [loadId]: {
+        sourceFile: file,
+        mode: 'original',
+        previewUrl,
+        isProcessing: false,
+      },
+    };
+  });
 };
 
 
@@ -4128,10 +4140,11 @@ const DriverLoadCard = ({ load }) => {
           <input
             id={`scan-${load.id}`}
             type="file"
-            accept="image/*"
+            accept="image/*,.heic,.heif"
             capture="environment"
             className="driver-native-file-input"
-            onChange={(e) => handleDriverFileSelected(load.id, e.target.files?.[0] || null)}
+            onInput={(e) => handleDriverFileSelected(load.id, e.currentTarget.files?.[0] || null)}
+            onChange={(e) => handleDriverFileSelected(load.id, e.currentTarget.files?.[0] || null)}
           />
 
           <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
@@ -4140,9 +4153,10 @@ const DriverLoadCard = ({ load }) => {
           <input
             id={`upload-${load.id}`}
             type="file"
-            accept="image/*,.pdf"
+            accept="image/*,.pdf,.heic,.heif"
             className="driver-native-file-input"
-            onChange={(e) => handleDriverFileSelected(load.id, e.target.files?.[0] || null)}
+            onInput={(e) => handleDriverFileSelected(load.id, e.currentTarget.files?.[0] || null)}
+            onChange={(e) => handleDriverFileSelected(load.id, e.currentTarget.files?.[0] || null)}
           />
         </div>
 
@@ -4150,7 +4164,15 @@ const DriverLoadCard = ({ load }) => {
           <div className="driver-scan-preview">
             <div className="driver-scan-preview-header">
               <strong>Scanner Preview</strong>
-              <span>{scanDraft.isProcessing ? 'Preparing...' : scanDraft.mode === 'scanner' ? 'Scanner B/W' : 'Natural'}</span>
+              <span>
+                {scanDraft.isProcessing
+                  ? 'Preparing...'
+                  : scanDraft.mode === 'scanner'
+                  ? 'Scanner B/W'
+                  : scanDraft.mode === 'natural'
+                  ? 'Natural'
+                  : 'Photo ready'}
+              </span>
             </div>
             {scanDraft.previewUrl ? (
               <img src={scanDraft.previewUrl} alt="Document scan preview" />
@@ -4158,7 +4180,7 @@ const DriverLoadCard = ({ load }) => {
               <p>{scanDraft.sourceFile?.name || 'Document selected'}</p>
             )}
             {scanDraft.error && <p className="driver-scan-error">{scanDraft.error}</p>}
-            {scanDraft.sourceFile?.type?.startsWith('image/') && (
+            {isDriverImageFile(scanDraft.sourceFile) && (
               <div className="driver-scan-modes">
                 <button
                   type="button"
