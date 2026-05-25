@@ -618,6 +618,9 @@ const [portHoustonSettingsForm, setPortHoustonSettingsForm] = useState(
   buildPortHoustonCredentialForm(savedCompany || {})
 );
 const [portHoustonSettingsStatus, setPortHoustonSettingsStatus] = useState('');
+const [appNotifications, setAppNotifications] = useState([]);
+const previousLoadsRef = useRef(null);
+const driverAssignmentSeenRef = useRef(new Set());
 const [portHoustonSettingsSaving, setPortHoustonSettingsSaving] = useState('');
 
 const getCompanyLogoSrc = () => {
@@ -1484,6 +1487,129 @@ const fetchSelectedLoadAuditLogs = async (loadId) => {
     setSelectedLoadAuditLogs([]);
   }
 };
+
+const normalizeLoadedLoads = (loads = []) =>
+  loads.map((load) => ({
+    ...load,
+    documents: load.documents || [],
+    paperwork: getPaperworkStatusFromDocuments(load.documents || []),
+  }));
+
+const getLoadAlertLabel = (load = {}) =>
+  load.containerNumber || load.referenceNumber || load.poNumber || load.bookingNumber || load.id || 'load';
+
+const getDriverAssignmentAlertKey = () =>
+  `portflow-driver-assigned-alerts-${currentUser?.driverId || currentUser?.id || 'unknown'}`;
+
+const saveSeenDriverAssignments = () => {
+  if (currentUser?.role !== 'driver') return;
+  try {
+    localStorage.setItem(
+      getDriverAssignmentAlertKey(),
+      JSON.stringify(Array.from(driverAssignmentSeenRef.current))
+    );
+  } catch (error) {
+    console.error('Failed to save driver assignment alerts:', error);
+  }
+};
+
+const pushAppNotification = (type, title, message) => {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  setAppNotifications((prev) => [
+    { id, type, title, message },
+    ...prev.slice(0, 2),
+  ]);
+
+  window.setTimeout(() => {
+    setAppNotifications((prev) => prev.filter((notice) => notice.id !== id));
+  }, 12000);
+
+  if (navigator.vibrate) {
+    navigator.vibrate(type === 'driver' ? [150, 80, 150] : 120);
+  }
+};
+
+const detectLoadNotifications = (nextLoads = []) => {
+  const previousLoads = previousLoadsRef.current;
+
+  if (!currentUser) {
+    previousLoadsRef.current = nextLoads;
+    return;
+  }
+
+  if (currentUser.role === 'driver') {
+    const activeAssignedLoads = nextLoads.filter((load) => {
+      const status = String(load.status || '').trim().toLowerCase();
+      return (
+        driverMatchesCurrentUser(load.driver, currentUser) &&
+        !['delivered', 'completed', 'dropped'].includes(status)
+      );
+    });
+
+    if (!previousLoads) {
+      activeAssignedLoads.forEach((load) => driverAssignmentSeenRef.current.add(load.id));
+      saveSeenDriverAssignments();
+      previousLoadsRef.current = nextLoads;
+      return;
+    }
+
+    activeAssignedLoads.forEach((load) => {
+      if (driverAssignmentSeenRef.current.has(load.id)) return;
+
+      driverAssignmentSeenRef.current.add(load.id);
+      pushAppNotification(
+        'driver',
+        'New load assigned',
+        `${getLoadAlertLabel(load)} is now assigned to you.`
+      );
+    });
+
+    saveSeenDriverAssignments();
+  }
+
+  if (previousLoads && roleCanAccessView(currentUser.role, 'dispatch')) {
+    const previousById = previousLoads.reduce((map, load) => {
+      map[load.id] = load;
+      return map;
+    }, {});
+    const finishedStatuses = new Set(['dropped', 'delivered', 'completed']);
+
+    nextLoads.forEach((load) => {
+      const previousLoad = previousById[load.id];
+      if (!previousLoad || !hasAssignedDriver(load)) return;
+
+      const previousStatus = getLoadQuickStatusKey(previousLoad);
+      const nextStatus = getLoadQuickStatusKey(load);
+
+      if (finishedStatuses.has(previousStatus) || !finishedStatuses.has(nextStatus)) return;
+
+      const driverName = getDriverLabel(load.driver);
+      const actionText = nextStatus === 'dropped' ? 'dropped' : 'completed';
+      pushAppNotification(
+        'dispatch',
+        `${driverName} ${actionText} a load`,
+        `${getLoadAlertLabel(load)} was marked ${actionText}.`
+      );
+    });
+  }
+
+  previousLoadsRef.current = nextLoads;
+};
+
+useEffect(() => {
+  previousLoadsRef.current = null;
+  driverAssignmentSeenRef.current = new Set();
+
+  if (currentUser?.role !== 'driver') return;
+
+  try {
+    const storedIds = JSON.parse(localStorage.getItem(getDriverAssignmentAlertKey()) || '[]');
+    driverAssignmentSeenRef.current = new Set(Array.isArray(storedIds) ? storedIds : []);
+  } catch (error) {
+    console.error('Failed to load driver assignment alerts:', error);
+  }
+}, [currentUser?.id, currentUser?.driverId, currentUser?.role]);
+
 const fetchLoads = async () => {
   if (!authToken) return;
 
@@ -1504,13 +1630,10 @@ const fetchLoads = async () => {
       throw new Error('Loads response is not an array');
     }
 
-    const loadsWithPaperwork = data.map((load) => ({
-  ...load,
-  documents: load.documents || [],
-  paperwork: getPaperworkStatusFromDocuments(load.documents || []),
-}));
+    const loadsWithPaperwork = normalizeLoadedLoads(data);
 
-setLoadsData(loadsWithPaperwork);
+    detectLoadNotifications(loadsWithPaperwork);
+    setLoadsData(loadsWithPaperwork);
 
     setSelectedLoad((prev) => {
       if (loadsWithPaperwork.length === 0) return null;
@@ -3692,7 +3815,9 @@ const refreshLoadsData = async () => {
       throw new Error(data.error || 'Failed to load loads');
     }
 
-    setLoadsData(data);
+    const loadsWithPaperwork = normalizeLoadedLoads(data);
+    detectLoadNotifications(loadsWithPaperwork);
+    setLoadsData(loadsWithPaperwork);
   } catch (error) {
     console.error('Error refreshing loads:', error);
   }
@@ -3920,6 +4045,29 @@ const getDriverStatusClass = (status) =>
     .toLowerCase()
     .replace(/\s+/g, '-');
 
+const NotificationStack = () =>
+  appNotifications.length > 0 ? (
+    <div className="app-notification-stack" aria-live="polite">
+      {appNotifications.map((notice) => (
+        <section key={notice.id} className={`app-notification notice-${notice.type}`}>
+          <div>
+            <strong>{notice.title}</strong>
+            <p>{notice.message}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Dismiss notification"
+            onClick={() =>
+              setAppNotifications((prev) => prev.filter((item) => item.id !== notice.id))
+            }
+          >
+            x
+          </button>
+        </section>
+      ))}
+    </div>
+  ) : null;
+
 const DriverLoadCard = ({ load }) => {
   const selectedFile = uploadFileByLoad[load.id] || uploadFileRef.current[load.id];
   const uploadStatus = driverUploadStatusByLoad[load.id];
@@ -4100,6 +4248,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           Exit
         </button>
       </header>
+
+      <NotificationStack />
 
       {driverCameraLoadId && (
         <section className="driver-camera-modal" aria-label="PortFlow camera">
@@ -4739,6 +4889,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           </button>
         </div>
       </header>
+
+      <NotificationStack />
 
       {activeView === 'dispatch' && (
         <>
