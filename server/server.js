@@ -2851,7 +2851,7 @@ app.put('/api/loads/:id/container-number', authenticate, (req, res) => {
 
 app.put('/api/loads/:id/status', authenticate, (req, res) => {
   const loadId = req.params.id;
-  const { status, dropDateTime } = req.body;
+  const { status, dropDateTime, droppedBy } = req.body;
   const companyId = req.company.companyId;
   const isDriver = req.user?.role === 'driver';
   const driverId = req.user?.driverId;
@@ -2873,20 +2873,31 @@ app.put('/api/loads/:id/status', authenticate, (req, res) => {
   }
 
   const updateStatus = () => {
+    const effectiveDropDateTime =
+      status === 'Dropped' ? dropDateTime || new Date().toISOString() : dropDateTime || '';
+    const effectiveDroppedBy =
+      status === 'Dropped' ? String(isDriver ? driverId : droppedBy || '').trim() : '';
+
     const query = isDriver
       ? `UPDATE loads
-         SET status = ?, dropDateTime = ?
+         SET status = ?,
+             dropDateTime = ?,
+             availabilityStatus = '',
+             droppedBy = CASE WHEN ? != '' THEN ? ELSE droppedBy END
          WHERE id = ? AND companyId = ? AND driver = ?`
       : `UPDATE loads
-         SET status = ?, dropDateTime = ?
+         SET status = ?,
+             dropDateTime = ?,
+             availabilityStatus = '',
+             droppedBy = CASE WHEN ? != '' THEN ? ELSE droppedBy END
          WHERE id = ? AND companyId = ?`;
 
     const params = isDriver
-      ? [status, dropDateTime || '', loadId, companyId, driverId]
-      : [status, dropDateTime || '', loadId, companyId];
+      ? [status, effectiveDropDateTime, effectiveDroppedBy, effectiveDroppedBy, loadId, companyId, driverId]
+      : [status, effectiveDropDateTime, effectiveDroppedBy, effectiveDroppedBy, loadId, companyId];
 
     db.get(
-      `SELECT id, status, dropDateTime, containerNumber FROM loads WHERE id = ? AND companyId = ?`,
+      `SELECT id, status, dropDateTime, droppedBy, availabilityStatus, containerNumber FROM loads WHERE id = ? AND companyId = ?`,
       [loadId, companyId],
       (oldErr, oldLoad) => {
         if (oldErr) {
@@ -2906,11 +2917,15 @@ app.put('/api/loads/:id/status', authenticate, (req, res) => {
 
           const newStatusValue = {
             status,
-            dropDateTime: dropDateTime || '',
+            dropDateTime: effectiveDropDateTime,
+            droppedBy: effectiveDroppedBy || oldLoad?.droppedBy || '',
+            availabilityStatus: '',
           };
           const oldStatusValue = {
             status: oldLoad?.status || '',
             dropDateTime: oldLoad?.dropDateTime || '',
+            droppedBy: oldLoad?.droppedBy || '',
+            availabilityStatus: oldLoad?.availabilityStatus || '',
           };
 
           writeAuditLog(req, {
@@ -2923,7 +2938,14 @@ app.put('/api/loads/:id/status', authenticate, (req, res) => {
             changedFields: getChangedFields(oldStatusValue, newStatusValue),
           });
 
-          res.json({ success: true, loadId, status, dropDateTime: dropDateTime || '' });
+          res.json({
+            success: true,
+            loadId,
+            status,
+            dropDateTime: effectiveDropDateTime,
+            droppedBy: effectiveDroppedBy || oldLoad?.droppedBy || '',
+            availabilityStatus: '',
+          });
         });
       }
     );

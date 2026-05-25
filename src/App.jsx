@@ -244,6 +244,14 @@ const getLoadQuickStatus = (load = {}) => {
 const getLoadQuickStatusKey = (load = {}) =>
   String(getLoadQuickStatus(load) || '').trim().toLowerCase();
 
+const getDroppedByDriverValue = (load = {}) => {
+  const droppedBy = normalizeDriverForStorage(load.droppedBy);
+  if (droppedBy) return droppedBy;
+  return getLoadQuickStatusKey(load) === 'dropped'
+    ? normalizeDriverForStorage(load.driver)
+    : '';
+};
+
 const getAvailabilityStatusKey = (load = {}) =>
   String(load.availabilityStatus || '').trim().toLowerCase();
 
@@ -2537,8 +2545,12 @@ const handleQuickStatusChange = async (e) => {
 
 const updatedLoad = {
   ...selectedLoad,
-  status: isAvailabilityStatus ? selectedLoad.status : newStatus,
+  status: isAvailabilityStatus ? 'Dispatched' : newStatus,
   availabilityStatus: isAvailabilityStatus ? newStatus : '',
+  droppedBy:
+    !isAvailabilityStatus && newStatus === 'Dropped'
+      ? normalizeDriverForStorage(selectedLoad.driver)
+      : selectedLoad.droppedBy || '',
   dropDateTime:
     !isAvailabilityStatus && newStatus === 'Dropped'
       ? new Date().toISOString()
@@ -2584,6 +2596,8 @@ const handleSaveDropDetails = async () => {
   const updatedLoad = {
     ...selectedLoad,
     status: 'Dropped',
+    availabilityStatus: '',
+    droppedBy: normalizeDriverForStorage(selectedLoad.driver),
     dropDateTime: selectedLoad.dropDateTime || new Date().toISOString(),
   };
 
@@ -3460,7 +3474,23 @@ const handleDriverStatusUpdate = async (loadId, newStatus) => {
 
     setLoadsData((prevLoads) =>
       prevLoads.map((load) =>
-        load.id === loadId ? { ...load, status: newStatus } : load
+        load.id === loadId
+          ? {
+              ...load,
+              status: newStatus,
+              availabilityStatus: ['In Transit', 'Dropped', 'Delivered'].includes(newStatus)
+                ? ''
+                : load.availabilityStatus,
+              droppedBy:
+                newStatus === 'Dropped'
+                  ? normalizeDriverForStorage(load.driver)
+                  : load.droppedBy,
+              dropDateTime:
+                newStatus === 'Dropped'
+                  ? data.dropDateTime || new Date().toISOString()
+                  : load.dropDateTime,
+            }
+          : load
       )
     );
 
@@ -5881,7 +5911,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 </div>
    <p>📍 <strong>Drop Type:</strong><br /> {load.dropType || '-'}</p>
    <p>📍 <strong>Drop Location:</strong><br /> {load.dropLocation || '-'}</p>
-   <p>👤 <strong>Dropped By:</strong><br /> {load.droppedBy ? getDriverLabel(load.droppedBy) : '—'}</p>
+   <p>👤 <strong>Dropped By:</strong><br /> {getDroppedByDriverValue(load) ? getDriverLabel(getDroppedByDriverValue(load)) : '—'}</p>
    <p>📅 <strong>Drop Date/Time:</strong><br /> {load.dropDateTime || '-'}</p>
 <div className="load-field">
   <strong>🔁 Return</strong>
@@ -6393,8 +6423,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 <div className="detail-box">
   <span>Dropped By</span>
   <strong>
-    {selectedLoad.droppedBy
-      ? getDriverLabel(selectedLoad.droppedBy)
+    {getDroppedByDriverValue(selectedLoad)
+      ? getDriverLabel(getDroppedByDriverValue(selectedLoad))
       : '—'}
   </strong>
 </div>
@@ -6402,10 +6432,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 <div className="detail-box">
   <span>Drop Date/Time</span>
   <strong>{formatDateTime(selectedLoad.dropDateTime)}</strong>
-</div>
-<div className="detail-box">
-  <span>Current Pickup</span>
-  <strong>{selectedLoad.pickup || '—'}</strong>
 </div>
                         <div className="detail-box"><span>Container Number</span><strong>{selectedLoad.containerNumber}</strong></div>
                         <div className="detail-box"><span>Booking Number</span><strong>{selectedLoad.bookingNumber || '—'}</strong></div>
