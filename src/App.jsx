@@ -3194,6 +3194,231 @@ const handleInvoiceStatusChange = async (invoiceId, newStatus) => {
 const handleGeneratePOD = () => {
   if (!selectedInvoiceLoad) return;
 
+  const escapePodHtml = (value) =>
+    String(value || '—')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  const podField = (label, value) => `
+    <div class="field">
+      <span>${escapePodHtml(label)}</span>
+      <strong>${escapePodHtml(value)}</strong>
+    </div>
+  `;
+  const podAddress = (label, value) => `
+    <div class="address-block">
+      <span>${escapePodHtml(label)}</span>
+      <p>${escapePodHtml(value)}</p>
+    </div>
+  `;
+  const signatureImage =
+    selectedInvoiceLoad?.id && signatures[selectedInvoiceLoad.id]
+      ? `<img src="${signatures[selectedInvoiceLoad.id]}" alt="Signature" />`
+      : '';
+  const modernPodHtml = `
+    <html>
+      <head>
+        <title>Proof of Delivery - ${escapePodHtml(selectedInvoiceLoad.id)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            background: #eef2f7;
+            color: #111827;
+            font-family: Arial, Helvetica, sans-serif;
+            line-height: 1.4;
+          }
+          .page {
+            width: 8.5in;
+            min-height: 11in;
+            margin: 0 auto;
+            padding: 34px;
+            background: #ffffff;
+          }
+          .hero {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+            padding: 24px;
+            border-radius: 10px;
+            background: #0f172a;
+            color: #ffffff;
+          }
+          .brand {
+            color: #93c5fd;
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 0;
+            text-transform: uppercase;
+          }
+          h1 { margin: 6px 0 0; font-size: 32px; line-height: 1.05; }
+          .hero p { margin: 8px 0 0; color: #cbd5e1; }
+          .status-badge {
+            align-self: flex-start;
+            padding: 8px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            border-radius: 999px;
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: 800;
+            white-space: nowrap;
+          }
+          .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin: 18px 0;
+          }
+          .field,
+          .address-block,
+          .signature-card {
+            border: 1px solid #dbe4f0;
+            border-radius: 8px;
+            background: #f8fafc;
+          }
+          .field { min-height: 72px; padding: 12px; }
+          .field span,
+          .address-block span,
+          .signature-card span {
+            display: block;
+            color: #64748b;
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+          }
+          .field strong {
+            display: block;
+            margin-top: 5px;
+            color: #111827;
+            font-size: 14px;
+            overflow-wrap: anywhere;
+          }
+          .section-title {
+            margin: 22px 0 10px;
+            color: #0f172a;
+            font-size: 15px;
+            font-weight: 900;
+            text-transform: uppercase;
+          }
+          .addresses {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+          }
+          .address-block { padding: 14px; }
+          .address-block p {
+            margin: 6px 0 0;
+            color: #111827;
+            font-size: 14px;
+            font-weight: 700;
+            overflow-wrap: anywhere;
+          }
+          .signature-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 12px;
+          }
+          .signature-card { min-height: 120px; padding: 14px; }
+          .signature-line {
+            height: 58px;
+            margin-top: 20px;
+            border-bottom: 2px solid #111827;
+          }
+          .signature-card img {
+            display: block;
+            max-width: 100%;
+            max-height: 76px;
+            margin: 10px 0 0;
+            border-bottom: 2px solid #111827;
+          }
+          .footer {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            margin-top: 24px;
+            padding-top: 12px;
+            border-top: 1px solid #dbe4f0;
+            color: #64748b;
+            font-size: 11px;
+          }
+          @media print {
+            body { background: #ffffff; }
+            .page { width: auto; min-height: auto; margin: 0; padding: 24px; }
+          }
+        </style>
+      </head>
+      <body>
+        <main class="page">
+          <section class="hero">
+            <div>
+              <h1>Proof of Delivery</h1>
+              <p>Delivery confirmation for load ${escapePodHtml(selectedInvoiceLoad.id)}</p>
+            </div>
+            <div class="status-badge">POD</div>
+          </section>
+
+          <section class="meta-grid">
+            ${podField('Load ID', selectedInvoiceLoad.id)}
+            ${podField('Reference #', selectedInvoiceLoad.referenceNumber)}
+            ${podField('Load Date', selectedInvoiceLoad.loadDate)}
+            ${podField('Customer', selectedInvoiceLoad.customer)}
+            ${podField('Driver', getDriverLabel(selectedInvoiceLoad.driver))}
+            ${podField('Truck', selectedInvoiceLoad.truck)}
+            ${podField('Container', selectedInvoiceLoad.containerNumber)}
+            ${podField('Size', selectedInvoiceLoad.containerSize)}
+            ${podField('Chassis #', selectedInvoiceLoad.chassisNumber)}
+            ${podField('Seal #', selectedInvoiceLoad.sealNumber)}
+            ${podField('Booking #', selectedInvoiceLoad.bookingNumber)}
+            ${podField('POD #', selectedInvoiceLoad.pod)}
+          </section>
+
+          <h2 class="section-title">Route</h2>
+          <section class="addresses">
+            ${podAddress('Pickup', selectedInvoiceLoad.pickup)}
+            ${podAddress('Delivery', selectedInvoiceLoad.delivery)}
+            ${podAddress('Return', selectedInvoiceLoad.returnLocation)}
+          </section>
+
+          <h2 class="section-title">Delivery Confirmation</h2>
+          <section class="signature-grid">
+            <div class="signature-card">
+              <span>Delivery Date</span>
+              <div class="signature-line"></div>
+            </div>
+            <div class="signature-card">
+              <span>Receiver Name</span>
+              <div class="signature-line"></div>
+            </div>
+            <div class="signature-card">
+              <span>Receiver Signature</span>
+              <div class="signature-line"></div>
+            </div>
+            <div class="signature-card">
+              <span>Driver Signature</span>
+              ${signatureImage || '<div class="signature-line"></div>'}
+            </div>
+          </section>
+
+          <footer class="footer">
+            <span>Generated by PortFlow</span>
+            <span>${escapePodHtml(new Date().toLocaleString())}</span>
+          </footer>
+        </main>
+      </body>
+    </html>
+  `;
+
+  const modernWindow = window.open('', '_blank');
+  if (!modernWindow) return;
+
+  modernWindow.document.write(modernPodHtml);
+  modernWindow.document.close();
+  modernWindow.print();
+  return;
+
   const podHtml = `
     <html>
       <head>
@@ -7693,56 +7918,68 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 >
   Print Invoice
 </button>
-              <button onClick={handleGeneratePOD} style={{ marginLeft: '10px' }}>
-  Generate POD
-</button>
-<div style={{ marginTop: '20px' }}>
-  <h3>Signature</h3>
+              <button type="button" className="pod-generate-btn" onClick={handleGeneratePOD}>
+                Generate POD
+              </button>
 
-  <SignatureCanvas
-    ref={sigCanvas}
-    penColor="black"
-    canvasProps={{
-      width: 400,
-      height: 150,
-      className: 'sigCanvas',
-      style: { border: '1px solid #000' }
-    }}
-  />
+              <div className="signature-panel">
+                <div className="signature-panel-header">
+                  <div>
+                    <span>Signature</span>
+                    <strong>Driver POD Signature</strong>
+                  </div>
+                  {selectedInvoiceLoad?.id && signatures[selectedInvoiceLoad.id] && (
+                    <span className="status-pill active">Saved</span>
+                  )}
+                </div>
 
-  <div style={{ marginTop: '10px' }}>
-    <button onClick={() => sigCanvas.current.clear()}>
-      Clear
-    </button>
+                <SignatureCanvas
+                  ref={sigCanvas}
+                  penColor="black"
+                  canvasProps={{
+                    width: 400,
+                    height: 150,
+                    className: 'sigCanvas signature-canvas',
+                  }}
+                />
 
-<button
-  onClick={() => {
-    const dataURL = sigCanvas.current?.toDataURL();
-    if (dataURL && selectedInvoiceLoad?.id) {
-      setSignatures((prev) => ({
-        ...prev,
-        [selectedInvoiceLoad.id]: dataURL,
-      }));
-      sigCanvas.current?.clear();
-    }
-  }}
-  style={{ marginLeft: '10px' }}
->
-  Save Signature
-</button>
-  </div>
-</div>
+                <div className="signature-actions">
+                  <button
+                    type="button"
+                    className="secondary-btn compact-btn"
+                    onClick={() => sigCanvas.current?.clear()}
+                  >
+                    Clear
+                  </button>
 
-{selectedInvoiceLoad?.id && signatures[selectedInvoiceLoad.id] && (
-  <div style={{ marginTop: '10px' }}>
-    <p>Saved Signature:</p>
-    <img
-      src={signatures[selectedInvoiceLoad.id]}
-      alt="signature"
-      style={{ border: '1px solid #000', maxWidth: '400px' }}
-    />
-  </div>
-)}
+                  <button
+                    type="button"
+                    className="primary-btn compact-btn"
+                    onClick={() => {
+                      const dataURL = sigCanvas.current?.toDataURL();
+                      if (dataURL && selectedInvoiceLoad?.id) {
+                        setSignatures((prev) => ({
+                          ...prev,
+                          [selectedInvoiceLoad.id]: dataURL,
+                        }));
+                        sigCanvas.current?.clear();
+                      }
+                    }}
+                  >
+                    Save Signature
+                  </button>
+                </div>
+
+                {selectedInvoiceLoad?.id && signatures[selectedInvoiceLoad.id] && (
+                  <div className="saved-signature-preview">
+                    <span>Saved Signature</span>
+                    <img
+                      src={signatures[selectedInvoiceLoad.id]}
+                      alt="signature"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
