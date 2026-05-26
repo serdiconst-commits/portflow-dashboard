@@ -219,6 +219,16 @@ db.run(`ALTER TABLE companies ADD COLUMN logoPath TEXT`, (err) => {
     console.error('Error adding logoPath column to companies:', err.message);
   }
 });
+db.run(`ALTER TABLE companies ADD COLUMN invoiceName TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding invoiceName column to companies:', err.message);
+  }
+});
+db.run(`ALTER TABLE companies ADD COLUMN invoiceAddress TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding invoiceAddress column to companies:', err.message);
+  }
+});
 db.run(`ALTER TABLE companies ADD COLUMN portHoustonUsername TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding portHoustonUsername column to companies:', err.message);

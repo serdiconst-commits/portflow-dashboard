@@ -617,6 +617,11 @@ const [currentUser, setCurrentUser] = useState(savedUser || null);
 const [company, setCompany] = useState(savedCompany || null);
 const [companyLogoUploading, setCompanyLogoUploading] = useState(false);
 const [companyLogoVersion, setCompanyLogoVersion] = useState(Date.now());
+const [invoiceBrandingForm, setInvoiceBrandingForm] = useState({
+  invoiceName: savedCompany?.invoiceName || savedCompany?.name || '',
+  invoiceAddress: savedCompany?.invoiceAddress || '',
+});
+const [invoiceBrandingStatus, setInvoiceBrandingStatus] = useState('');
 const [auditLogs, setAuditLogs] = useState([]);
 const [selectedLoadAuditLogs, setSelectedLoadAuditLogs] = useState([]);
 const [driverContainerByLoad, setDriverContainerByLoad] = useState({});
@@ -642,6 +647,13 @@ const getCompanyLogoSrc = () => {
 useEffect(() => {
   setPortHoustonSettingsForm(buildPortHoustonCredentialForm(company || {}));
 }, [company?.portHoustonCredentials]);
+
+useEffect(() => {
+  setInvoiceBrandingForm({
+    invoiceName: company?.invoiceName || company?.name || '',
+    invoiceAddress: company?.invoiceAddress || '',
+  });
+}, [company?.invoiceName, company?.invoiceAddress, company?.name]);
 
 const handleLogin = async (e) => {
   e.preventDefault();
@@ -1356,6 +1368,35 @@ const handleCompanyLogoUpload = async (e) => {
   } finally {
     setCompanyLogoUploading(false);
     e.target.value = '';
+  }
+};
+
+const handleSaveInvoiceBranding = async (e) => {
+  e.preventDefault();
+
+  try {
+    setInvoiceBrandingStatus('');
+    const res = await fetch(`${API_BASE}/api/company/invoice-branding`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(invoiceBrandingForm),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save invoice branding');
+    }
+
+    setCompany(data);
+    localStorage.setItem('company', JSON.stringify(data));
+    setInvoiceBrandingStatus('Invoice branding saved.');
+  } catch (error) {
+    console.error('Failed to save invoice branding:', error);
+    setInvoiceBrandingStatus(`Failed to save invoice branding: ${error.message}`);
   }
 };
 
@@ -3191,8 +3232,8 @@ const handleInvoiceStatusChange = async (invoiceId, newStatus) => {
     console.error('Failed to update invoice status:', error);
   }
 };
-const handleGeneratePOD = () => {
-  if (!selectedInvoiceLoad) return;
+const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
+  if (!loadForPod) return;
 
   const escapePodHtml = (value) =>
     String(value || '—')
@@ -3214,13 +3255,13 @@ const handleGeneratePOD = () => {
     </div>
   `;
   const signatureImage =
-    selectedInvoiceLoad?.id && signatures[selectedInvoiceLoad.id]
-      ? `<img src="${signatures[selectedInvoiceLoad.id]}" alt="Signature" />`
+    loadForPod?.id && signatures[loadForPod.id]
+      ? `<img src="${signatures[loadForPod.id]}" alt="Signature" />`
       : '';
   const modernPodHtml = `
     <html>
       <head>
-        <title>Proof of Delivery - ${escapePodHtml(selectedInvoiceLoad.id)}</title>
+        <title>Proof of Delivery - ${escapePodHtml(loadForPod.id)}</title>
         <style>
           * { box-sizing: border-box; }
           body {
@@ -3355,31 +3396,31 @@ const handleGeneratePOD = () => {
           <section class="hero">
             <div>
               <h1>Proof of Delivery</h1>
-              <p>Delivery confirmation for load ${escapePodHtml(selectedInvoiceLoad.id)}</p>
+              <p>Delivery confirmation for load ${escapePodHtml(loadForPod.id)}</p>
             </div>
             <div class="status-badge">POD</div>
           </section>
 
           <section class="meta-grid">
-            ${podField('Load ID', selectedInvoiceLoad.id)}
-            ${podField('Reference #', selectedInvoiceLoad.referenceNumber)}
-            ${podField('Load Date', selectedInvoiceLoad.loadDate)}
-            ${podField('Customer', selectedInvoiceLoad.customer)}
-            ${podField('Driver', getDriverLabel(selectedInvoiceLoad.driver))}
-            ${podField('Truck', selectedInvoiceLoad.truck)}
-            ${podField('Container', selectedInvoiceLoad.containerNumber)}
-            ${podField('Size', selectedInvoiceLoad.containerSize)}
-            ${podField('Chassis #', selectedInvoiceLoad.chassisNumber)}
-            ${podField('Seal #', selectedInvoiceLoad.sealNumber)}
-            ${podField('Booking #', selectedInvoiceLoad.bookingNumber)}
-            ${podField('POD #', selectedInvoiceLoad.pod)}
+            ${podField('Load ID', loadForPod.id)}
+            ${podField('Reference #', loadForPod.referenceNumber)}
+            ${podField('Load Date', loadForPod.loadDate)}
+            ${podField('Customer', loadForPod.customer)}
+            ${podField('Driver', getDriverLabel(loadForPod.driver))}
+            ${podField('Truck', loadForPod.truck)}
+            ${podField('Container', loadForPod.containerNumber)}
+            ${podField('Size', loadForPod.containerSize)}
+            ${podField('Chassis #', loadForPod.chassisNumber)}
+            ${podField('Seal #', loadForPod.sealNumber)}
+            ${podField('Booking #', loadForPod.bookingNumber)}
+            ${podField('POD #', loadForPod.pod)}
           </section>
 
           <h2 class="section-title">Route</h2>
           <section class="addresses">
-            ${podAddress('Pickup', selectedInvoiceLoad.pickup)}
-            ${podAddress('Delivery', selectedInvoiceLoad.delivery)}
-            ${podAddress('Return', selectedInvoiceLoad.returnLocation)}
+            ${podAddress('Pickup', loadForPod.pickup)}
+            ${podAddress('Delivery', loadForPod.delivery)}
+            ${podAddress('Return', loadForPod.returnLocation)}
           </section>
 
           <h2 class="section-title">Delivery Confirmation</h2>
@@ -3403,7 +3444,7 @@ const handleGeneratePOD = () => {
           </section>
 
           <footer class="footer">
-            <span>Generated by PortFlow</span>
+            <span>Generated POD</span>
             <span>${escapePodHtml(new Date().toLocaleString())}</span>
           </footer>
         </main>
@@ -3499,11 +3540,6 @@ const handleLogout = () => {
 const handlePrintInvoice = () => {
   if (!selectedInvoiceLoad) return;
 
-  if (!selectedInvoiceLoad?.pod) {
-    alert('POD is required before printing invoice');
-    return;
-  }
-
   const invoiceNumber =
     savedInvoices.find((inv) => inv.loadId === selectedInvoiceLoad.id)?.invoiceNumber ||
     'INV-XXXX';
@@ -3512,6 +3548,9 @@ const handlePrintInvoice = () => {
   const customerContact = selectedCustomer?.contactName || '';
   const customerEmail = selectedCustomer?.email || '';
   const customerPhone = selectedCustomer?.phone || '';
+  const invoiceCompanyName = company?.invoiceName || company?.name || 'Company';
+  const invoiceCompanyAddress = company?.invoiceAddress || '';
+  const invoiceLogoSrc = getCompanyLogoSrc();
 
   const formattedRate = `$${Number(selectedInvoiceLoad.rate || 0).toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -3528,7 +3567,10 @@ const handlePrintInvoice = () => {
         <style>
           body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
           h1, h2, h3, p { margin: 0; }
-          .header { margin-bottom: 24px; }
+          .header { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+          .brand { display: flex; gap: 12px; align-items: flex-start; }
+          .brand img { width: 72px; max-height: 72px; object-fit: contain; }
+          .brand-address { margin-top: 6px; color: #4b5563; white-space: pre-line; }
           .section { margin-bottom: 20px; }
           .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
           .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 16px; }
@@ -3538,9 +3580,18 @@ const handlePrintInvoice = () => {
       </head>
       <body>
         <div class="header">
-          <h1>Invoice</h1>
-          <p>Invoice Number: ${invoiceNumber}</p>
-          <p>Load ID: ${selectedInvoiceLoad.id || '—'}</p>
+          <div class="brand">
+            ${invoiceLogoSrc ? `<img src="${invoiceLogoSrc}" alt="Company logo" />` : ''}
+            <div>
+              <h2>${invoiceCompanyName}</h2>
+              ${invoiceCompanyAddress ? `<p class="brand-address">${invoiceCompanyAddress}</p>` : ''}
+            </div>
+          </div>
+          <div>
+            <h1>Invoice</h1>
+            <p>Invoice Number: ${invoiceNumber}</p>
+            <p>Load ID: ${selectedInvoiceLoad.id || '—'}</p>
+          </div>
         </div>
 
         <div class="section grid">
@@ -6303,6 +6354,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       >
                         {portHoustonCheckingLoadId === selectedLoad.id ? 'Checking...' : 'Check Port Houston'}
                       </button>
+                      <button
+                        type="button"
+                        className="pod-generate-btn"
+                        onClick={() => handleGeneratePOD(selectedLoad)}
+                      >
+                        Generate POD
+                      </button>
                       <button className="secondary-btn" onClick={handleEditClick}>Edit Load</button>
                       <button className="danger-btn" onClick={handleDeleteLoad}>Delete Load</button>
                     </div>
@@ -7731,6 +7789,74 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             />
           </label>
         </div>
+        <form className="invoice-branding-settings" onSubmit={handleSaveInvoiceBranding}>
+          <div className="settings-row-header">
+            <div>
+              <span>Invoice Branding</span>
+              <strong>Company details shown on invoices</strong>
+            </div>
+            <button type="submit" className="primary-btn compact-btn">
+              Save Branding
+            </button>
+          </div>
+
+          <div className="invoice-branding-grid">
+            <label>
+              <span>Company Name on Invoice</span>
+              <input
+                type="text"
+                value={invoiceBrandingForm.invoiceName}
+                onChange={(e) =>
+                  setInvoiceBrandingForm((prev) => ({
+                    ...prev,
+                    invoiceName: e.target.value,
+                  }))
+                }
+                placeholder="Company name"
+              />
+            </label>
+            <label>
+              <span>Company Address on Invoice</span>
+              <textarea
+                value={invoiceBrandingForm.invoiceAddress}
+                onChange={(e) =>
+                  setInvoiceBrandingForm((prev) => ({
+                    ...prev,
+                    invoiceAddress: e.target.value,
+                  }))
+                }
+                placeholder="Street, city, state, zip"
+                rows={3}
+              />
+            </label>
+          </div>
+
+          <div className="invoice-branding-logo-row">
+            <div className="company-logo-preview">
+              {getCompanyLogoSrc() ? (
+                <img src={getCompanyLogoSrc()} alt={`${company?.name || 'Company'} invoice logo`} />
+              ) : (
+                <strong>No logo uploaded</strong>
+              )}
+            </div>
+            <label className="upload-btn">
+              {companyLogoUploading ? 'Uploading...' : 'Upload Invoice Logo'}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={handleCompanyLogoUpload}
+                hidden
+                disabled={companyLogoUploading}
+              />
+            </label>
+          </div>
+
+          {invoiceBrandingStatus && (
+            <p className={invoiceBrandingStatus.includes('saved') ? 'settings-status success' : 'settings-status error'}>
+              {invoiceBrandingStatus}
+            </p>
+          )}
+        </form>
         <div className="port-houston-settings">
           <div className="settings-row-header">
             <div>
@@ -7992,9 +8118,17 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           {selectedInvoiceLoad ? (
             <div className="invoice-preview">
               <div className="invoice-header">
+                <div className="invoice-brand-preview">
+                  {getCompanyLogoSrc() && (
+                    <img src={getCompanyLogoSrc()} alt={`${company?.name || 'Company'} invoice logo`} />
+                  )}
+                  <div>
+                    <strong>{company?.invoiceName || company?.name || 'Company'}</strong>
+                    {company?.invoiceAddress && <p>{company.invoiceAddress}</p>}
+                  </div>
+                </div>
                 <div>
                   <h2>INVOICE</h2>
-                  <p>PortFlow Dispatch</p>
                 </div>
                 <div className="invoice-meta">
                   <p>

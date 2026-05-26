@@ -84,11 +84,16 @@ const getCompanyPayload = (company = {}) => ({
   id: company.id,
   name: company.name,
   email: company.email,
+  invoiceName: company.invoiceName || company.name || '',
+  invoiceAddress: company.invoiceAddress || '',
   logoUrl: getCompanyLogoUrl(company),
   portHoustonUsername: company.portHoustonUsername || '',
   portHoustonConfigured: Object.values(getSanitizedPortHoustonCredentials(company)).some((item) => item.configured),
   portHoustonCredentials: getSanitizedPortHoustonCredentials(company),
 });
+
+const companyProfileSelect =
+  'id, name, email, logoPath, invoiceName, invoiceAddress, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -609,7 +614,7 @@ app.get('/api/company', authenticate, (req, res) => {
   const companyId = req.company.companyId;
 
   db.get(
-    `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
+    `SELECT ${companyProfileSelect} FROM companies WHERE id = ?`,
     [companyId],
     (err, company) => {
       if (err) {
@@ -622,6 +627,55 @@ app.get('/api/company', authenticate, (req, res) => {
       }
 
       res.json(getCompanyPayload(company));
+    }
+  );
+});
+
+app.put('/api/company/invoice-branding', authenticate, requireRoles(adminRoles), (req, res) => {
+  const companyId = req.company.companyId;
+  const invoiceName = String(req.body.invoiceName || '').trim().slice(0, 120);
+  const invoiceAddress = String(req.body.invoiceAddress || '').trim().slice(0, 500);
+
+  if (!invoiceName) {
+    return res.status(400).json({ error: 'Invoice company name is required.' });
+  }
+
+  db.run(
+    `UPDATE companies
+     SET invoiceName = ?, invoiceAddress = ?
+     WHERE id = ?`,
+    [invoiceName, invoiceAddress, companyId],
+    function (err) {
+      if (err) {
+        console.error('Invoice branding update error:', err.message);
+        return res.status(500).json({ error: 'Failed to save invoice branding.' });
+      }
+
+      db.get(
+        `SELECT ${companyProfileSelect} FROM companies WHERE id = ?`,
+        [companyId],
+        (lookupErr, company) => {
+          if (lookupErr || !company) {
+            console.error('Invoice branding lookup error:', lookupErr?.message);
+            return res.status(500).json({ error: 'Branding saved, but profile refresh failed.' });
+          }
+
+          writeAuditLog(req, {
+            action: 'UPDATE_INVOICE_BRANDING',
+            entityType: 'COMPANY',
+            entityId: companyId,
+            entityLabel: company.name,
+            oldValue: null,
+            newValue: { invoiceName, invoiceAddress },
+            changedFields: {
+              invoiceName: { oldValue: '', newValue: invoiceName },
+              invoiceAddress: { oldValue: '', newValue: invoiceAddress },
+            },
+          });
+
+          res.json(getCompanyPayload(company));
+        }
+      );
     }
   );
 });
@@ -688,7 +742,7 @@ app.put('/api/company/port-houston', authenticate, requireRoles(adminRoles), (re
           }
 
           db.get(
-            `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
+            `SELECT ${companyProfileSelect} FROM companies WHERE id = ?`,
             [companyId],
             (companyErr, company) => {
               if (companyErr || !company) {
@@ -739,7 +793,7 @@ app.post('/api/company/logo', authenticate, upload.single('logo'), (req, res) =>
       }
 
       db.get(
-        `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
+        `SELECT ${companyProfileSelect} FROM companies WHERE id = ?`,
         [companyId],
         (lookupErr, company) => {
           if (lookupErr || !company) {
@@ -1470,7 +1524,7 @@ app.post('/api/login', (req, res) => {
         );
 
         db.get(
-          `SELECT id, name, email, logoPath, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
+          `SELECT ${companyProfileSelect} FROM companies WHERE id = ?`,
           [user.companyId],
           (companyErr, company) => {
             if (companyErr) {
@@ -2311,6 +2365,21 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
             });
           }
 
+          const packetCompany = await new Promise((resolve) => {
+            db.get(
+              `SELECT ${companyProfileSelect} FROM companies WHERE id = ?`,
+              [companyId],
+              (companyErr, company) => {
+                if (companyErr) {
+                  console.error('Error loading company branding for packet:', companyErr.message);
+                }
+                resolve(company || {});
+              }
+            );
+          });
+          const packetCompanyName = packetCompany.invoiceName || packetCompany.name || 'Company';
+          const packetCompanyAddress = packetCompany.invoiceAddress || '';
+
           const mergedPdf = await PDFDocument.create();
 
           const invoicePdf = await PDFDocument.create();
@@ -2322,15 +2391,23 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
             thickness: 1,
           });
 
-          invoicePage.drawText('PORTFLOW DISPATCH', {
+          invoicePage.drawText(packetCompanyName, {
             x: 50,
             y: 760,
             size: 18,
           });
 
+          if (packetCompanyAddress) {
+            invoicePage.drawText(String(packetCompanyAddress).slice(0, 90), {
+              x: 50,
+              y: 742,
+              size: 10,
+            });
+          }
+
           invoicePage.drawText('INVOICE', {
             x: 50,
-            y: 730,
+            y: 710,
             size: 28,
           });
 
