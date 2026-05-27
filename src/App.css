@@ -777,12 +777,14 @@ button {
 }
 
 .app-shell {
+  width: 100%;
+  max-width: 100vw;
   padding: 24px;
 }
 
 @media (min-width: 1001px) {
   .app-shell {
-    min-width: 1740px;
+    overflow-x: hidden;
   }
 }
 
@@ -894,14 +896,14 @@ button {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 1.1fr 1.4fr;
+  grid-template-columns: minmax(0, 1.75fr) minmax(360px, 0.8fr);
   gap: 20px;
   margin-bottom: 24px;
 }
 
 @media (min-width: 1001px) {
   .dashboard-grid {
-    grid-template-columns: minmax(1120px, 1fr) minmax(520px, 0.65fr);
+    grid-template-columns: minmax(0, 1.85fr) minmax(390px, 0.75fr);
   }
 }
 
@@ -912,6 +914,7 @@ button {
 }
 
 .panel {
+  min-width: 0;
   background: white;
   border-radius: 14px;
   padding: 20px;
