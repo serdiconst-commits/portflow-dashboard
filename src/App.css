@@ -922,6 +922,8 @@ button {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 16px;
 }
 
@@ -1415,7 +1417,10 @@ td {
 .details-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
+  max-width: 100%;
 }
 
 .form-actions {
@@ -1435,7 +1440,10 @@ td {
 .details-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
+  max-width: 100%;
 }
 
 .form-actions {
@@ -1450,6 +1458,24 @@ td {
   padding: 10px 16px;
   border-radius: 10px;
   cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .panel-header {
+    align-items: flex-start;
+  }
+
+  .details-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .details-actions button,
+  .details-actions select,
+  .details-actions .pod-generate-btn {
+    flex: 1 1 150px;
+    min-width: 0;
+  }
 }
 .filters-bar {
   display: grid;
