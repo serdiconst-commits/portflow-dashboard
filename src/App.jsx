@@ -983,6 +983,7 @@ const [settlementStartDate, setSettlementStartDate] = useState('');
 const [settlementEndDate, setSettlementEndDate] = useState('');
 const [settlementNote, setSettlementNote] = useState('');
 const [settlementContainerSearch, setSettlementContainerSearch] = useState('');
+const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
 const [selectedSettlementLoadId, setSelectedSettlementLoadId] = useState('');
 const [settlementPayDrafts, setSettlementPayDrafts] = useState({});
 const [settlementPayStatus, setSettlementPayStatus] = useState('');
@@ -2147,6 +2148,17 @@ const activeOperationsLoads = (loadsData || []).filter((load) => !isCompletedLoa
 const completedAccountingLoads = (loadsData || [])
   .filter((load) => isCompletedLoad(load))
   .sort((a, b) => String(b.loadDate || '').localeCompare(String(a.loadDate || '')));
+const normalizedAccountingSearchTerm = String(accountingSearchTerm || '').trim().toLowerCase();
+const filteredAccountingLoads = normalizedAccountingSearchTerm
+  ? completedAccountingLoads.filter((load) => {
+      const container = String(load.containerNumber || '').toLowerCase();
+      const reference = String(load.referenceNumber || '').toLowerCase();
+      return (
+        container.includes(normalizedAccountingSearchTerm) ||
+        reference.includes(normalizedAccountingSearchTerm)
+      );
+    })
+  : completedAccountingLoads;
 const hasLastFreeDay = (load) => Boolean(String(load.lfd || load.lastFreeDay || '').trim());
 const hasAppointment = (load) => Boolean(String(load.appointmentTime || '').trim());
 const getRelativeDateString = (offsetDays = 0) => {
@@ -8339,7 +8351,18 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             </div>
           </div>
 
-          {completedAccountingLoads.length > 0 ? (
+          <div className="accounting-search-bar">
+            <input
+              type="text"
+              value={accountingSearchTerm}
+              onChange={(e) => setAccountingSearchTerm(e.target.value)}
+              className="search-input"
+              placeholder="Search billing by container or reference #"
+            />
+            <span>{filteredAccountingLoads.length} shown</span>
+          </div>
+
+          {filteredAccountingLoads.length > 0 ? (
             <div className="table-wrap accounting-table-wrap">
               <table>
                 <thead>
@@ -8356,7 +8379,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </tr>
                 </thead>
                 <tbody>
-                  {completedAccountingLoads.map((load) => {
+                  {filteredAccountingLoads.map((load) => {
                     const invoice = savedInvoices.find((item) => item.loadId === load.id);
                     return (
                       <tr key={load.id}>
@@ -8392,7 +8415,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             </div>
           ) : (
             <div className="empty-state">
-              <p>No completed loads in billing yet.</p>
+              <p>{completedAccountingLoads.length > 0 ? 'No completed loads match that search.' : 'No completed loads in billing yet.'}</p>
             </div>
           )}
         </section>

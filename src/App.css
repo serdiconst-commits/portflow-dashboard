@@ -2586,8 +2586,28 @@ button:disabled {
   margin-top: 0;
 }
 
+.accounting-search-bar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.accounting-search-bar span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
-  .accounting-summary-strip {
+  .accounting-summary-strip,
+  .accounting-search-bar {
     grid-template-columns: 1fr;
   }
 }
