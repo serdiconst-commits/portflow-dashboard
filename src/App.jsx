@@ -6292,7 +6292,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             )}
           </section>
 
-          <main className="dashboard-grid">
+          <main className="dashboard-grid dispatch-workspace">
             <section className="panel">
               <div className="panel-header">
                 <h3>All Loads</h3>
@@ -6605,7 +6605,19 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               </div>
             </section>
 
-            <section className="panel">
+            {selectedLoad && (
+              <button
+                type="button"
+                className="load-details-backdrop"
+                aria-label="Close load details"
+                onClick={() => {
+                  setSelectedLoad(null);
+                  setIsEditing(false);
+                }}
+              />
+            )}
+
+            <section className={`panel load-details-drawer ${selectedLoad ? 'open' : ''}`}>
               {selectedLoad ? (
                 <>
                   <div className="panel-header">
@@ -6639,6 +6651,16 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <button className="secondary-btn" onClick={handleEditClick}>Edit Load</button>
                       )}
                       <button className="danger-btn" onClick={handleDeleteLoad}>Delete Load</button>
+                      <button
+                        type="button"
+                        className="secondary-btn drawer-close-btn"
+                        onClick={() => {
+                          setSelectedLoad(null);
+                          setIsEditing(false);
+                        }}
+                      >
+                        Close
+                      </button>
                     </div>
                   </div>
 
