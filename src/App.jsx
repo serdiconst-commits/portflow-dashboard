@@ -2001,14 +2001,23 @@ useEffect(() => {
     const activeDriverId = selectedSettlementDriverId || driversList[0]?.id || '';
     const start = settlementStartDate ? new Date(`${settlementStartDate}T00:00:00`) : null;
     const end = settlementEndDate ? new Date(`${settlementEndDate}T23:59:59`) : null;
+    const getSettlementDate = (load) => {
+      const completedAt = load.dropDateTime || load.completedAt || load.deliveredAt || '';
+      if (completedAt) {
+        const completedDate = new Date(completedAt);
+        if (!Number.isNaN(completedDate.getTime())) return completedDate;
+      }
+
+      return load.loadDate ? new Date(`${load.loadDate}T12:00:00`) : null;
+    };
 
     return loadsData.filter((load) => {
       const matchesDriver = activeDriverId
         ? normalizeDriverForStorage(load.driver) === activeDriverId
         : true;
-      const loadDate = load.loadDate ? new Date(`${load.loadDate}T12:00:00`) : null;
-      const matchesStart = !start || (loadDate && loadDate >= start);
-      const matchesEnd = !end || (loadDate && loadDate <= end);
+      const settlementDate = getSettlementDate(load);
+      const matchesStart = !start || (settlementDate && settlementDate >= start);
+      const matchesEnd = !end || (settlementDate && settlementDate <= end);
       return matchesDriver && matchesStart && matchesEnd;
     });
   }, [loadsData, selectedSettlementDriverId, driversList, settlementStartDate, settlementEndDate]);
@@ -2020,7 +2029,7 @@ useEffect(() => {
   const settlementPeriodLabel =
     settlementStartDate || settlementEndDate
       ? `${settlementStartDate || 'Start'} to ${settlementEndDate || 'End'}`
-      : 'All load dates';
+      : 'All completion dates';
 
   const settlementReport = activeSettlementDriver
     ? [
@@ -2084,6 +2093,17 @@ useEffect(() => {
     setSelectedSettlementLoadId('');
   };
 
+  const getSettlementCompletionDateValue = (load) => {
+    const completedAt = load.dropDateTime || load.completedAt || load.deliveredAt || '';
+    if (completedAt) {
+      const completedTime = new Date(completedAt).getTime();
+      if (!Number.isNaN(completedTime)) return completedTime;
+    }
+
+    const loadDateTime = load.loadDate ? new Date(`${load.loadDate}T12:00:00`).getTime() : 0;
+    return Number.isNaN(loadDateTime) ? 0 : loadDateTime;
+  };
+
   /*const settlementReport = driversList.map((driver) => {
     const driverLoads = filteredSettlementLoads.filter(
       (load) => normalizeDriverForStorage(load.driver) === driver.id
@@ -2112,7 +2132,7 @@ useEffect(() => {
   });*/
 
   const settlementDetailLoads = [...filteredSettlementLoads].sort((a, b) => {
-    const dateCompare = String(a.loadDate || '').localeCompare(String(b.loadDate || ''));
+    const dateCompare = getSettlementCompletionDateValue(a) - getSettlementCompletionDateValue(b);
     if (dateCompare !== 0) return dateCompare;
     return getDriverLabel(a.driver).localeCompare(getDriverLabel(b.driver));
   });
