@@ -490,6 +490,8 @@ const [driverCameraError, setDriverCameraError] = useState('');
 const driverCameraVideoRef = useRef(null);
 const driverCameraStreamRef = useRef(null);
 const [dashboardFilter, setDashboardFilter] = useState('all');
+const [appointmentDateFilter, setAppointmentDateFilter] = useState('today');
+const [customAppointmentDate, setCustomAppointmentDate] = useState(getTodayDate());
 const [driverMobileTab, setDriverMobileTab] = useState('active');
 const [driverTrackingEnabled, setDriverTrackingEnabled] = useState(false);
 const [driverTrackingStatus, setDriverTrackingStatus] = useState('Location sharing is off.');
@@ -2146,6 +2148,30 @@ const completedAccountingLoads = (loadsData || [])
   .sort((a, b) => String(b.loadDate || '').localeCompare(String(a.loadDate || '')));
 const hasLastFreeDay = (load) => Boolean(String(load.lfd || load.lastFreeDay || '').trim());
 const hasAppointment = (load) => Boolean(String(load.appointmentTime || '').trim());
+const getRelativeDateString = (offsetDays = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  return date.toISOString().split('T')[0];
+};
+const getAppointmentFilterDate = () => {
+  if (appointmentDateFilter === 'yesterday') return getRelativeDateString(-1);
+  if (appointmentDateFilter === 'tomorrow') return getRelativeDateString(1);
+  if (appointmentDateFilter === 'custom') return customAppointmentDate;
+  return getRelativeDateString(0);
+};
+const getLoadAppointmentDate = (load) => {
+  const rawAppointment = String(load?.appointmentTime || '').trim();
+  if (!rawAppointment) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(rawAppointment)) return rawAppointment.slice(0, 10);
+
+  const date = new Date(rawAppointment);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
+};
+const matchesAppointmentDateFilter = (load) => {
+  const targetDate = getAppointmentFilterDate();
+  if (!targetDate) return hasAppointment(load);
+  return getLoadAppointmentDate(load) === targetDate;
+};
 const hasAssignedDriver = (load) => {
   const rawDriver = String(load?.driver || '').trim();
   return Boolean(rawDriver && !/^(-+\s*)?(no driver|assign later|select driver|not assigned)$/i.test(rawDriver));
@@ -4097,7 +4123,7 @@ const baseFilteredLoadsData =
   dashboardFilter === 'lfd'
     ? activeOperationsLoads.filter((load) => hasLastFreeDay(load))
     : dashboardFilter === 'appointments'
-    ? activeOperationsLoads.filter((load) => hasAppointment(load))
+    ? activeOperationsLoads.filter((load) => hasAppointment(load) && matchesAppointmentDateFilter(load))
     : dashboardFilter === 'available'
     ? activeOperationsLoads.filter(
         (load) => getAvailabilityStatusKey(load) === 'available'
@@ -6138,6 +6164,33 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </div>
   ))}
 </section>
+
+          {dashboardFilter === 'appointments' && (
+            <section className="appointment-filter-panel">
+              <div>
+                <span>Appointment Date</span>
+                <strong>{filteredLoadsData.length} loads</strong>
+              </div>
+              <select
+                value={appointmentDateFilter}
+                onChange={(e) => setAppointmentDateFilter(e.target.value)}
+                className="filter-select"
+              >
+                <option value="yesterday">Yesterday</option>
+                <option value="today">Today</option>
+                <option value="tomorrow">Tomorrow</option>
+                <option value="custom">Custom</option>
+              </select>
+              {appointmentDateFilter === 'custom' && (
+                <input
+                  type="date"
+                  value={customAppointmentDate}
+                  onChange={(e) => setCustomAppointmentDate(e.target.value)}
+                  className="filter-select"
+                />
+              )}
+            </section>
+          )}
 
           <section className="panel driver-tracking-panel">
             <div className="panel-header compact-header">

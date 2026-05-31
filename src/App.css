@@ -1507,6 +1507,32 @@ td {
   margin-bottom: 16px;
 }
 
+.appointment-filter-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 220px) minmax(180px, 220px);
+  align-items: center;
+  gap: 12px;
+  margin: -8px 0 20px;
+  padding: 14px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.appointment-filter-panel span {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.appointment-filter-panel strong {
+  display: block;
+  margin-top: 3px;
+  color: #111827;
+}
+
 .search-input,
 .filter-select {
   width: 100%;
@@ -1527,7 +1553,8 @@ td {
 }
 
 @media (max-width: 1000px) {
-  .filters-bar {
+  .filters-bar,
+  .appointment-filter-panel {
     grid-template-columns: 1fr;
   }
 }
