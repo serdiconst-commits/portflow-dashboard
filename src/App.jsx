@@ -373,7 +373,7 @@ const getPaperworkStatusFromDocuments = (documents = []) => {
 const getDocumentCategory = (doc) =>
   String(doc?.category || doc?.type || '').trim().toUpperCase();
 
-const requiredDriverDocumentTypes = ['POD', 'IN EIR', 'OUT EIR'];
+const requiredDriverDocumentTypes = ['POD'];
 
 const hasRequiredDriverDocuments = (load) => {
   const uploaded = new Set((load?.documents || []).map(getDocumentCategory));
@@ -666,6 +666,7 @@ const [invoiceBrandingStatus, setInvoiceBrandingStatus] = useState('');
 const [auditLogs, setAuditLogs] = useState([]);
 const [selectedLoadAuditLogs, setSelectedLoadAuditLogs] = useState([]);
 const [driverContainerByLoad, setDriverContainerByLoad] = useState({});
+const [driverChassisByLoad, setDriverChassisByLoad] = useState({});
 const [portHoustonChecksByLoad, setPortHoustonChecksByLoad] = useState({});
 const [portHoustonCheckingLoadId, setPortHoustonCheckingLoadId] = useState('');
 const [portHoustonSettingsForm, setPortHoustonSettingsForm] = useState(
@@ -3872,9 +3873,10 @@ const handleDriverStatusUpdate = async (loadId, newStatus) => {
 
 const handleDriverContainerUpdate = async (loadId) => {
   const containerNumber = String(driverContainerByLoad[loadId] || '').trim().toUpperCase();
+  const chassisNumber = String(driverChassisByLoad[loadId] || '').trim().toUpperCase();
 
-  if (!containerNumber) {
-    alert('Please enter the container number first.');
+  if (!containerNumber && !chassisNumber) {
+    alert('Please enter the container number or chassis number first.');
     return;
   }
 
@@ -3885,7 +3887,7 @@ const handleDriverContainerUpdate = async (loadId) => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
       },
-      body: JSON.stringify({ containerNumber }),
+      body: JSON.stringify({ containerNumber, chassisNumber }),
     });
 
     const data = await res.json();
@@ -3896,15 +3898,22 @@ const handleDriverContainerUpdate = async (loadId) => {
 
     setLoadsData((prevLoads) =>
       prevLoads.map((load) =>
-        load.id === loadId ? { ...load, containerNumber: data.containerNumber } : load
+        load.id === loadId
+          ? {
+              ...load,
+              containerNumber: data.containerNumber ?? load.containerNumber,
+              chassisNumber: data.chassisNumber ?? load.chassisNumber,
+            }
+          : load
       )
     );
     setDriverContainerByLoad((prev) => ({ ...prev, [loadId]: '' }));
+    setDriverChassisByLoad((prev) => ({ ...prev, [loadId]: '' }));
     await fetchLoads();
-    alert('Container number saved');
+    alert('Equipment details saved');
   } catch (error) {
-    console.error('Container update error:', error);
-    alert(`Failed to save container number: ${error.message}`);
+    console.error('Equipment update error:', error);
+    alert(`Failed to save equipment details: ${error.message}`);
   }
 };
 
@@ -4662,6 +4671,14 @@ const DriverLoadCard = ({ load }) => {
           <strong>{load.containerSize || '-'}</strong>
         </div>
         <div className="driver-info-item">
+          <span>Ship Line</span>
+          <strong>{load.shipLine || '-'}</strong>
+        </div>
+        <div className="driver-info-item">
+          <span>Chassis</span>
+          <strong>{load.chassisNumber || '-'}</strong>
+        </div>
+        <div className="driver-info-item">
           <span>Pay</span>
           <strong>{load.driverRate ? formatMoney(parseMoney(load.driverRate)) : '-'}</strong>
         </div>
@@ -4700,8 +4717,21 @@ const DriverLoadCard = ({ load }) => {
             }))
           }
         />
+        <label htmlFor={`chassis-${load.id}`}>Chassis Number</label>
+        <input
+          id={`chassis-${load.id}`}
+          type="text"
+          placeholder={load.chassisNumber ? 'Update chassis number' : 'Enter chassis number'}
+          value={driverChassisByLoad[load.id] ?? ''}
+          onChange={(e) =>
+            setDriverChassisByLoad((prev) => ({
+              ...prev,
+              [load.id]: e.target.value,
+            }))
+          }
+        />
         <button type="button" onClick={() => handleDriverContainerUpdate(load.id)}>
-          Save Container
+          Save Equipment
         </button>
       </div>
 
@@ -5005,13 +5035,29 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         }))
       }
     />
+    <label htmlFor={`chassis-${load.id}`}>Chassis Number</label>
+    <input
+      id={`chassis-${load.id}`}
+      type="text"
+      placeholder={load.chassisNumber ? 'Update chassis number' : 'Enter chassis number'}
+      value={driverChassisByLoad[load.id] ?? ''}
+      onChange={(e) =>
+        setDriverChassisByLoad((prev) => ({
+          ...prev,
+          [load.id]: e.target.value,
+        }))
+      }
+    />
     <button type="button" onClick={() => handleDriverContainerUpdate(load.id)}>
-      Save Container
+      Save Equipment
     </button>
   </div>
 
   <p>
     <strong>Container Size:</strong> {load.containerSize || '-'}
+  </p>
+  <p>
+    <strong>Chassis #:</strong> {load.chassisNumber || '-'}
   </p>
 </div>
 <p

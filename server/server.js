@@ -2872,16 +2872,17 @@ app.put('/api/loads/:id/container-number', authenticate, (req, res) => {
   const companyId = req.company.companyId;
   const loadId = req.params.id;
   const containerNumber = String(req.body?.containerNumber || '').trim().toUpperCase();
+  const chassisNumber = String(req.body?.chassisNumber || '').trim().toUpperCase();
   const isDriver = req.user?.role === 'driver';
   const driverId = req.user?.driverId;
 
-  if (!containerNumber) {
-    return res.status(400).json({ error: 'Container number is required' });
+  if (!containerNumber && !chassisNumber) {
+    return res.status(400).json({ error: 'Container number or chassis number is required' });
   }
 
   const lookupQuery = isDriver
-    ? `SELECT id, containerNumber, driver FROM loads WHERE id = ? AND companyId = ? AND driver = ?`
-    : `SELECT id, containerNumber, driver FROM loads WHERE id = ? AND companyId = ?`;
+    ? `SELECT id, containerNumber, chassisNumber, driver FROM loads WHERE id = ? AND companyId = ? AND driver = ?`
+    : `SELECT id, containerNumber, chassisNumber, driver FROM loads WHERE id = ? AND companyId = ?`;
   const lookupParams = isDriver
     ? [loadId, companyId, driverId]
     : [loadId, companyId];
@@ -2897,30 +2898,51 @@ app.put('/api/loads/:id/container-number', authenticate, (req, res) => {
     }
 
     db.run(
-      `UPDATE loads SET containerNumber = ? WHERE id = ? AND companyId = ?`,
-      [containerNumber, loadId, companyId],
+      `UPDATE loads
+       SET containerNumber = COALESCE(NULLIF(?, ''), containerNumber),
+           chassisNumber = COALESCE(NULLIF(?, ''), chassisNumber)
+       WHERE id = ? AND companyId = ?`,
+      [containerNumber, chassisNumber, loadId, companyId],
       function (err) {
         if (err) {
           console.error('Error updating container number:', err.message);
           return res.status(500).json({ error: 'Failed to update container number' });
         }
 
+        const nextContainerNumber = containerNumber || existingLoad.containerNumber || '';
+        const nextChassisNumber = chassisNumber || existingLoad.chassisNumber || '';
+
         writeAuditLog(req, {
           action: 'UPDATE',
           entityType: 'LOAD',
           entityId: loadId,
-          entityLabel: containerNumber || loadId,
-          oldValue: { containerNumber: existingLoad.containerNumber || '' },
-          newValue: { containerNumber },
+          entityLabel: nextContainerNumber || nextChassisNumber || loadId,
+          oldValue: {
+            containerNumber: existingLoad.containerNumber || '',
+            chassisNumber: existingLoad.chassisNumber || '',
+          },
+          newValue: {
+            containerNumber: nextContainerNumber,
+            chassisNumber: nextChassisNumber,
+          },
           changedFields: {
             containerNumber: {
               oldValue: existingLoad.containerNumber || '',
-              newValue: containerNumber,
+              newValue: nextContainerNumber,
+            },
+            chassisNumber: {
+              oldValue: existingLoad.chassisNumber || '',
+              newValue: nextChassisNumber,
             },
           },
         });
 
-        res.json({ success: true, loadId, containerNumber });
+        res.json({
+          success: true,
+          loadId,
+          containerNumber: nextContainerNumber,
+          chassisNumber: nextChassisNumber,
+        });
       }
     );
   });
