@@ -341,7 +341,8 @@ const getLocationOptionLabel = (location = {}) => {
 
 const isInvalidTokenError = (message = '') =>
   String(message).toLowerCase().includes('invalid token') ||
-  String(message).toLowerCase().includes('unauthorized');
+  String(message).toLowerCase().includes('unauthorized') ||
+  String(message).includes('401');
 
 const handleAuthError = (message) => {
   if (!isInvalidTokenError(message)) return false;
@@ -353,7 +354,6 @@ const handleAuthError = (message) => {
   setCurrentUser(null);
   setCompany(null);
   setLoginError('Your session expired after the latest update. Please log in again.');
-  alert('Your session expired. Please log in again, then save the address.');
   return true;
 };
   const calculateSettlement = ({ driverRate, detention, lumper, fuelAdvance }) => {
@@ -557,6 +557,10 @@ const defaultDispatchLoadColumnOrder = [
 ];
 const getSavedDispatchColumnKey = (companySource, userSource) =>
   `portflow-all-loads-columns-${companySource?.id || userSource?.companyId || userSource?.id || 'default'}`;
+const getSavedDeductionReasonsKey = (companySource, userSource) =>
+  `portflow-settlement-deduction-reasons-${companySource?.id || userSource?.companyId || userSource?.id || 'default'}`;
+const getSavedDeductionDetailsKey = (companySource, userSource) =>
+  `portflow-settlement-deduction-details-${companySource?.id || userSource?.companyId || userSource?.id || 'default'}`;
 const getValidDispatchColumnOrder = (order = []) => {
   const allowed = new Set(defaultDispatchLoadColumnOrder);
   const cleanOrder = Array.isArray(order)
@@ -678,6 +682,24 @@ const previousLoadsRef = useRef(null);
 const driverAssignmentSeenRef = useRef(new Set());
 const [portHoustonSettingsSaving, setPortHoustonSettingsSaving] = useState('');
 const dispatchColumnStorageKey = getSavedDispatchColumnKey(company, currentUser);
+const deductionReasonsStorageKey = getSavedDeductionReasonsKey(company, currentUser);
+const deductionDetailsStorageKey = getSavedDeductionDetailsKey(company, currentUser);
+const [savedDeductionReasons, setSavedDeductionReasons] = useState(() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(getSavedDeductionReasonsKey(savedCompany, savedUser)) || '[]');
+    return Array.isArray(stored) ? stored : [];
+  } catch {
+    return [];
+  }
+});
+const [settlementDeductionDetails, setSettlementDeductionDetails] = useState(() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(getSavedDeductionDetailsKey(savedCompany, savedUser)) || '{}');
+    return stored && typeof stored === 'object' ? stored : {};
+  } catch {
+    return {};
+  }
+});
 
 useEffect(() => {
   if (!currentUser || !roleCanAccessView(currentUser.role, 'dispatch')) return;
@@ -705,6 +727,40 @@ useEffect(() => {
     console.error('Failed to save All Loads column order:', error);
   }
 }, [currentUser, dispatchColumnStorageKey, dispatchColumnOrder]);
+
+useEffect(() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(deductionReasonsStorageKey) || '[]');
+    setSavedDeductionReasons(Array.isArray(stored) ? stored : []);
+  } catch {
+    setSavedDeductionReasons([]);
+  }
+}, [deductionReasonsStorageKey]);
+
+useEffect(() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(deductionDetailsStorageKey) || '{}');
+    setSettlementDeductionDetails(stored && typeof stored === 'object' ? stored : {});
+  } catch {
+    setSettlementDeductionDetails({});
+  }
+}, [deductionDetailsStorageKey]);
+
+useEffect(() => {
+  try {
+    localStorage.setItem(deductionReasonsStorageKey, JSON.stringify(savedDeductionReasons));
+  } catch (error) {
+    console.error('Failed to save deduction reasons:', error);
+  }
+}, [deductionReasonsStorageKey, savedDeductionReasons]);
+
+useEffect(() => {
+  try {
+    localStorage.setItem(deductionDetailsStorageKey, JSON.stringify(settlementDeductionDetails));
+  } catch (error) {
+    console.error('Failed to save deduction details:', error);
+  }
+}, [deductionDetailsStorageKey, settlementDeductionDetails]);
 
 const getCompanyLogoSrc = () => {
   if (!company?.logoUrl) return '';
@@ -983,6 +1039,7 @@ const [settlementStartDate, setSettlementStartDate] = useState('');
 const [settlementEndDate, setSettlementEndDate] = useState('');
 const [settlementNote, setSettlementNote] = useState('');
 const [settlementContainerSearch, setSettlementContainerSearch] = useState('');
+const [settlementDeductionReasonInput, setSettlementDeductionReasonInput] = useState('');
 const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
 const [selectedSettlementLoadId, setSelectedSettlementLoadId] = useState('');
 const [settlementPayDrafts, setSettlementPayDrafts] = useState({});
@@ -1352,6 +1409,7 @@ const fetchDrivers = async () => {
     const data = await res.json();
 
     if (!res.ok) {
+      if (res.status === 401 && handleAuthError(data.error || 'Unauthorized')) return;
       throw new Error(data.error || 'Failed to fetch drivers');
     }
 
@@ -1397,6 +1455,7 @@ const fetchCompanyProfile = async () => {
     const data = await res.json();
 
     if (!res.ok) {
+      if (res.status === 401 && handleAuthError(data.error || 'Unauthorized')) return;
       throw new Error(data.error || 'Failed to fetch company profile');
     }
 
@@ -1742,6 +1801,7 @@ const fetchLoads = async () => {
     });
 
     if (!res.ok) {
+      if (res.status === 401 && handleAuthError('Unauthorized')) return;
       throw new Error(`Failed to fetch loads: ${res.status}`);
     }
 
@@ -1782,12 +1842,13 @@ const fetchDriverLocations = async () => {
       cache: 'no-store',
     });
 
-    const data = await res.json();
-
     if (!res.ok) {
+      if (res.status === 401 && handleAuthError('Unauthorized')) return;
+      const data = await res.json().catch(() => ({}));
       throw new Error(data.error || 'Failed to fetch driver locations');
     }
 
+    const data = await res.json();
     setLiveDriverLocations(Array.isArray(data) ? data : []);
   } catch (error) {
     console.error('Error loading driver locations:', error);
@@ -1805,6 +1866,7 @@ const fetchDriverLocations = async () => {
     });
 
     if (!res.ok) {
+      if (res.status === 401 && handleAuthError('Unauthorized')) return;
       throw new Error(`Failed to fetch customers: ${res.status}`);
     }
 
@@ -1827,6 +1889,7 @@ const fetchDriverLocations = async () => {
     });
 
     if (!res.ok) {
+      if (res.status === 401 && handleAuthError('Unauthorized')) return;
       throw new Error(`Failed to fetch invoices: ${res.status}`);
     }
 
@@ -1849,6 +1912,7 @@ const fetchLocations = async () => {
     });
 
     if (!res.ok) {
+      if (res.status === 401 && handleAuthError('Unauthorized')) return;
       throw new Error(`Failed to fetch locations: ${res.status}`);
     }
 
@@ -2562,6 +2626,29 @@ const handleSettlementPayChange = (loadId, field, value) => {
   setSettlementPayStatus('');
 };
 
+const handleSettlementDeductionDetailChange = (loadId, value) => {
+  setSettlementDeductionDetails((prev) => ({
+    ...prev,
+    [loadId]: value,
+  }));
+  setSettlementPayStatus('');
+};
+
+const handleSaveDeductionReason = () => {
+  const reason = settlementDeductionReasonInput.trim();
+  if (!reason) return;
+
+  setSavedDeductionReasons((prev) => {
+    if (prev.some((item) => item.toLowerCase() === reason.toLowerCase())) return prev;
+    return [...prev, reason].sort((a, b) => a.localeCompare(b));
+  });
+  setSettlementDeductionReasonInput('');
+  setSettlementPayStatus(`Deduction reason saved: ${reason}`);
+};
+
+const getSettlementDeductionDetail = (load) =>
+  settlementDeductionDetails[load.id] || '';
+
 const handleSettlementLoadSelect = (loadId) => {
   setSelectedSettlementLoadId(loadId);
   setSettlementPayStatus('');
@@ -3155,6 +3242,7 @@ const handleChangeUserRole = async (userId, newRole) => {
       Detention: getSettlementPayValue(load, 'detention'),
       Lumper: getSettlementPayValue(load, 'lumper'),
       Deductions: getSettlementPayValue(load, 'fuelAdvance'),
+      DeductionReason: getSettlementDeductionDetail(load),
       NetSettlement: getSettlementPayTotal(load),
       Note: settlementNote,
     }));
@@ -3171,6 +3259,7 @@ const handleChangeUserRole = async (userId, newRole) => {
       Detention: '',
       Lumper: '',
       Deductions: '',
+      DeductionReason: '',
       NetSettlement: '',
       Note: '',
     });
@@ -3216,6 +3305,7 @@ const handleChangeUserRole = async (userId, newRole) => {
             <td>${getSettlementPayValue(load, 'detention')}</td>
             <td>${getSettlementPayValue(load, 'lumper')}</td>
             <td>${getSettlementPayValue(load, 'fuelAdvance')}</td>
+            <td>${getSettlementDeductionDetail(load) || '-'}</td>
             <td>${getSettlementPayTotal(load)}</td>
           </tr>
         `
@@ -3266,6 +3356,7 @@ const handleChangeUserRole = async (userId, newRole) => {
                 <th>Detention</th>
                 <th>Lumper</th>
                 <th>Deductions</th>
+                <th>Deduction Reason</th>
                 <th>Net Settlement</th>
               </tr>
             </thead>
@@ -7539,6 +7630,39 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   />
                 </label>
 
+                <label className="settlement-entry-field settlement-deduction-detail-field">
+                  <span>Deduction Reason</span>
+                  <input
+                    type="search"
+                    list="settlement-deduction-reasons"
+                    placeholder="Search or type reason"
+                    value={getSettlementDeductionDetail(selectedSettlementLoad)}
+                    onChange={(e) =>
+                      handleSettlementDeductionDetailChange(selectedSettlementLoad.id, e.target.value)
+                    }
+                  />
+                  <datalist id="settlement-deduction-reasons">
+                    {savedDeductionReasons.map((reason) => (
+                      <option key={reason} value={reason} />
+                    ))}
+                  </datalist>
+                </label>
+
+                <label className="settlement-entry-field settlement-deduction-save-field">
+                  <span>Save New Reason</span>
+                  <div className="settlement-deduction-save-row">
+                    <input
+                      type="text"
+                      placeholder="Example: Repair, advance, toll"
+                      value={settlementDeductionReasonInput}
+                      onChange={(e) => setSettlementDeductionReasonInput(e.target.value)}
+                    />
+                    <button type="button" className="secondary-btn" onClick={handleSaveDeductionReason}>
+                      Add
+                    </button>
+                  </div>
+                </label>
+
                 <div className="settlement-entry-total">
                   <span>Net Driver Pay</span>
                   <strong>{getSettlementPayTotal(selectedSettlementLoad)}</strong>
@@ -7639,6 +7763,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <th>Detention</th>
                   <th>Lumper</th>
                   <th>Deductions</th>
+                  <th>Deduction Reason</th>
                   <th>Net Settlement</th>
                   <th>Actions</th>
                 </tr>
@@ -7646,7 +7771,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <tbody>
                 {visibleSettlementLoads.length === 0 ? (
                   <tr>
-                    <td colSpan="11" className="settlement-empty-cell">
+                    <td colSpan="12" className="settlement-empty-cell">
                       No loads found for this settlement period or container search.
                     </td>
                   </tr>
@@ -7676,6 +7801,18 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             />
                           </td>
                         ))}
+                        <td>
+                          <input
+                            type="search"
+                            list="settlement-deduction-reasons"
+                            className="settlement-pay-input settlement-deduction-input"
+                            placeholder="Reason"
+                            value={getSettlementDeductionDetail(load)}
+                            onChange={(e) =>
+                              handleSettlementDeductionDetailChange(load.id, e.target.value)
+                            }
+                          />
+                        </td>
                         <td className="settlement-net">{getSettlementPayTotal(load)}</td>
                         <td>
                           <div className="settlement-row-actions">

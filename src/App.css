@@ -1960,6 +1960,17 @@ td {
   grid-column: span 2;
 }
 
+.settlement-deduction-detail-field,
+.settlement-deduction-save-field {
+  grid-column: span 2;
+}
+
+.settlement-deduction-save-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
 .settlement-entry-field input,
 .settlement-entry-field textarea {
   width: 100%;
@@ -1982,6 +1993,10 @@ td {
   border-color: #0f62fe;
   box-shadow: 0 0 0 3px rgba(15, 98, 254, 0.12);
   outline: none;
+}
+
+.settlement-deduction-save-row .secondary-btn {
+  min-height: 42px;
 }
 
 .settlement-period-actions {
@@ -2109,6 +2124,10 @@ td {
   outline: none;
 }
 
+.settlement-deduction-input {
+  min-width: 160px;
+}
+
 .settlement-net {
   font-weight: 800;
   color: #064e3b;
@@ -2145,6 +2164,8 @@ button:disabled {
   .settlement-entry-driver,
   .settlement-container-search,
   .settlement-note-field,
+  .settlement-deduction-detail-field,
+  .settlement-deduction-save-field,
   .settlement-period-actions,
   .settlement-entry-meta {
     grid-column: span 1;
