@@ -2065,23 +2065,21 @@ useEffect(() => {
     const activeDriverId = selectedSettlementDriverId || driversList[0]?.id || '';
     const start = settlementStartDate ? new Date(`${settlementStartDate}T00:00:00`) : null;
     const end = settlementEndDate ? new Date(`${settlementEndDate}T23:59:59`) : null;
-    const getSettlementDate = (load) => {
-      const completedAt = load.dropDateTime || load.completedAt || load.deliveredAt || '';
-      if (completedAt) {
-        const completedDate = new Date(completedAt);
-        if (!Number.isNaN(completedDate.getTime())) return completedDate;
-      }
+    const getSettlementAppointmentDate = (load) => {
+      const rawAppointment = String(load.appointmentTime || '').trim();
+      if (!rawAppointment) return null;
 
-      return load.loadDate ? new Date(`${load.loadDate}T12:00:00`) : null;
+      const appointmentDate = new Date(rawAppointment);
+      return Number.isNaN(appointmentDate.getTime()) ? null : appointmentDate;
     };
 
     return loadsData.filter((load) => {
       const matchesDriver = activeDriverId
         ? normalizeDriverForStorage(load.driver) === activeDriverId
         : true;
-      const settlementDate = getSettlementDate(load);
-      const matchesStart = !start || (settlementDate && settlementDate >= start);
-      const matchesEnd = !end || (settlementDate && settlementDate <= end);
+      const settlementAppointmentDate = getSettlementAppointmentDate(load);
+      const matchesStart = !start || (settlementAppointmentDate && settlementAppointmentDate >= start);
+      const matchesEnd = !end || (settlementAppointmentDate && settlementAppointmentDate <= end);
       return matchesDriver && matchesStart && matchesEnd;
     });
   }, [loadsData, selectedSettlementDriverId, driversList, settlementStartDate, settlementEndDate]);
@@ -2093,7 +2091,7 @@ useEffect(() => {
   const settlementPeriodLabel =
     settlementStartDate || settlementEndDate
       ? `${settlementStartDate || 'Start'} to ${settlementEndDate || 'End'}`
-      : 'All completion dates';
+      : 'All appointment dates';
 
   const settlementReport = activeSettlementDriver
     ? [
@@ -2157,15 +2155,12 @@ useEffect(() => {
     setSelectedSettlementLoadId('');
   };
 
-  const getSettlementCompletionDateValue = (load) => {
-    const completedAt = load.dropDateTime || load.completedAt || load.deliveredAt || '';
-    if (completedAt) {
-      const completedTime = new Date(completedAt).getTime();
-      if (!Number.isNaN(completedTime)) return completedTime;
-    }
+  const getSettlementAppointmentDateValue = (load) => {
+    const appointmentTime = String(load.appointmentTime || '').trim();
+    if (!appointmentTime) return 0;
 
-    const loadDateTime = load.loadDate ? new Date(`${load.loadDate}T12:00:00`).getTime() : 0;
-    return Number.isNaN(loadDateTime) ? 0 : loadDateTime;
+    const appointmentDateTime = new Date(appointmentTime).getTime();
+    return Number.isNaN(appointmentDateTime) ? 0 : appointmentDateTime;
   };
 
   /*const settlementReport = driversList.map((driver) => {
@@ -2196,7 +2191,7 @@ useEffect(() => {
   });*/
 
   const settlementDetailLoads = [...filteredSettlementLoads].sort((a, b) => {
-    const dateCompare = getSettlementCompletionDateValue(a) - getSettlementCompletionDateValue(b);
+    const dateCompare = getSettlementAppointmentDateValue(a) - getSettlementAppointmentDateValue(b);
     if (dateCompare !== 0) return dateCompare;
     return getDriverLabel(a.driver).localeCompare(getDriverLabel(b.driver));
   });
@@ -7485,7 +7480,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             </label>
 
             <label className="settlement-entry-field">
-              <span>Start Date</span>
+              <span>Appointment Start</span>
               <input
                 type="date"
                 value={settlementStartDate}
@@ -7497,7 +7492,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             </label>
 
             <label className="settlement-entry-field">
-              <span>End Date</span>
+              <span>Appointment End</span>
               <input
                 type="date"
                 value={settlementEndDate}
@@ -7548,7 +7543,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 ) : (
                   visibleSettlementLoads.map((load) => (
                     <option key={load.id} value={load.id}>
-                      {load.loadDate || 'No date'} - {load.containerNumber || 'No container'} - {getDriverLabel(load.driver)} - {load.id}
+                      {formatAppointmentTime(load.appointmentTime) || 'No appointment'} - {load.containerNumber || 'No container'} - {getDriverLabel(load.driver)} - {load.id}
                     </option>
                   ))
                 )}
