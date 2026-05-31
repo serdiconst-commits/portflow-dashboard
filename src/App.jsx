@@ -67,9 +67,9 @@ const roleCanAccessView = (role, view) => {
   const normalizedRole = getNormalizedRole(role);
   if (fullAccessRoles.has(normalizedRole)) return true;
   if (normalizedRole === 'driver') return view === 'driver';
-  if (normalizedRole === 'payroll') return ['settlements', 'invoices', 'settings'].includes(view);
+  if (normalizedRole === 'payroll') return ['settlements', 'invoices', 'accounting', 'settings'].includes(view);
   if (normalizedRole === 'manager') {
-    return ['dispatch', 'drivers', 'customers', 'settlements', 'invoices', 'settings'].includes(view);
+    return ['dispatch', 'drivers', 'customers', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
   }
   if (normalizedRole === 'dispatcher') {
     return ['dispatch', 'drivers', 'customers', 'settings'].includes(view);
@@ -579,11 +579,11 @@ const [activeView, setActiveView] = useState(
 
 const [loadsData, setLoadsData] = useState([]);
 const availableLoads = loadsData.filter(
-  (load) => getAvailabilityStatusKey(load) === 'available'
+  (load) => getAvailabilityStatusKey(load) === 'available' && !['delivered', 'completed'].includes(getLoadQuickStatusKey(load))
 );
 
 const notAvailableLoads = loadsData.filter(
-  (load) => getAvailabilityStatusKey(load) === 'not available'
+  (load) => getAvailabilityStatusKey(load) === 'not available' && !['delivered', 'completed'].includes(getLoadQuickStatusKey(load))
 );
 
 const [selectedPresetName, setSelectedPresetName] = useState('');
@@ -2073,6 +2073,10 @@ useEffect(() => {
 
 const isCompletedLoad = (load) => ['delivered', 'completed'].includes(getLoadQuickStatusKey(load));
 const isDeliveredLoad = isCompletedLoad;
+const activeOperationsLoads = (loadsData || []).filter((load) => !isCompletedLoad(load));
+const completedAccountingLoads = (loadsData || [])
+  .filter((load) => isCompletedLoad(load))
+  .sort((a, b) => String(b.loadDate || '').localeCompare(String(a.loadDate || '')));
 const hasLastFreeDay = (load) => Boolean(String(load.lfd || load.lastFreeDay || '').trim());
 const hasAppointment = (load) => Boolean(String(load.appointmentTime || '').trim());
 const hasAssignedDriver = (load) => {
@@ -2103,10 +2107,6 @@ const droppedLoads = loadsData.filter(
   (load) => getLoadQuickStatusKey(load) === 'dropped'
 );
 
-const deliveredLoads = loadsData.filter(
-  (load) => getLoadQuickStatusKey(load) === 'delivered'
-);
-
 const lfdLoads = loadsData.filter(
   (load) => hasLastFreeDay(load) && !isDeliveredLoad(load)
 );
@@ -2119,7 +2119,6 @@ const summaryCards = [
   { title: 'Dispatched', value: dispatchedLoads.length, filter: 'dispatched' },
   { title: 'In Transit', value: inTransitLoads.length, filter: 'in-transit' },
   { title: 'Dropped', value: droppedLoads.length, filter: 'dropped' },
-  { title: 'Delivered', value: deliveredLoads.length, filter: 'delivered' },
   { title: 'Appointments', value: appointmentLoads.length, filter: 'appointments' },
   { title: 'LFD', value: lfdLoads.length, filter: 'lfd' },
   { title: 'Available', value: availableLoads.length, filter: 'available' },
@@ -4029,36 +4028,32 @@ return (
 
 const baseFilteredLoadsData =
   dashboardFilter === 'lfd'
-    ? loadsData.filter((load) => hasLastFreeDay(load) && !isDeliveredLoad(load))
+    ? activeOperationsLoads.filter((load) => hasLastFreeDay(load))
     : dashboardFilter === 'appointments'
-    ? loadsData.filter((load) => hasAppointment(load) && !isCompletedLoad(load))
+    ? activeOperationsLoads.filter((load) => hasAppointment(load))
     : dashboardFilter === 'available'
-    ? loadsData.filter(
+    ? activeOperationsLoads.filter(
         (load) => getAvailabilityStatusKey(load) === 'available'
       )
     : dashboardFilter === 'not-available'
-    ? loadsData.filter(
+    ? activeOperationsLoads.filter(
         (load) => getAvailabilityStatusKey(load) === 'not available'
       )
     : dashboardFilter === 'dispatched'
-    ? loadsData.filter(
+    ? activeOperationsLoads.filter(
         (load) => isDriverAssignedDispatchLoad(load)
       )
     : dashboardFilter === 'in-transit'
-    ? loadsData.filter(
+    ? activeOperationsLoads.filter(
         (load) => getLoadQuickStatusKey(load) === 'in transit'
       )
 
           : dashboardFilter === 'dropped'
-    ? loadsData.filter(
+    ? activeOperationsLoads.filter(
         (load) => getLoadQuickStatusKey(load) === 'dropped'
       )
 
-    : dashboardFilter === 'delivered'
-    ? loadsData.filter(
-        (load) => getLoadQuickStatusKey(load) === 'delivered'
-      )
-    : loadsData;
+    : activeOperationsLoads;
     const normalizedSearchTerm = String(searchTerm || '').trim().toLowerCase();
     
 const viewFilteredLoadsData =
@@ -5170,6 +5165,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               Invoices
             </button>
             )}
+            {roleCanAccessView(currentUser?.role, 'accounting') && (
+            <button
+              className={activeView === 'accounting' ? 'toggle-btn active' : 'toggle-btn'}
+              onClick={() => setActiveView('accounting')}
+            >
+              Accounting
+            </button>
+            )}
           </div>
 
           {activeView === 'dispatch' && (
@@ -5996,7 +5999,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   <option value="Dispatched">Dispatched</option>
   <option value="In Transit">In Transit</option>
   <option value="Dropped">Dropped</option>
-  <option value="Delivered">Delivered</option>
 </select>
 
                 <select value={paperworkFilter} onChange={(e) => setPaperworkFilter(e.target.value)} className="filter-select">
@@ -6361,13 +6363,24 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       >
                         Generate POD
                       </button>
-                      <button className="secondary-btn" onClick={handleEditClick}>Edit Load</button>
+                      {isEditing ? (
+                        <>
+                          <button type="submit" form="load-edit-form" className="primary-btn">
+                            Save Changes
+                          </button>
+                          <button type="button" className="secondary-btn" onClick={() => setIsEditing(false)}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button className="secondary-btn" onClick={handleEditClick}>Edit Load</button>
+                      )}
                       <button className="danger-btn" onClick={handleDeleteLoad}>Delete Load</button>
                     </div>
                   </div>
 
                   {isEditing ? (
-                    <form className="load-form" onSubmit={handleUpdateLoad}>
+                    <form id="load-edit-form" className="load-form" onSubmit={handleUpdateLoad}>
                       <select
                         name="customer"
                         value={editingLoad?.customer || ''}
@@ -6405,6 +6418,20 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   value={editingLoad.reservationNumber || ''}
   onChange={handleEditInputChange}
 />
+<input type="text" name="containerNumber" placeholder="Container Number" value={editingLoad.containerNumber} onChange={handleEditInputChange} />
+<input type="text" name="containerSize" placeholder="Container Size" value={editingLoad.containerSize} onChange={handleEditInputChange} />
+<select
+  name="shipLine"
+  value={editingLoad.shipLine || ''}
+  onChange={handleEditInputChange}
+>
+  <option value="">Select Ship Line</option>
+  {shipLineOptions.map((line) => (
+    <option key={line} value={line}>
+      {line}
+    </option>
+  ))}
+</select>
 <input
   type="text"
   name="returnNumber"
@@ -6503,23 +6530,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   <option value="Yard">Yard</option>
   <option value="Customer">Customer</option>
 </select>
-                      <input type="text" name="containerNumber" placeholder="Container Number" value={editingLoad.containerNumber} onChange={handleEditInputChange} />
                       <input type="text" name="bookingNumber" placeholder="Booking Number" value={editingLoad.bookingNumber || ''} onChange={handleEditInputChange} />
-                      <select
-  name="shipLine"
-  value={editingLoad.shipLine || ''}
-  onChange={handleEditInputChange}
->
-  <option value="">🚢 Select Ship Line</option>
-  {shipLineOptions.map((line) => (
-    <option key={line} value={line}>
-      {line}
-    </option>
-  ))}
-</select>
                       <input type="text" name="chassisNumber" placeholder="Chassis Number" value={editingLoad.chassisNumber} onChange={handleEditInputChange} />
                       <input type="text" name="sealNumber" placeholder="Seal Number" value={editingLoad.sealNumber} onChange={handleEditInputChange} />
-                      <input type="text" name="containerSize" placeholder="Container Size" value={editingLoad.containerSize} onChange={handleEditInputChange} />
                       <input type="text" name="rate" placeholder="Load Rate" value={editingLoad.rate} onChange={handleEditInputChange} />
                       <input type="text" name="driverRate" placeholder="Driver Rate" value={editingLoad.driverRate} onChange={handleEditInputChange} />
 
@@ -6552,14 +6565,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 <input
   type="date"
   name="lastFreeDay"
-  value={newLoad.lastFreeDay || ''}
-  onChange={handleInputChange}
+  value={editingLoad.lastFreeDay || ''}
+  onChange={handleEditInputChange}
 />
 
-                      <div className="form-actions">
-                        <button type="submit" className="primary-btn">Save Changes</button>
-                        <button type="button" className="secondary-btn" onClick={() => setIsEditing(false)}>Cancel</button>
-                      </div>
                     </form>
                   ) : (
                     <>
@@ -6682,6 +6691,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   <span>Reservation #</span>
   <strong>{selectedLoad.reservationNumber || '—'}</strong>
 </div>
+                        <div className="detail-box"><span>Container Number</span><strong>{selectedLoad.containerNumber || '—'}</strong></div>
+                        <div className="detail-box"><span>Container Size</span><strong>{selectedLoad.containerSize || '—'}</strong></div>
+                        <div className="detail-box"><span>Ship Line</span><strong>{selectedLoad.shipLine || '—'}</strong></div>
+
                         <div className="detail-box">
   <span>Driver</span>
   <strong>{getDriverLabel(selectedLoad.driver)}</strong>
@@ -6716,15 +6729,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   <span>Drop Date/Time</span>
   <strong>{formatDateTime(selectedLoad.dropDateTime)}</strong>
 </div>
-                        <div className="detail-box"><span>Container Number</span><strong>{selectedLoad.containerNumber}</strong></div>
                         <div className="detail-box"><span>Booking Number</span><strong>{selectedLoad.bookingNumber || '—'}</strong></div>
                         <div className="detail-box"><span>Chassis Number</span><strong>{selectedLoad.chassisNumber}</strong></div>
                         <div className="detail-box"><span>Seal Number</span><strong>{selectedLoad.sealNumber}</strong></div>
-                        <div className="detail-box"><span>Container Size</span><strong>{selectedLoad.containerSize}</strong></div>
                         <div className="detail-box"><span>Load Rate</span><strong>{selectedLoad.rate}</strong></div>
                         <div className="detail-box"><span>Driver Rate</span><strong>{selectedLoad.driverRate}</strong></div>
                         <div className="detail-box"><span>Paperwork</span><strong>{selectedLoad.paperwork}</strong></div>
-                        <div className="detail-box"><span>Ship Line</span><strong>{selectedLoad.shipLine}</strong></div>
                         <div className="detail-box"><span>Detention</span><strong>{selectedLoad.detention}</strong></div>
                         
                       </div>
@@ -8012,6 +8022,97 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </section>
   </div>
 )}
+      {activeView === 'accounting' && (
+        <section className="panel accounting-panel">
+          <div className="panel-header">
+            <div>
+              <h3>Accounting</h3>
+              <span>{completedAccountingLoads.length} completed loads ready for billing</span>
+            </div>
+            <div className="details-actions">
+              <button type="button" className="primary-btn compact-btn">
+                Bill
+              </button>
+            </div>
+          </div>
+
+          <div className="accounting-summary-strip">
+            <div>
+              <span>Completed Loads</span>
+              <strong>{completedAccountingLoads.length}</strong>
+            </div>
+            <div>
+              <span>Total Load Revenue</span>
+              <strong>
+                {formatMoney(
+                  completedAccountingLoads.reduce((sum, load) => sum + parseMoney(load.rate), 0)
+                )}
+              </strong>
+            </div>
+            <div>
+              <span>Saved Invoices</span>
+              <strong>{savedInvoices.length}</strong>
+            </div>
+          </div>
+
+          {completedAccountingLoads.length > 0 ? (
+            <div className="table-wrap accounting-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>Container</th>
+                    <th>Reference #</th>
+                    <th>PO #</th>
+                    <th>Driver</th>
+                    <th>Status</th>
+                    <th>Amount</th>
+                    <th>Invoice</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {completedAccountingLoads.map((load) => {
+                    const invoice = savedInvoices.find((item) => item.loadId === load.id);
+                    return (
+                      <tr key={load.id}>
+                        <td>{load.loadDate || '—'}</td>
+                        <td>{load.customer || '—'}</td>
+                        <td>{load.containerNumber || '—'}</td>
+                        <td>{load.referenceNumber || '—'}</td>
+                        <td>{load.poNumber || '—'}</td>
+                        <td>{load.driver ? getDriverLabel(load.driver) : 'Not Assigned'}</td>
+                        <td>
+                          <span className={`sheet-status ${String(getLoadQuickStatus(load) || '').toLowerCase().replace(/\s/g, '-')}`}>
+                            {getLoadQuickStatus(load) || 'Completed'}
+                          </span>
+                        </td>
+                        <td>{formatMoney(parseMoney(load.rate))}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="secondary-btn compact-btn"
+                            onClick={() => {
+                              setInvoiceLoadId(load.id);
+                              setActiveView('invoices');
+                            }}
+                          >
+                            {invoice ? invoice.invoiceNumber : 'Create Invoice'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <p>No completed loads in billing yet.</p>
+            </div>
+          )}
+        </section>
+      )}
       {activeView === 'invoices' && (
         <section className="panel">
           <div className="panel-header">
@@ -8022,7 +8123,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onChange={(e) => setInvoiceLoadId(e.target.value)}
                 className="filter-select settlement-filter"
               >
-                {(filteredLoadsData || []).map((load) => (
+                {(loadsData || []).map((load) => (
                   <option key={load.id} value={load.id}>
                     {load.id} - {load.customer}
                   </option>
