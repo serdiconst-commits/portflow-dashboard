@@ -536,6 +536,35 @@ const getAddressPartsFromPlace = (place) => {
 
 const savedUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
 const savedCompany = JSON.parse(localStorage.getItem('company') || 'null');
+const defaultDispatchLoadColumnOrder = [
+  'loadDate',
+  'customer',
+  'containerNumber',
+  'bookingNumber',
+  'containerSize',
+  'shipLine',
+  'pickup',
+  'delivery',
+  'appointmentTime',
+  'driver',
+  'eta',
+  'status',
+  'referenceNumber',
+  'poNumber',
+  'paperwork',
+];
+const getSavedDispatchColumnKey = (companySource, userSource) =>
+  `portflow-all-loads-columns-${companySource?.id || userSource?.companyId || userSource?.id || 'default'}`;
+const getValidDispatchColumnOrder = (order = []) => {
+  const allowed = new Set(defaultDispatchLoadColumnOrder);
+  const cleanOrder = Array.isArray(order)
+    ? order.filter((key, index) => allowed.has(key) && order.indexOf(key) === index)
+    : [];
+  return [
+    ...cleanOrder,
+    ...defaultDispatchLoadColumnOrder.filter((key) => !cleanOrder.includes(key)),
+  ];
+};
 const portHoustonCredentialGroups = [
   {
     terminal: 'BAYPORT TERMINAL',
@@ -588,6 +617,16 @@ const notAvailableLoads = loadsData.filter(
 
 const [selectedPresetName, setSelectedPresetName] = useState('');
 const [selectedLoad, setSelectedLoad] = useState(null);
+const [dispatchColumnOrder, setDispatchColumnOrder] = useState(() => {
+  try {
+    return getValidDispatchColumnOrder(
+      JSON.parse(localStorage.getItem(getSavedDispatchColumnKey(savedCompany, savedUser)) || '[]')
+    );
+  } catch {
+    return defaultDispatchLoadColumnOrder;
+  }
+});
+const [draggedDispatchColumn, setDraggedDispatchColumn] = useState('');
 const [userRole, setUserRole] = useState(isDriverApp ? 'driver' : 'dispatcher');
 const [driversList, setDriversList] = useState([]);
 const [customers, setCustomers] = useState([]);
@@ -635,6 +674,34 @@ const [appNotifications, setAppNotifications] = useState([]);
 const previousLoadsRef = useRef(null);
 const driverAssignmentSeenRef = useRef(new Set());
 const [portHoustonSettingsSaving, setPortHoustonSettingsSaving] = useState('');
+const dispatchColumnStorageKey = getSavedDispatchColumnKey(company, currentUser);
+
+useEffect(() => {
+  if (!currentUser || !roleCanAccessView(currentUser.role, 'dispatch')) return;
+
+  try {
+    setDispatchColumnOrder(
+      getValidDispatchColumnOrder(
+        JSON.parse(localStorage.getItem(dispatchColumnStorageKey) || '[]')
+      )
+    );
+  } catch {
+    setDispatchColumnOrder(defaultDispatchLoadColumnOrder);
+  }
+}, [dispatchColumnStorageKey, currentUser]);
+
+useEffect(() => {
+  if (!currentUser || !roleCanAccessView(currentUser.role, 'dispatch')) return;
+
+  try {
+    localStorage.setItem(
+      dispatchColumnStorageKey,
+      JSON.stringify(getValidDispatchColumnOrder(dispatchColumnOrder))
+    );
+  } catch (error) {
+    console.error('Failed to save All Loads column order:', error);
+  }
+}, [currentUser, dispatchColumnStorageKey, dispatchColumnOrder]);
 
 const getCompanyLogoSrc = () => {
   if (!company?.logoUrl) return '';
@@ -4055,6 +4122,19 @@ const baseFilteredLoadsData =
 
     : activeOperationsLoads;
     const normalizedSearchTerm = String(searchTerm || '').trim().toLowerCase();
+
+const getNewestLoadSortValue = (load = {}) => {
+  const idNumber = Number(String(load.id || '').match(/(\d+)$/)?.[1] || 0);
+  if (idNumber) return idNumber;
+
+  const createdTime = Date.parse(load.createdAt || '');
+  if (!Number.isNaN(createdTime)) return createdTime;
+
+  const loadDateTime = Date.parse(`${load.loadDate || ''}T12:00:00`);
+  return Number.isNaN(loadDateTime) ? 0 : loadDateTime;
+};
+
+const sortLoadsNewestFirst = (a, b) => getNewestLoadSortValue(b) - getNewestLoadSortValue(a);
     
 const viewFilteredLoadsData =
   activeView === 'driver'
@@ -4084,7 +4164,142 @@ const filteredLoadsData = viewFilteredLoadsData.filter((load) => {
     loadContainer.includes(normalizedSearchTerm) ||
     loadBooking.includes(normalizedSearchTerm)
   );
-});
+}).sort(sortLoadsNewestFirst);
+
+const getDispatchLoadPaperworkLabel = (load) => {
+  const hasPod = load.documents?.some(
+    (doc) => (doc.category || '').trim().toUpperCase() === 'POD'
+  );
+  const hasInEir = load.documents?.some(
+    (doc) => (doc.category || '').trim().toUpperCase() === 'IN EIR'
+  );
+  const hasOutEir = load.documents?.some(
+    (doc) => (doc.category || '').trim().toUpperCase() === 'OUT EIR'
+  );
+
+  if (hasPod && hasInEir && hasOutEir) return 'Complete';
+  if (hasPod || hasInEir || hasOutEir) return 'Partial';
+  return 'Missing';
+};
+
+const handleDispatchColumnDragStart = (event, columnKey) => {
+  setDraggedDispatchColumn(columnKey);
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', columnKey);
+};
+
+const handleDispatchColumnDrop = (event, targetColumnKey) => {
+  event.preventDefault();
+  const sourceColumnKey = event.dataTransfer.getData('text/plain') || draggedDispatchColumn;
+  setDraggedDispatchColumn('');
+
+  if (!sourceColumnKey || sourceColumnKey === targetColumnKey) return;
+
+  setDispatchColumnOrder((prev) => {
+    const nextOrder = getValidDispatchColumnOrder(prev);
+    const sourceIndex = nextOrder.indexOf(sourceColumnKey);
+    const targetIndex = nextOrder.indexOf(targetColumnKey);
+
+    if (sourceIndex < 0 || targetIndex < 0) return nextOrder;
+
+    const [movedColumn] = nextOrder.splice(sourceIndex, 1);
+    nextOrder.splice(targetIndex, 0, movedColumn);
+    return nextOrder;
+  });
+};
+
+const dispatchLoadColumnsByKey = {
+  loadDate: {
+    label: 'Date',
+    render: (load) => load.loadDate || '-',
+  },
+  customer: {
+    label: 'Broker',
+    render: (load) => load.customer || '-',
+  },
+  containerNumber: {
+    label: 'Container',
+    render: (load) => (
+      <button
+        type="button"
+        className="container-link"
+        onClick={(event) => {
+          event.stopPropagation();
+          setSelectedLoad(load);
+          setIsEditing(false);
+        }}
+      >
+        {load.containerNumber || 'Open load'}
+      </button>
+    ),
+  },
+  bookingNumber: {
+    label: 'Booking #',
+    render: (load) => load.bookingNumber || '-',
+  },
+  containerSize: {
+    label: 'Size',
+    render: (load) => load.containerSize || '-',
+  },
+  shipLine: {
+    label: 'Ship Line',
+    render: (load) => load.shipLine || '-',
+  },
+  pickup: {
+    label: 'Pickup',
+    render: (load) => shortLocation(load.pickup),
+  },
+  delivery: {
+    label: 'Delivery',
+    render: (load) => shortLocation(load.delivery),
+  },
+  appointmentTime: {
+    label: 'Appointment',
+    render: (load) => formatAppointmentTime(load.appointmentTime),
+  },
+  driver: {
+    label: 'Driver',
+    render: (load) => (load.driver ? getDriverLabel(load.driver) : 'Not Assigned'),
+  },
+  eta: {
+    label: 'ETA',
+    render: (load) => formatAppointmentTime(load.eta),
+  },
+  status: {
+    label: 'Status',
+    render: (load) => {
+      const displayStatus = getLoadQuickStatus(load);
+      return (
+        <span className={`sheet-status ${String(displayStatus || '').toLowerCase().replace(/\s/g, '-')}`}>
+          {displayStatus || '-'}
+        </span>
+      );
+    },
+  },
+  referenceNumber: {
+    label: 'Ref #',
+    render: (load) => load.referenceNumber || '-',
+  },
+  poNumber: {
+    label: 'PO #',
+    render: (load) => load.poNumber || '-',
+  },
+  paperwork: {
+    label: 'Paperwork',
+    render: (load) => {
+      const paperworkLabel = getDispatchLoadPaperworkLabel(load);
+      return (
+        <span className={`sheet-paperwork ${paperworkLabel.toLowerCase()}`}>
+          {paperworkLabel}
+        </span>
+      );
+    },
+  },
+};
+
+const orderedDispatchLoadColumns = dispatchColumnOrder
+  .map((key) => ({ key, ...dispatchLoadColumnsByKey[key] }))
+  .filter((column) => column.label);
 const selectedDeliveryLocationId =
   (deliveryLocations || []).find((loc) => formatLocationAddress(loc) === newLoad.delivery)?.id || '';
 const activeLoads = filteredLoadsData.length;
@@ -6012,89 +6227,38 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <table className="dispatch-load-sheet">
                     <thead>
                       <tr>
-                        <th>Date</th>
-                        <th>Broker</th>
-                        <th>Container</th>
-                        <th>Booking #</th>
-                        <th>Size</th>
-                        <th>Ship Line</th>
-                        <th>Pickup</th>
-                        <th>Delivery</th>
-                        <th>Appointment</th>
-                        <th>Driver</th>
-                        <th>ETA</th>
-                        <th>Status</th>
-                        <th>Ref #</th>
-                        <th>PO #</th>
-                        <th>Paperwork</th>
+                        {orderedDispatchLoadColumns.map((column) => (
+                          <th
+                            key={column.key}
+                            draggable
+                            className={draggedDispatchColumn === column.key ? 'dragging-column' : ''}
+                            onDragStart={(event) => handleDispatchColumnDragStart(event, column.key)}
+                            onDragEnd={() => setDraggedDispatchColumn('')}
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={(event) => handleDispatchColumnDrop(event, column.key)}
+                            title="Drag to move this column"
+                          >
+                            <span className="column-drag-handle" aria-hidden="true">::</span>
+                            {column.label}
+                          </th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredLoadsData.map((load) => {
-                        const displayStatus = getLoadQuickStatus(load);
-                        const hasPod = load.documents?.some(
-                          (doc) => (doc.category || '').trim().toUpperCase() === 'POD'
-                        );
-                        const hasInEir = load.documents?.some(
-                          (doc) => (doc.category || '').trim().toUpperCase() === 'IN EIR'
-                        );
-                        const hasOutEir = load.documents?.some(
-                          (doc) => (doc.category || '').trim().toUpperCase() === 'OUT EIR'
-                        );
-                        const paperworkLabel =
-                          hasPod && hasInEir && hasOutEir
-                            ? 'Complete'
-                            : hasPod || hasInEir || hasOutEir
-                            ? 'Partial'
-                            : 'Missing';
-
-                        return (
-                          <tr
-                            key={load.id}
-                            className={selectedLoad?.id === load.id ? 'selected' : ''}
-                            onClick={() => {
-                              setSelectedLoad(load);
-                              setIsEditing(false);
-                            }}
-                          >
-                            <td>{load.loadDate || '-'}</td>
-                            <td>{load.customer || '-'}</td>
-                            <td>
-                              <button
-                                type="button"
-                                className="container-link"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setSelectedLoad(load);
-                                  setIsEditing(false);
-                                }}
-                              >
-                                {load.containerNumber || 'Open load'}
-                              </button>
-                            </td>
-                            <td>{load.bookingNumber || '-'}</td>
-                            <td>{load.containerSize || '-'}</td>
-                            <td>{load.shipLine || '-'}</td>
-                            <td>{shortLocation(load.pickup)}</td>
-                            <td>{shortLocation(load.delivery)}</td>
-                            <td>{formatAppointmentTime(load.appointmentTime)}</td>
-                            <td>{load.driver ? getDriverLabel(load.driver) : 'Not Assigned'}</td>
-                            <td>{formatAppointmentTime(load.eta)}</td>
-                            <td>
-                              <span className={`sheet-status ${String(displayStatus || '').toLowerCase().replace(/\s/g, '-')}`}>
-                                {displayStatus || '-'}
-                              </span>
-                            </td>
-                            <td>{load.referenceNumber || '-'}</td>
-                            <td>{load.poNumber || '-'}</td>
-                            <td>
-                              <span className={`sheet-paperwork ${paperworkLabel.toLowerCase()}`}>
-                                {paperworkLabel}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {filteredLoadsData.map((load) => (
+                        <tr
+                          key={load.id}
+                          className={selectedLoad?.id === load.id ? 'selected' : ''}
+                          onClick={() => {
+                            setSelectedLoad(load);
+                            setIsEditing(false);
+                          }}
+                        >
+                          {orderedDispatchLoadColumns.map((column) => (
+                            <td key={`${load.id}-${column.key}`}>{column.render(load)}</td>
+                          ))}
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 ) : (

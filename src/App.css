@@ -1123,6 +1123,26 @@ button {
   text-align: center;
   font-weight: 700;
   white-space: nowrap;
+  cursor: grab;
+  user-select: none;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.dispatch-load-sheet th:active {
+  cursor: grabbing;
+}
+
+.dispatch-load-sheet th.dragging-column {
+  background: #224d40;
+  opacity: 0.82;
+}
+
+.column-drag-handle {
+  display: inline-block;
+  margin-right: 6px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  letter-spacing: 1px;
 }
 
 .dispatch-load-sheet td {
