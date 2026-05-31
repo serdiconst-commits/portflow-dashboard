@@ -1999,6 +1999,53 @@ td {
   min-height: 42px;
 }
 
+.settlement-deductions-panel {
+  border-top: 4px solid #111827;
+}
+
+.settlement-custom-deduction-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 2fr) minmax(130px, 0.7fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.settlement-custom-deduction-form .primary-btn {
+  min-height: 42px;
+}
+
+.settlement-custom-deduction-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.settlement-custom-deduction-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.settlement-custom-deduction-row strong,
+.settlement-custom-deduction-row span {
+  display: block;
+}
+
+.settlement-custom-deduction-row span {
+  color: #6b7280;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.settlement-custom-deduction-row b {
+  color: #991b1b;
+}
+
 .settlement-period-actions {
   grid-column: span 4;
   display: flex;
@@ -2178,6 +2225,11 @@ button:disabled {
 
   .settlement-entry-actions button {
     width: 100%;
+  }
+
+  .settlement-custom-deduction-form,
+  .settlement-custom-deduction-row {
+    grid-template-columns: 1fr;
   }
 }
 .customers-grid {

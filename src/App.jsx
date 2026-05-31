@@ -561,6 +561,8 @@ const getSavedDeductionReasonsKey = (companySource, userSource) =>
   `portflow-settlement-deduction-reasons-${companySource?.id || userSource?.companyId || userSource?.id || 'default'}`;
 const getSavedDeductionDetailsKey = (companySource, userSource) =>
   `portflow-settlement-deduction-details-${companySource?.id || userSource?.companyId || userSource?.id || 'default'}`;
+const getSavedSettlementCustomDeductionsKey = (companySource, userSource) =>
+  `portflow-settlement-custom-deductions-${companySource?.id || userSource?.companyId || userSource?.id || 'default'}`;
 const getValidDispatchColumnOrder = (order = []) => {
   const allowed = new Set(defaultDispatchLoadColumnOrder);
   const cleanOrder = Array.isArray(order)
@@ -684,6 +686,7 @@ const [portHoustonSettingsSaving, setPortHoustonSettingsSaving] = useState('');
 const dispatchColumnStorageKey = getSavedDispatchColumnKey(company, currentUser);
 const deductionReasonsStorageKey = getSavedDeductionReasonsKey(company, currentUser);
 const deductionDetailsStorageKey = getSavedDeductionDetailsKey(company, currentUser);
+const customDeductionsStorageKey = getSavedSettlementCustomDeductionsKey(company, currentUser);
 const [savedDeductionReasons, setSavedDeductionReasons] = useState(() => {
   try {
     const stored = JSON.parse(localStorage.getItem(getSavedDeductionReasonsKey(savedCompany, savedUser)) || '[]');
@@ -699,6 +702,19 @@ const [settlementDeductionDetails, setSettlementDeductionDetails] = useState(() 
   } catch {
     return {};
   }
+});
+const [settlementCustomDeductions, setSettlementCustomDeductions] = useState(() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(getSavedSettlementCustomDeductionsKey(savedCompany, savedUser)) || '{}');
+    return stored && typeof stored === 'object' ? stored : {};
+  } catch {
+    return {};
+  }
+});
+const [settlementCustomDeductionDraft, setSettlementCustomDeductionDraft] = useState({
+  name: '',
+  description: '',
+  amount: '',
 });
 
 useEffect(() => {
@@ -748,6 +764,15 @@ useEffect(() => {
 
 useEffect(() => {
   try {
+    const stored = JSON.parse(localStorage.getItem(customDeductionsStorageKey) || '{}');
+    setSettlementCustomDeductions(stored && typeof stored === 'object' ? stored : {});
+  } catch {
+    setSettlementCustomDeductions({});
+  }
+}, [customDeductionsStorageKey]);
+
+useEffect(() => {
+  try {
     localStorage.setItem(deductionReasonsStorageKey, JSON.stringify(savedDeductionReasons));
   } catch (error) {
     console.error('Failed to save deduction reasons:', error);
@@ -761,6 +786,14 @@ useEffect(() => {
     console.error('Failed to save deduction details:', error);
   }
 }, [deductionDetailsStorageKey, settlementDeductionDetails]);
+
+useEffect(() => {
+  try {
+    localStorage.setItem(customDeductionsStorageKey, JSON.stringify(settlementCustomDeductions));
+  } catch (error) {
+    console.error('Failed to save custom settlement deductions:', error);
+  }
+}, [customDeductionsStorageKey, settlementCustomDeductions]);
 
 const getCompanyLogoSrc = () => {
   if (!company?.logoUrl) return '';
@@ -2088,6 +2121,15 @@ useEffect(() => {
     driversList.find((driver) => driver.id === (selectedSettlementDriverId || driversList[0]?.id)) ||
     null;
 
+  const settlementCustomDeductionKey = [
+    activeSettlementDriver?.id || 'no-driver',
+    settlementStartDate || 'all-start',
+    settlementEndDate || 'all-end',
+  ].join('|');
+
+  const currentSettlementCustomDeductions =
+    settlementCustomDeductions[settlementCustomDeductionKey] || [];
+
   const settlementPeriodLabel =
     settlementStartDate || settlementEndDate
       ? `${settlementStartDate || 'Start'} to ${settlementEndDate || 'End'}`
@@ -2111,8 +2153,15 @@ useEffect(() => {
           totalFuelAdvance: formatMoney(
             filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.fuelAdvance), 0)
           ),
+          totalCustomDeductions: formatMoney(
+            currentSettlementCustomDeductions.reduce((sum, item) => sum + parseMoney(item.amount), 0)
+          ),
           totalSettlement: formatMoney(
             filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.settlement), 0)
+          ),
+          finalPayment: formatMoney(
+            filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.settlement), 0) -
+              currentSettlementCustomDeductions.reduce((sum, item) => sum + parseMoney(item.amount), 0)
           ),
         },
       ]
@@ -2124,7 +2173,9 @@ useEffect(() => {
     totalDetention: formatMoney(0),
     totalLumper: formatMoney(0),
     totalFuelAdvance: formatMoney(0),
+    totalCustomDeductions: formatMoney(0),
     totalSettlement: formatMoney(0),
+    finalPayment: formatMoney(0),
   };
 
   useEffect(() => {
@@ -2643,6 +2694,56 @@ const handleSaveDeductionReason = () => {
 
 const getSettlementDeductionDetail = (load) =>
   settlementDeductionDetails[load.id] || '';
+
+const handleCustomDeductionDraftChange = (field, value) => {
+  setSettlementCustomDeductionDraft((prev) => ({
+    ...prev,
+    [field]: value,
+  }));
+  setSettlementPayStatus('');
+};
+
+const handleAddSettlementCustomDeduction = () => {
+  const name = settlementCustomDeductionDraft.name.trim();
+  const description = settlementCustomDeductionDraft.description.trim();
+  const amount = settlementCustomDeductionDraft.amount.trim();
+
+  if (!name || !amount) {
+    setSettlementPayStatus('Add a deduction name and amount first.');
+    return;
+  }
+
+  setSettlementCustomDeductions((prev) => ({
+    ...prev,
+    [settlementCustomDeductionKey]: [
+      ...(prev[settlementCustomDeductionKey] || []),
+      {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name,
+        description,
+        amount,
+      },
+    ],
+  }));
+
+  setSavedDeductionReasons((prev) => {
+    if (prev.some((item) => item.toLowerCase() === name.toLowerCase())) return prev;
+    return [...prev, name].sort((a, b) => a.localeCompare(b));
+  });
+
+  setSettlementCustomDeductionDraft({ name: '', description: '', amount: '' });
+  setSettlementPayStatus(`Custom deduction added: ${name}`);
+};
+
+const handleRemoveSettlementCustomDeduction = (deductionId) => {
+  setSettlementCustomDeductions((prev) => ({
+    ...prev,
+    [settlementCustomDeductionKey]: (prev[settlementCustomDeductionKey] || []).filter(
+      (item) => item.id !== deductionId
+    ),
+  }));
+  setSettlementPayStatus('Custom deduction removed.');
+};
 
 const handleSettlementLoadSelect = (loadId) => {
   setSelectedSettlementLoadId(loadId);
@@ -3224,6 +3325,7 @@ const handleChangeUserRole = async (userId, newRole) => {
 };
   const handleExportSettlementCsv = () => {
     const rows = visibleSettlementLoads.map((load) => ({
+      Type: 'Load',
       Driver: activeSettlementDriver
         ? `${activeSettlementDriver.id} - ${activeSettlementDriver.name}`
         : getDriverLabel(load.driver),
@@ -3242,7 +3344,31 @@ const handleChangeUserRole = async (userId, newRole) => {
       Note: settlementNote,
     }));
 
-    const headers = Object.keys(rows[0] || {
+    const customDeductionRows = currentSettlementCustomDeductions.map((item) => ({
+      Type: 'Custom Deduction',
+      Driver: activeSettlementDriver
+        ? `${activeSettlementDriver.id} - ${activeSettlementDriver.name}`
+        : '',
+      Period: settlementPeriodLabel,
+      Date: '',
+      Load: '',
+      Customer: '',
+      Container: '',
+      Reference: '',
+      LoadPay: '',
+      Detention: '',
+      Lumper: '',
+      Deductions: item.amount,
+      DeductionReason: item.name,
+      DeductionDescription: item.description,
+      NetSettlement: '',
+      Note: settlementNote,
+    }));
+
+    const exportRows = [...rows, ...customDeductionRows];
+
+    const headers = Object.keys(exportRows[0] || {
+      Type: '',
       Driver: '',
       Period: '',
       Date: '',
@@ -3255,13 +3381,14 @@ const handleChangeUserRole = async (userId, newRole) => {
       Lumper: '',
       Deductions: '',
       DeductionReason: '',
+      DeductionDescription: '',
       NetSettlement: '',
       Note: '',
     });
 
     const csv = [
       headers.join(','),
-      ...rows.map((row) =>
+      ...exportRows.map((row) =>
         headers
           .map((header) => `"${String(row[header] ?? '').replace(/"/g, '""')}"`)
           .join(',')
@@ -3307,6 +3434,18 @@ const handleChangeUserRole = async (userId, newRole) => {
       )
       .join('');
 
+    const customDeductionsHtml = currentSettlementCustomDeductions
+      .map(
+        (item) => `
+          <tr>
+            <td>${item.name || '-'}</td>
+            <td>${item.description || '-'}</td>
+            <td>${item.amount || '$0.00'}</td>
+          </tr>
+        `
+      )
+      .join('');
+
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) return;
 
@@ -3318,10 +3457,11 @@ const handleChangeUserRole = async (userId, newRole) => {
             body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
             h1 { margin: 0 0 8px; }
             p { margin: 0 0 20px; color: #4b5563; }
-            .summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 18px 0; }
+            .summary { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin: 18px 0; }
             .box { border: 1px solid #d1d5db; padding: 10px; border-radius: 8px; }
             .box span { display: block; color: #6b7280; font-size: 12px; margin-bottom: 4px; }
             .note { border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; margin: 18px 0; white-space: pre-wrap; }
+            h2 { margin: 22px 0 8px; font-size: 18px; }
             table { width: 100%; border-collapse: collapse; margin-top: 16px; }
             th, td { border: 1px solid #d1d5db; padding: 10px; text-align: left; font-size: 14px; }
             th { background: #f3f4f6; }
@@ -3337,8 +3477,24 @@ const handleChangeUserRole = async (userId, newRole) => {
             <div class="box"><span>Detention</span><strong>${settlementTotals.totalDetention}</strong></div>
             <div class="box"><span>Lumper</span><strong>${settlementTotals.totalLumper}</strong></div>
             <div class="box"><span>Net Pay</span><strong>${settlementTotals.totalSettlement}</strong></div>
+            <div class="box"><span>Custom Deductions</span><strong>${settlementTotals.totalCustomDeductions}</strong></div>
+            <div class="box"><span>Final Payment</span><strong>${settlementTotals.finalPayment}</strong></div>
           </div>
           ${settlementNote ? `<div class="note"><strong>Payroll Note</strong><br>${settlementNote}</div>` : ''}
+          <h2>Custom Deductions</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Deduction Name</th>
+                <th>Description</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${customDeductionsHtml || '<tr><td colspan="3">No custom deductions</td></tr>'}
+            </tbody>
+          </table>
+          <h2>Loads</h2>
           <table>
             <thead>
               <tr>
@@ -7684,6 +7840,74 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           </div>
         </section>
 
+        <section className="panel settlement-deductions-panel">
+          <div className="panel-header">
+            <div>
+              <h3>Custom Deductions</h3>
+              <p className="panel-subtitle">Add payroll deductions like insurance, parking, dispatch, fuel, loan, or any custom detail.</p>
+            </div>
+            <span>{settlementTotals.totalCustomDeductions}</span>
+          </div>
+
+          <div className="settlement-custom-deduction-form">
+            <label className="settlement-entry-field">
+              <span>Deduction Name</span>
+              <input
+                type="search"
+                list="settlement-deduction-reasons"
+                placeholder="Insurance, Parking, Loan"
+                value={settlementCustomDeductionDraft.name}
+                onChange={(e) => handleCustomDeductionDraftChange('name', e.target.value)}
+              />
+            </label>
+            <label className="settlement-entry-field">
+              <span>Description</span>
+              <input
+                type="text"
+                placeholder="Details for payroll"
+                value={settlementCustomDeductionDraft.description}
+                onChange={(e) => handleCustomDeductionDraftChange('description', e.target.value)}
+              />
+            </label>
+            <label className="settlement-entry-field">
+              <span>Amount</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="$0.00"
+                value={settlementCustomDeductionDraft.amount}
+                onChange={(e) => handleCustomDeductionDraftChange('amount', e.target.value)}
+              />
+            </label>
+            <button type="button" className="primary-btn" onClick={handleAddSettlementCustomDeduction}>
+              Add Deduction
+            </button>
+          </div>
+
+          <div className="settlement-custom-deduction-list">
+            {currentSettlementCustomDeductions.length === 0 ? (
+              <p className="documents-empty">No custom deductions for this driver and period.</p>
+            ) : (
+              currentSettlementCustomDeductions.map((item) => (
+                <div key={item.id} className="settlement-custom-deduction-row">
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{item.description || 'No description'}</span>
+                  </div>
+                  <b>{item.amount}</b>
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={() => handleRemoveSettlementCustomDeduction(item.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
         <section className="panel">
           <div className="panel-header">
             <div>
@@ -7715,8 +7939,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <th>Driver Rate</th>
                   <th>Detention</th>
                   <th>Lumper</th>
-                  <th>Deductions</th>
+                  <th>Load Deductions</th>
+                  <th>Custom Deductions</th>
                   <th>Total Settlement</th>
+                  <th>Final Payment</th>
                 </tr>
               </thead>
               <tbody>
@@ -7728,7 +7954,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     <td>{item.totalDetention}</td>
                     <td>{item.totalLumper}</td>
                     <td>{item.totalFuelAdvance}</td>
+                    <td>{item.totalCustomDeductions}</td>
                     <td>{item.totalSettlement}</td>
+                    <td>{item.finalPayment}</td>
                   </tr>
                 ))}
               </tbody>
