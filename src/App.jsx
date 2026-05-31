@@ -1756,8 +1756,8 @@ const fetchLoads = async () => {
 
     setSelectedLoad((prev) => {
       if (loadsWithPaperwork.length === 0) return null;
-      if (!prev) return loadsWithPaperwork[0];
-      return loadsWithPaperwork.find((load) => load.id === prev.id) || loadsWithPaperwork[0];
+      if (!prev) return null;
+      return loadsWithPaperwork.find((load) => load.id === prev.id) || null;
     });
 
     setInvoiceLoadId((prev) => {
@@ -2374,7 +2374,6 @@ const res = await fetch(`${API_BASE}/api/loads`, {
       return [data, ...withoutCurrent];
     });
 
-    setSelectedLoad(data);
     setInvoiceLoadId(data.id);
     setShowForm(false);
     setNewLoad(emptyLoad);
