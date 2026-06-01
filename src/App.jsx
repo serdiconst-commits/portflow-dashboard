@@ -714,6 +714,7 @@ const [settlementCustomDeductions, setSettlementCustomDeductions] = useState(() 
 const [settlementCustomDeductionDraft, setSettlementCustomDeductionDraft] = useState({
   name: '',
   description: '',
+  type: 'fixed',
   amount: '',
 });
 
@@ -2130,6 +2131,32 @@ useEffect(() => {
   const currentSettlementCustomDeductions =
     settlementCustomDeductions[settlementCustomDeductionKey] || [];
 
+  const settlementTripPayTotalNumber = filteredSettlementLoads.reduce(
+    (sum, load) => sum + parseMoney(load.driverRate),
+    0
+  );
+
+  const getSettlementCustomDeductionAmountNumber = (item = {}) => {
+    if (item.type === 'percent') {
+      return settlementTripPayTotalNumber * (parseMoney(item.percent ?? item.amount) / 100);
+    }
+
+    return parseMoney(item.amount);
+  };
+
+  const getSettlementCustomDeductionAmount = (item = {}) =>
+    formatMoney(getSettlementCustomDeductionAmountNumber(item));
+
+  const getSettlementCustomDeductionLabel = (item = {}) =>
+    item.type === 'percent'
+      ? `${item.percent ?? (item.amount || 0)}% of trip pay`
+      : 'Fixed amount';
+
+  const settlementCustomDeductionTotalNumber = currentSettlementCustomDeductions.reduce(
+    (sum, item) => sum + getSettlementCustomDeductionAmountNumber(item),
+    0
+  );
+
   const settlementPeriodLabel =
     settlementStartDate || settlementEndDate
       ? `${settlementStartDate || 'Start'} to ${settlementEndDate || 'End'}`
@@ -2141,9 +2168,7 @@ useEffect(() => {
           driverId: activeSettlementDriver.id,
           driverName: activeSettlementDriver.name,
           loadsCount: filteredSettlementLoads.length,
-          totalDriverRate: formatMoney(
-            filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.driverRate), 0)
-          ),
+          totalDriverRate: formatMoney(settlementTripPayTotalNumber),
           totalDetention: formatMoney(
             filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.detention), 0)
           ),
@@ -2153,15 +2178,13 @@ useEffect(() => {
           totalFuelAdvance: formatMoney(
             filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.fuelAdvance), 0)
           ),
-          totalCustomDeductions: formatMoney(
-            currentSettlementCustomDeductions.reduce((sum, item) => sum + parseMoney(item.amount), 0)
-          ),
+          totalCustomDeductions: formatMoney(settlementCustomDeductionTotalNumber),
           totalSettlement: formatMoney(
             filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.settlement), 0)
           ),
           finalPayment: formatMoney(
             filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.settlement), 0) -
-              currentSettlementCustomDeductions.reduce((sum, item) => sum + parseMoney(item.amount), 0)
+              settlementCustomDeductionTotalNumber
           ),
         },
       ]
@@ -2706,10 +2729,17 @@ const handleCustomDeductionDraftChange = (field, value) => {
 const handleAddSettlementCustomDeduction = () => {
   const name = settlementCustomDeductionDraft.name.trim();
   const description = settlementCustomDeductionDraft.description.trim();
+  const type = settlementCustomDeductionDraft.type || 'fixed';
   const amount = settlementCustomDeductionDraft.amount.trim();
 
   if (!name || !amount) {
-    setSettlementPayStatus('Add a deduction name and amount first.');
+    setSettlementPayStatus(`Add a deduction name and ${type === 'percent' ? 'percent' : 'amount'} first.`);
+    return;
+  }
+
+  const numericAmount = parseMoney(amount);
+  if (numericAmount <= 0) {
+    setSettlementPayStatus(`Enter a ${type === 'percent' ? 'percent' : 'deduction amount'} greater than 0.`);
     return;
   }
 
@@ -2721,7 +2751,9 @@ const handleAddSettlementCustomDeduction = () => {
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         name,
         description,
-        amount,
+        type,
+        percent: type === 'percent' ? amount : '',
+        amount: type === 'percent' ? formatMoney(settlementTripPayTotalNumber * (numericAmount / 100)) : amount,
       },
     ],
   }));
@@ -2731,7 +2763,7 @@ const handleAddSettlementCustomDeduction = () => {
     return [...prev, name].sort((a, b) => a.localeCompare(b));
   });
 
-  setSettlementCustomDeductionDraft({ name: '', description: '', amount: '' });
+  setSettlementCustomDeductionDraft({ name: '', description: '', type: 'fixed', amount: '' });
   setSettlementPayStatus(`Custom deduction added: ${name}`);
 };
 
@@ -3358,9 +3390,11 @@ const handleChangeUserRole = async (userId, newRole) => {
       LoadPay: '',
       Detention: '',
       Lumper: '',
-      Deductions: item.amount,
+      Deductions: getSettlementCustomDeductionAmount(item),
       DeductionReason: item.name,
-      DeductionDescription: item.description,
+      DeductionDescription: [getSettlementCustomDeductionLabel(item), item.description]
+        .filter(Boolean)
+        .join(' - '),
       NetSettlement: '',
       Note: settlementNote,
     }));
@@ -3439,8 +3473,8 @@ const handleChangeUserRole = async (userId, newRole) => {
         (item) => `
           <tr>
             <td>${item.name || '-'}</td>
-            <td>${item.description || '-'}</td>
-            <td>${item.amount || '$0.00'}</td>
+            <td>${[getSettlementCustomDeductionLabel(item), item.description].filter(Boolean).join(' - ') || '-'}</td>
+            <td>${getSettlementCustomDeductionAmount(item)}</td>
           </tr>
         `
       )
@@ -7870,11 +7904,22 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               />
             </label>
             <label className="settlement-entry-field">
-              <span>Amount</span>
+              <span>Deduction Type</span>
+              <select
+                className="filter-select"
+                value={settlementCustomDeductionDraft.type}
+                onChange={(e) => handleCustomDeductionDraftChange('type', e.target.value)}
+              >
+                <option value="fixed">Fixed $</option>
+                <option value="percent">Percent %</option>
+              </select>
+            </label>
+            <label className="settlement-entry-field">
+              <span>{settlementCustomDeductionDraft.type === 'percent' ? 'Percent' : 'Amount'}</span>
               <input
                 type="text"
                 inputMode="decimal"
-                placeholder="$0.00"
+                placeholder={settlementCustomDeductionDraft.type === 'percent' ? '10' : '$0.00'}
                 value={settlementCustomDeductionDraft.amount}
                 onChange={(e) => handleCustomDeductionDraftChange('amount', e.target.value)}
               />
@@ -7892,9 +7937,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div key={item.id} className="settlement-custom-deduction-row">
                   <div>
                     <strong>{item.name}</strong>
-                    <span>{item.description || 'No description'}</span>
+                    <span>
+                      {[getSettlementCustomDeductionLabel(item), item.description || 'No description']
+                        .filter(Boolean)
+                        .join(' - ')}
+                    </span>
                   </div>
-                  <b>{item.amount}</b>
+                  <b>{getSettlementCustomDeductionAmount(item)}</b>
                   <button
                     type="button"
                     className="secondary-btn"

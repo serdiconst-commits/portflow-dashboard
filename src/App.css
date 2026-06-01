@@ -1972,7 +1972,8 @@ td {
 }
 
 .settlement-entry-field input,
-.settlement-entry-field textarea {
+.settlement-entry-field textarea,
+.settlement-entry-field select {
   width: 100%;
   min-height: 42px;
   padding: 10px 12px;
@@ -1989,7 +1990,8 @@ td {
 }
 
 .settlement-entry-field input:focus,
-.settlement-entry-field textarea:focus {
+.settlement-entry-field textarea:focus,
+.settlement-entry-field select:focus {
   border-color: #0f62fe;
   box-shadow: 0 0 0 3px rgba(15, 98, 254, 0.12);
   outline: none;
@@ -2005,7 +2007,7 @@ td {
 
 .settlement-custom-deduction-form {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(220px, 2fr) minmax(130px, 0.7fr) auto;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 2fr) minmax(130px, 0.7fr) minmax(130px, 0.7fr) auto;
   gap: 12px;
   align-items: end;
 }
