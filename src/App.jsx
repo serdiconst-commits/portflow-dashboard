@@ -26,6 +26,40 @@ const API_BASE = (() => {
 })();
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 const APP_PORTAL = import.meta.env.VITE_APP_PORTAL || 'web';
+const APP_TIME_ZONE = 'America/Chicago';
+
+const getDateStringInAppTimeZone = (dateValue = new Date()) => {
+  const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: APP_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const getPart = (type) => parts.find((part) => part.type === type)?.value || '';
+  const year = getPart('year');
+  const month = getPart('month');
+  const day = getPart('day');
+  return year && month && day ? `${year}-${month}-${day}` : '';
+};
+
+const getLocalDatePortion = (value) => {
+  const text = String(value || '').trim();
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] || '';
+};
+
+const getDateStringWithOffsetInAppTimeZone = (offsetDays = 0) => {
+  const today = getDateStringInAppTimeZone();
+  if (!today) return '';
+
+  const [year, month, day] = today.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + offsetDays, 12, 0, 0));
+  return getDateStringInAppTimeZone(date);
+};
 const isDriverWebPath = typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/driver';
 const isDriverApp = APP_PORTAL === 'driver' || isDriverWebPath;
 
@@ -385,7 +419,7 @@ const getMissingDriverDocuments = (load) => {
   return requiredDriverDocumentTypes.filter((docType) => !uploaded.has(docType));
 };
 
-  const getTodayDate = () => new Date().toISOString().split('T')[0];
+ const getTodayDate = () => getDateStringInAppTimeZone();
 
   const getStartOfWeek = (date) => {
     const d = new Date(date);
@@ -2097,14 +2131,14 @@ useEffect(() => {
 
   const filteredSettlementLoads = useMemo(() => {
     const activeDriverId = selectedSettlementDriverId || driversList[0]?.id || '';
-    const start = settlementStartDate ? new Date(`${settlementStartDate}T00:00:00`) : null;
-    const end = settlementEndDate ? new Date(`${settlementEndDate}T23:59:59`) : null;
     const getSettlementAppointmentDate = (load) => {
       const rawAppointment = String(load.appointmentTime || '').trim();
       if (!rawAppointment) return null;
 
-      const appointmentDate = new Date(rawAppointment);
-      return Number.isNaN(appointmentDate.getTime()) ? null : appointmentDate;
+      const localDate = getLocalDatePortion(rawAppointment);
+      if (localDate) return localDate;
+
+      return getDateStringInAppTimeZone(rawAppointment) || null;
     };
 
     return loadsData.filter((load) => {
@@ -2112,8 +2146,10 @@ useEffect(() => {
         ? normalizeDriverForStorage(load.driver) === activeDriverId
         : true;
       const settlementAppointmentDate = getSettlementAppointmentDate(load);
-      const matchesStart = !start || (settlementAppointmentDate && settlementAppointmentDate >= start);
-      const matchesEnd = !end || (settlementAppointmentDate && settlementAppointmentDate <= end);
+      const matchesStart =
+        !settlementStartDate || (settlementAppointmentDate && settlementAppointmentDate >= settlementStartDate);
+      const matchesEnd =
+        !settlementEndDate || (settlementAppointmentDate && settlementAppointmentDate <= settlementEndDate);
       return matchesDriver && matchesStart && matchesEnd;
     });
   }, [loadsData, selectedSettlementDriverId, driversList, settlementStartDate, settlementEndDate]);
@@ -2314,11 +2350,7 @@ const filteredAccountingLoads = normalizedAccountingSearchTerm
   : completedAccountingLoads;
 const hasLastFreeDay = (load) => Boolean(String(load.lfd || load.lastFreeDay || '').trim());
 const hasAppointment = (load) => Boolean(String(load.appointmentTime || '').trim());
-const getRelativeDateString = (offsetDays = 0) => {
-  const date = new Date();
-  date.setDate(date.getDate() + offsetDays);
-  return date.toISOString().split('T')[0];
-};
+const getRelativeDateString = (offsetDays = 0) => getDateStringWithOffsetInAppTimeZone(offsetDays);
 const getAppointmentFilterDate = () => {
   if (appointmentDateFilter === 'yesterday') return getRelativeDateString(-1);
   if (appointmentDateFilter === 'tomorrow') return getRelativeDateString(1);
@@ -2328,10 +2360,11 @@ const getAppointmentFilterDate = () => {
 const getLoadAppointmentDate = (load) => {
   const rawAppointment = String(load?.appointmentTime || '').trim();
   if (!rawAppointment) return '';
-  if (/^\d{4}-\d{2}-\d{2}/.test(rawAppointment)) return rawAppointment.slice(0, 10);
+  const localDate = getLocalDatePortion(rawAppointment);
+  if (localDate) return localDate;
 
   const date = new Date(rawAppointment);
-  return Number.isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
+  return Number.isNaN(date.getTime()) ? '' : getDateStringInAppTimeZone(date);
 };
 const matchesAppointmentDateFilter = (load) => {
   const targetDate = getAppointmentFilterDate();
