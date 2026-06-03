@@ -1109,6 +1109,7 @@ const [settlementNote, setSettlementNote] = useState('');
 const [settlementContainerSearch, setSettlementContainerSearch] = useState('');
 const [settlementDeductionReasonInput, setSettlementDeductionReasonInput] = useState('');
 const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
+const [selectedAccountingLoadId, setSelectedAccountingLoadId] = useState('');
 const [selectedSettlementLoadId, setSelectedSettlementLoadId] = useState('');
 const [settlementPayDrafts, setSettlementPayDrafts] = useState({});
 const [settlementPayStatus, setSettlementPayStatus] = useState('');
@@ -2348,6 +2349,10 @@ const filteredAccountingLoads = normalizedAccountingSearchTerm
       );
     })
   : completedAccountingLoads;
+const selectedAccountingLoad =
+  filteredAccountingLoads.find((load) => load.id === selectedAccountingLoadId) ||
+  filteredAccountingLoads[0] ||
+  null;
 const hasLastFreeDay = (load) => Boolean(String(load.lfd || load.lastFreeDay || '').trim());
 const hasAppointment = (load) => Boolean(String(load.appointmentTime || '').trim());
 const getRelativeDateString = (offsetDays = 0) => getDateStringWithOffsetInAppTimeZone(offsetDays);
@@ -3040,6 +3045,80 @@ const handleSaveDropDetails = async () => {
   } catch (error) {
     console.error('Failed to save drop details:', error);
     alert(`Failed to save drop details: ${error.message}`);
+  }
+};
+
+const handleGenerateCustomerPdf = async (loadForPacket) => {
+  if (!loadForPacket?.id) return;
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/loads/${loadForPacket.id}/customer-packet`,
+      {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }
+    );
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || 'Failed to generate PDF');
+    }
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+
+    window.open(url, '_blank');
+
+    setTimeout(() => window.URL.revokeObjectURL(url), 5000);
+  } catch (error) {
+    console.error('Customer PDF error:', error);
+    alert(`Failed to generate PDF: ${error.message}`);
+  }
+};
+
+const handleRestoreCompletedLoad = async (loadToRestore) => {
+  if (!loadToRestore?.id) return;
+
+  const confirmRestore = window.confirm(
+    `Restore load ${loadToRestore.containerNumber || loadToRestore.id} back to Dispatch?`
+  );
+  if (!confirmRestore) return;
+
+  const restoredLoad = {
+    ...loadToRestore,
+    status: 'Dispatched',
+    availabilityStatus: '',
+  };
+
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${restoredLoad.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(restoredLoad),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to restore load');
+    }
+
+    setLoadsData((prevLoads) =>
+      prevLoads.map((load) => (load.id === data.id ? data : load))
+    );
+    setSelectedAccountingLoadId('');
+    setSelectedLoad(data);
+    setEditingLoad(data);
+    await fetchLoads();
+    alert('Load restored to Dispatch.');
+  } catch (error) {
+    console.error('Failed to restore completed load:', error);
+    alert(`Failed to restore load: ${error.message}`);
   }
 };
 
@@ -7440,36 +7519,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="documents-header">
                           <h4>Documents / Paperwork</h4>
                           <div className="documents-toolbar">
-                            <button
+<button
   type="button"
   className="customer-pdf-btn"
-  onClick={async () => {
-  try {
-    const res = await fetch(
-      `${API_BASE}/api/loads/${selectedLoad.id}/customer-packet`,
-      {
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      }
-    );
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || 'Failed to generate PDF');
-    }
-
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-
-    window.open(url, '_blank');
-
-    setTimeout(() => window.URL.revokeObjectURL(url), 5000);
-  } catch (error) {
-    console.error('Customer PDF error:', error);
-    alert(`Failed to generate PDF: ${error.message}`);
-  }
-}}
+  onClick={() => handleGenerateCustomerPdf(selectedLoad)}
 >
   Generate Customer PDF
 </button>
@@ -8837,14 +8890,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     <th>Driver</th>
                     <th>Status</th>
                     <th>Amount</th>
-                    <th>Invoice</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredAccountingLoads.map((load) => {
                     const invoice = savedInvoices.find((item) => item.loadId === load.id);
                     return (
-                      <tr key={load.id}>
+                      <tr key={load.id} className={selectedAccountingLoad?.id === load.id ? 'selected-row' : ''}>
                         <td>{load.loadDate || '—'}</td>
                         <td>{load.customer || '—'}</td>
                         <td>{load.containerNumber || '—'}</td>
@@ -8858,16 +8911,25 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         </td>
                         <td>{formatMoney(parseMoney(load.rate))}</td>
                         <td>
-                          <button
-                            type="button"
-                            className="secondary-btn compact-btn"
-                            onClick={() => {
-                              setInvoiceLoadId(load.id);
-                              setActiveView('invoices');
-                            }}
-                          >
-                            {invoice ? invoice.invoiceNumber : 'Create Invoice'}
-                          </button>
+                          <div className="accounting-row-actions">
+                            <button
+                              type="button"
+                              className="secondary-btn compact-btn"
+                              onClick={() => setSelectedAccountingLoadId(load.id)}
+                            >
+                              Details
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-btn compact-btn"
+                              onClick={() => {
+                                setInvoiceLoadId(load.id);
+                                setActiveView('invoices');
+                              }}
+                            >
+                              {invoice ? invoice.invoiceNumber : 'Create Invoice'}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -8878,6 +8940,136 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           ) : (
             <div className="empty-state">
               <p>{completedAccountingLoads.length > 0 ? 'No completed loads match that search.' : 'No completed loads in billing yet.'}</p>
+            </div>
+          )}
+
+          {selectedAccountingLoad && (
+            <div className="accounting-detail-panel">
+              <div className="panel-header">
+                <div>
+                  <h3>Bill Load Details</h3>
+                  <p className="panel-subtitle">
+                    {selectedAccountingLoad.containerNumber || 'No container'} • {selectedAccountingLoad.referenceNumber || selectedAccountingLoad.id}
+                  </p>
+                </div>
+                <div className="details-actions">
+                  <button
+                    type="button"
+                    className="customer-pdf-btn"
+                    onClick={() => handleGenerateCustomerPdf(selectedAccountingLoad)}
+                  >
+                    Customer PDF
+                  </button>
+                  <button
+                    type="button"
+                    className="pod-generate-btn"
+                    onClick={() => handleGeneratePOD(selectedAccountingLoad)}
+                  >
+                    Generate POD
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn compact-btn"
+                    onClick={() => {
+                      setInvoiceLoadId(selectedAccountingLoad.id);
+                      setActiveView('invoices');
+                    }}
+                  >
+                    Invoice
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-btn compact-btn"
+                    onClick={() => handleRestoreCompletedLoad(selectedAccountingLoad)}
+                  >
+                    Restore
+                  </button>
+                </div>
+              </div>
+
+              <div className="details-grid accounting-details-grid">
+                <div className="detail-box"><span>Status</span><strong>{getLoadQuickStatus(selectedAccountingLoad) || 'Completed'}</strong></div>
+                <div className="detail-box"><span>Load Date</span><strong>{selectedAccountingLoad.loadDate || '—'}</strong></div>
+                <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedAccountingLoad.appointmentTime)}</strong></div>
+                <div className="detail-box"><span>Customer</span><strong>{selectedAccountingLoad.customer || '—'}</strong></div>
+                <div className="detail-box"><span>Broker</span><strong>{selectedAccountingLoad.brokerName || selectedAccountingLoad.broker || '—'}</strong></div>
+                <div className="detail-box"><span>Reference #</span><strong>{selectedAccountingLoad.referenceNumber || '—'}</strong></div>
+                <div className="detail-box"><span>PO #</span><strong>{selectedAccountingLoad.poNumber || '—'}</strong></div>
+                <div className="detail-box"><span>Container</span><strong>{selectedAccountingLoad.containerNumber || '—'}</strong></div>
+                <div className="detail-box"><span>Container Size</span><strong>{selectedAccountingLoad.containerSize || '—'}</strong></div>
+                <div className="detail-box"><span>Ship Line</span><strong>{selectedAccountingLoad.shipLine || '—'}</strong></div>
+                <div className="detail-box"><span>Driver</span><strong>{selectedAccountingLoad.driver ? getDriverLabel(selectedAccountingLoad.driver) : 'Not Assigned'}</strong></div>
+                <div className="detail-box"><span>Truck</span><strong>{selectedAccountingLoad.truck || '—'}</strong></div>
+                <div className="detail-box"><span>Pickup</span><strong>{selectedAccountingLoad.pickup || '—'}</strong></div>
+                <div className="detail-box"><span>Delivery</span><strong>{selectedAccountingLoad.delivery || '—'}</strong></div>
+                <div className="detail-box"><span>Return Location</span><strong>{selectedAccountingLoad.returnLocation || '—'}</strong></div>
+                <div className="detail-box"><span>Drop Location</span><strong>{selectedAccountingLoad.dropLocation || '—'}</strong></div>
+                <div className="detail-box"><span>Dropped By</span><strong>{getDroppedByDriverValue(selectedAccountingLoad) ? getDriverLabel(getDroppedByDriverValue(selectedAccountingLoad)) : '—'}</strong></div>
+                <div className="detail-box"><span>Drop Date/Time</span><strong>{formatDateTime(selectedAccountingLoad.dropDateTime)}</strong></div>
+                <div className="detail-box"><span>Load Rate</span><strong>{selectedAccountingLoad.rate || '$0.00'}</strong></div>
+                <div className="detail-box"><span>Driver Rate</span><strong>{selectedAccountingLoad.driverRate || '$0.00'}</strong></div>
+              </div>
+
+              <div className="settlement-box accounting-settlement-box">
+                <h4>Settlement Breakdown</h4>
+                <div className="settlement-row"><span>Load Rate</span><strong>{selectedAccountingLoad.rate || '$0.00'}</strong></div>
+                <div className="settlement-row"><span>Driver Rate</span><strong>{selectedAccountingLoad.driverRate || '$0.00'}</strong></div>
+                <div className="settlement-row"><span>Detention</span><strong>{selectedAccountingLoad.detention || '$0.00'}</strong></div>
+                <div className="settlement-row"><span>Lumper</span><strong>{selectedAccountingLoad.lumper || '$0.00'}</strong></div>
+                <div className="settlement-row"><span>Fuel Advance</span><strong>- {selectedAccountingLoad.fuelAdvance || '$0.00'}</strong></div>
+                <div className="settlement-row total"><span>Settlement</span><strong>{selectedAccountingLoad.settlement || '$0.00'}</strong></div>
+              </div>
+
+              <div className="documents-box accounting-documents-box">
+                <div className="documents-header">
+                  <h4>Documents / Paperwork</h4>
+                  <span>{(selectedAccountingLoad.documents || []).length} files</span>
+                </div>
+
+                <div className="checklist-grid">
+                  {checklistDocumentTypes.map((docType) => {
+                    const isUploaded = getChecklistStatus(selectedAccountingLoad, docType);
+                    const uploadedDoc = (selectedAccountingLoad.documents || []).find(
+                      (doc) => (doc.category || doc.type || '').toLowerCase() === docType.toLowerCase()
+                    );
+
+                    return (
+                      <div key={docType} className={`checklist-card ${isUploaded ? 'uploaded' : 'missing'}`}>
+                        <span>{docType}</span>
+                        <strong>{isUploaded ? `Uploaded (${uploadedDoc?.name || ''})` : 'Missing'}</strong>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {selectedAccountingLoad.documents && selectedAccountingLoad.documents.length > 0 ? (
+                  <div className="documents-list">
+                    {selectedAccountingLoad.documents.map((doc) => (
+                      <div key={doc.id} className="document-card">
+                        <div className="document-info">
+                          <strong>{doc.name}</strong>
+                          <p>{doc.size} • {normalizeDocType(doc.type)}</p>
+                          <div className="document-meta">
+                            <span className="document-badge">{doc.category}</span>
+                          </div>
+                        </div>
+
+                        <div className="document-actions">
+                          <button className="secondary-btn" onClick={() => handleOpenDocument(doc)}>Open</button>
+                          <button className="secondary-btn" onClick={() => handleDownloadDocument(doc)}>Download</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="documents-empty">No documents uploaded for this completed load.</p>
+                )}
+              </div>
+
+              <div className="notes-box">
+                <h4>Dispatcher Notes</h4>
+                <p>{selectedAccountingLoad.notes || 'No notes saved.'}</p>
+              </div>
             </div>
           )}
         </section>

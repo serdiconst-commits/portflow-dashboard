@@ -2661,6 +2661,16 @@ button:disabled {
   margin-top: 0;
 }
 
+.accounting-table-wrap tr.selected-row td {
+  background: #eff6ff;
+}
+
+.accounting-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .accounting-search-bar {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) auto;
@@ -2680,10 +2690,41 @@ button:disabled {
   white-space: nowrap;
 }
 
+.accounting-detail-panel {
+  display: grid;
+  gap: 18px;
+  margin-top: 6px;
+  padding: 18px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.accounting-detail-panel .panel-header {
+  align-items: flex-start;
+}
+
+.accounting-details-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 0;
+}
+
+.accounting-settlement-box,
+.accounting-documents-box {
+  margin-top: 0;
+}
+
 @media (max-width: 760px) {
   .accounting-summary-strip,
-  .accounting-search-bar {
+  .accounting-search-bar,
+  .accounting-details-grid {
     grid-template-columns: 1fr;
+  }
+
+  .accounting-row-actions,
+  .accounting-detail-panel .details-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
