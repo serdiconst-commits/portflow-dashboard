@@ -1102,6 +1102,7 @@ const [searchTerm, setSearchTerm] = useState('');
 const [statusFilter, setStatusFilter] = useState('All');
 const [paperworkFilter, setPaperworkFilter] = useState('All');
 const [selectedDocumentType, setSelectedDocumentType] = useState('POD');
+const [selectedAccountingDocumentType, setSelectedAccountingDocumentType] = useState('POD');
 const [selectedSettlementDriverId, setSelectedSettlementDriverId] = useState('');
 const [settlementStartDate, setSettlementStartDate] = useState('');
 const [settlementEndDate, setSettlementEndDate] = useState('');
@@ -3122,29 +3123,36 @@ const handleRestoreCompletedLoad = async (loadToRestore) => {
   }
 };
 
+const uploadDocumentsForLoad = async (loadId, files, category) => {
+  if (!loadId || !files.length) return null;
+
+  const formData = new FormData();
+  files.forEach((file) => formData.append('files', file));
+  formData.append('category', category || 'Other');
+
+  const res = await fetch(`${API_BASE}/api/loads/${loadId}/documents`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: formData,
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to upload documents');
+  }
+
+  return data;
+};
+
 const handleDocumentUpload = async (e) => {
   const files = Array.from(e.target.files || []);
   if (!files.length || !selectedLoad) return;
 
-  const formData = new FormData();
-  files.forEach((file) => formData.append('files', file));
-  formData.append('category', selectedDocumentType || 'Other');
-
   try {
-    const res = await fetch(`${API_BASE}/api/loads/${selectedLoad.id}/documents`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: formData,
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to upload documents');
-    }
-
+    await uploadDocumentsForLoad(selectedLoad.id, files, selectedDocumentType || 'Other');
     await fetchLoads();
     await fetchSelectedLoadAuditLogs(selectedLoad.id);
 
@@ -3152,6 +3160,26 @@ const handleDocumentUpload = async (e) => {
   } catch (error) {
     console.error('Document upload error:', error);
     alert(`Failed to upload documents: ${error.message}`);
+  } finally {
+    e.target.value = '';
+  }
+};
+
+const handleAccountingDocumentUpload = async (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length || !selectedAccountingLoad) return;
+
+  try {
+    await uploadDocumentsForLoad(
+      selectedAccountingLoad.id,
+      files,
+      selectedAccountingDocumentType || 'Other'
+    );
+    setSelectedAccountingLoadId(selectedAccountingLoad.id);
+    await fetchLoads();
+  } catch (error) {
+    console.error('Billing document upload error:', error);
+    alert(`Failed to upload billing documents: ${error.message}`);
   } finally {
     e.target.value = '';
   }
@@ -9023,7 +9051,29 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <div className="documents-box accounting-documents-box">
                 <div className="documents-header">
                   <h4>Documents / Paperwork</h4>
-                  <span>{(selectedAccountingLoad.documents || []).length} files</span>
+                  <div className="documents-toolbar">
+                    <span>{(selectedAccountingLoad.documents || []).length} files</span>
+                    <select
+                      value={selectedAccountingDocumentType}
+                      onChange={(e) => setSelectedAccountingDocumentType(e.target.value)}
+                      className="document-type-select"
+                    >
+                      {documentTypes.map((docType) => (
+                        <option key={docType} value={docType}>
+                          {docType}
+                        </option>
+                      ))}
+                    </select>
+                    <label className="upload-btn">
+                      Upload Files
+                      <input
+                        type="file"
+                        multiple
+                        onChange={handleAccountingDocumentUpload}
+                        hidden
+                      />
+                    </label>
+                  </div>
                 </div>
 
                 <div className="checklist-grid">
