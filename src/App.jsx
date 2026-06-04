@@ -5022,15 +5022,52 @@ useEffect(() => {
   };
 }, []);
 
-const driverActiveLoads = (loadsData || []).filter((load) => {
+const getDriverLoadAssignmentOrder = (load = {}) => {
+  const idNumber = Number(String(load.id || '').match(/(\d+)$/)?.[1] || 0);
+  if (idNumber) return idNumber;
+
+  const createdTime = Date.parse(load.createdAt || '');
+  if (!Number.isNaN(createdTime)) return createdTime;
+
+  const loadDateTime = Date.parse(`${load.loadDate || ''}T12:00:00`);
+  return Number.isNaN(loadDateTime) ? Number.MAX_SAFE_INTEGER : loadDateTime;
+};
+
+const getDriverLoadAppointmentOrder = (load = {}) => {
+  const rawAppointment = String(load.appointmentTime || '').trim();
+  if (!rawAppointment) return Number.MAX_SAFE_INTEGER;
+
+  const appointmentTime = Date.parse(rawAppointment);
+  return Number.isNaN(appointmentTime) ? Number.MAX_SAFE_INTEGER : appointmentTime;
+};
+
+const getDriverLoadStatusOrder = (load = {}) => {
+  const status = String(load.status || '').trim().toLowerCase();
+  if (status === 'in transit') return 0;
+  if (status === 'dispatched') return 1;
+  return 2;
+};
+
+const sortDriverLoads = (loads = []) =>
+  [...loads].sort((a, b) => {
+    const statusCompare = getDriverLoadStatusOrder(a) - getDriverLoadStatusOrder(b);
+    if (statusCompare !== 0) return statusCompare;
+
+    const appointmentCompare = getDriverLoadAppointmentOrder(a) - getDriverLoadAppointmentOrder(b);
+    if (appointmentCompare !== 0) return appointmentCompare;
+
+    return getDriverLoadAssignmentOrder(a) - getDriverLoadAssignmentOrder(b);
+  });
+
+const driverActiveLoads = sortDriverLoads((loadsData || []).filter((load) => {
   const status = String(load.status || '').trim().toLowerCase();
   return driverMatchesCurrentUser(load.driver, currentUser) && !['delivered', 'dropped'].includes(status);
-});
+}));
 
-const driverCompletedLoads = (loadsData || []).filter((load) => {
+const driverCompletedLoads = sortDriverLoads((loadsData || []).filter((load) => {
   const status = String(load.status || '').trim().toLowerCase();
   return driverMatchesCurrentUser(load.driver, currentUser) && status === 'delivered';
-});
+}));
 
 const driverNeedsDocsLoads = driverActiveLoads.filter((load) => !hasRequiredDriverDocuments(load));
 const driverVisibleLoads =
