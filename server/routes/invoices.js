@@ -55,6 +55,10 @@ export default function createInvoiceRoutes(db) {
   poNumber = '',
   amount = '',
   status = 'Unpaid',
+  paidAmount = 0,
+  paymentDate = '',
+  paymentMethod = '',
+  paymentNotes = '',
   issueDate = '',
   dueDate = '',
   notes = '',
@@ -119,12 +123,16 @@ export default function createInvoiceRoutes(db) {
     referenceNumber,
     amount,
     status,
+    paidAmount,
+    paymentDate,
+    paymentMethod,
+    paymentNotes,
     issueDate,
     dueDate,
     notes,
     companyId,
     createdAt
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   [
     newInvoiceNumber,
     customerId,
@@ -133,6 +141,10 @@ export default function createInvoiceRoutes(db) {
     referenceNumber,
     amount,
     status,
+    Number(paidAmount || 0),
+    paymentDate,
+    paymentMethod,
+    paymentNotes,
     issueDate,
     dueDate,
     notes,
@@ -200,6 +212,81 @@ export default function createInvoiceRoutes(db) {
         });
       }
     );
+  });
+
+  router.put('/:id/payment', (req, res) => {
+    const { id } = req.params;
+    const companyId = req.company?.companyId;
+    const {
+      paidAmount = 0,
+      paymentDate = '',
+      paymentMethod = '',
+      paymentNotes = '',
+      status = '',
+    } = req.body || {};
+
+    const normalizedPaidAmount = Number(paidAmount || 0);
+    if (Number.isNaN(normalizedPaidAmount) || normalizedPaidAmount < 0) {
+      return res.status(400).json({ error: 'Paid amount must be a valid number.' });
+    }
+
+    db.get(`SELECT * FROM invoices WHERE id = ? AND companyId = ?`, [id, companyId], (findErr, invoice) => {
+      if (findErr) {
+        console.error('Error loading invoice for payment update:', findErr.message);
+        return res.status(500).json({ error: 'Failed to load invoice' });
+      }
+
+      if (!invoice) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      const invoiceAmount = Number(invoice.amount || 0);
+      const nextStatus =
+        status ||
+        (normalizedPaidAmount >= invoiceAmount && invoiceAmount > 0
+          ? 'Paid'
+          : normalizedPaidAmount > 0
+          ? 'Partial'
+          : 'Unpaid');
+
+      db.run(
+        `UPDATE invoices
+         SET paidAmount = ?,
+             paymentDate = ?,
+             paymentMethod = ?,
+             paymentNotes = ?,
+             status = ?
+         WHERE id = ? AND companyId = ?`,
+        [
+          normalizedPaidAmount,
+          String(paymentDate || ''),
+          String(paymentMethod || ''),
+          String(paymentNotes || ''),
+          nextStatus,
+          id,
+          companyId,
+        ],
+        function (updateErr) {
+          if (updateErr) {
+            console.error('Error updating invoice payment:', updateErr.message);
+            return res.status(500).json({ error: 'Failed to update invoice payment' });
+          }
+
+          if (this.changes === 0) {
+            return res.status(404).json({ error: 'Invoice not found' });
+          }
+
+          db.get(`SELECT * FROM invoices WHERE id = ? AND companyId = ?`, [id, companyId], (fetchErr, row) => {
+            if (fetchErr) {
+              console.error('Error fetching updated invoice payment:', fetchErr.message);
+              return res.status(500).json({ error: 'Payment saved but failed to fetch invoice' });
+            }
+
+            return res.json(row);
+          });
+        }
+      );
+    });
   });
 
   return router;

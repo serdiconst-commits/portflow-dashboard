@@ -1117,6 +1117,7 @@ const [settlementPayStatus, setSettlementPayStatus] = useState('');
 const [invoiceLoadId, setInvoiceLoadId] = useState('');
 const [savedInvoices, setSavedInvoices] = useState([]);
 const [invoiceStatusMessage, setInvoiceStatusMessage] = useState('');
+const [invoicePaymentDrafts, setInvoicePaymentDrafts] = useState({});
 const [showNewPickupForm, setShowNewPickupForm] = useState(false);
 const [showNewPickup, setShowNewPickup] = useState(false);
 const [newPickupLocation, setNewPickupLocation] = useState({
@@ -2354,6 +2355,9 @@ const selectedAccountingLoad =
   filteredAccountingLoads.find((load) => load.id === selectedAccountingLoadId) ||
   filteredAccountingLoads[0] ||
   null;
+const selectedAccountingInvoice = selectedAccountingLoad
+  ? savedInvoices.find((invoice) => invoice.loadId === selectedAccountingLoad.id) || null
+  : null;
 const hasLastFreeDay = (load) => Boolean(String(load.lfd || load.lastFreeDay || '').trim());
 const hasAppointment = (load) => Boolean(String(load.appointmentTime || '').trim());
 const getRelativeDateString = (offsetDays = 0) => getDateStringWithOffsetInAppTimeZone(offsetDays);
@@ -3770,6 +3774,84 @@ const handleInvoiceStatusChange = async (invoiceId, newStatus) => {
     );
   } catch (error) {
     console.error('Failed to update invoice status:', error);
+  }
+};
+
+const getInvoicePaymentDraft = (invoice) => {
+  if (!invoice) {
+    return {
+      paidAmount: '',
+      paymentDate: getTodayDate(),
+      paymentMethod: '',
+      paymentNotes: '',
+    };
+  }
+
+  return invoicePaymentDrafts[invoice.id] || {
+    paidAmount:
+      invoice.paidAmount === null || invoice.paidAmount === undefined || invoice.paidAmount === ''
+        ? ''
+        : String(invoice.paidAmount),
+    paymentDate: invoice.paymentDate || getTodayDate(),
+    paymentMethod: invoice.paymentMethod || '',
+    paymentNotes: invoice.paymentNotes || '',
+  };
+};
+
+const getInvoiceBalance = (invoice, draft = null) => {
+  if (!invoice) return 0;
+  const activeDraft = draft || getInvoicePaymentDraft(invoice);
+  return Math.max(0, parseMoney(invoice.amount) - parseMoney(activeDraft.paidAmount));
+};
+
+const handleInvoicePaymentDraftChange = (invoiceId, field, value) => {
+  setInvoicePaymentDrafts((prev) => ({
+    ...prev,
+    [invoiceId]: {
+      ...(prev[invoiceId] || {}),
+      [field]: value,
+    },
+  }));
+  setInvoiceStatusMessage('');
+};
+
+const handleSaveInvoicePayment = async (invoice) => {
+  if (!invoice?.id) return;
+  const draft = getInvoicePaymentDraft(invoice);
+
+  try {
+    const res = await fetch(`${API_BASE}/api/invoices/${invoice.id}/payment`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        paidAmount: parseMoney(draft.paidAmount),
+        paymentDate: draft.paymentDate || '',
+        paymentMethod: draft.paymentMethod || '',
+        paymentNotes: draft.paymentNotes || '',
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save customer payment');
+    }
+
+    setSavedInvoices((prev) =>
+      prev.map((item) => (item.id === data.id ? data : item))
+    );
+    setInvoicePaymentDrafts((prev) => {
+      const next = { ...prev };
+      delete next[invoice.id];
+      return next;
+    });
+    setInvoiceStatusMessage(`Payment updated for ${data.invoiceNumber}.`);
+  } catch (error) {
+    console.error('Failed to save invoice payment:', error);
+    setInvoiceStatusMessage(`Failed to save payment: ${error.message}`);
   }
 };
 const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
@@ -8918,6 +9000,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     <th>Driver</th>
                     <th>Status</th>
                     <th>Amount</th>
+                    <th>Paid</th>
+                    <th>Balance</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -8938,6 +9022,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           </span>
                         </td>
                         <td>{formatMoney(parseMoney(load.rate))}</td>
+                        <td>{invoice ? formatMoney(parseMoney(invoice.paidAmount)) : '—'}</td>
+                        <td>
+                          {invoice
+                            ? formatMoney(Math.max(0, parseMoney(invoice.amount) - parseMoney(invoice.paidAmount)))
+                            : '—'}
+                        </td>
                         <td>
                           <div className="accounting-row-actions">
                             <button
@@ -9046,6 +9136,135 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="settlement-row"><span>Lumper</span><strong>{selectedAccountingLoad.lumper || '$0.00'}</strong></div>
                 <div className="settlement-row"><span>Fuel Advance</span><strong>- {selectedAccountingLoad.fuelAdvance || '$0.00'}</strong></div>
                 <div className="settlement-row total"><span>Settlement</span><strong>{selectedAccountingLoad.settlement || '$0.00'}</strong></div>
+              </div>
+
+              <div className="invoice-box accounting-payment-box">
+                <div className="documents-header">
+                  <h4>Customer Payment</h4>
+                  <span>{selectedAccountingInvoice?.invoiceNumber || 'No invoice yet'}</span>
+                </div>
+
+                {selectedAccountingInvoice ? (
+                  <>
+                    {(() => {
+                      const paymentDraft = getInvoicePaymentDraft(selectedAccountingInvoice);
+                      const balance = getInvoiceBalance(selectedAccountingInvoice, paymentDraft);
+                      return (
+                        <>
+                          <div className="accounting-payment-summary">
+                            <div>
+                              <span>Invoice Total</span>
+                              <strong>{formatMoney(parseMoney(selectedAccountingInvoice.amount))}</strong>
+                            </div>
+                            <div>
+                              <span>Paid</span>
+                              <strong>{formatMoney(parseMoney(paymentDraft.paidAmount))}</strong>
+                            </div>
+                            <div>
+                              <span>Balance</span>
+                              <strong>{formatMoney(balance)}</strong>
+                            </div>
+                            <div>
+                              <span>Status</span>
+                              <strong>{selectedAccountingInvoice.status || 'Unpaid'}</strong>
+                            </div>
+                          </div>
+
+                          <div className="accounting-payment-form">
+                            <label className="settlement-entry-field">
+                              <span>Paid Amount</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={paymentDraft.paidAmount}
+                                placeholder="$0.00"
+                                onChange={(e) =>
+                                  handleInvoicePaymentDraftChange(
+                                    selectedAccountingInvoice.id,
+                                    'paidAmount',
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </label>
+                            <label className="settlement-entry-field">
+                              <span>Payment Date</span>
+                              <input
+                                type="date"
+                                value={paymentDraft.paymentDate}
+                                onChange={(e) =>
+                                  handleInvoicePaymentDraftChange(
+                                    selectedAccountingInvoice.id,
+                                    'paymentDate',
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </label>
+                            <label className="settlement-entry-field">
+                              <span>Method</span>
+                              <select
+                                className="filter-select"
+                                value={paymentDraft.paymentMethod}
+                                onChange={(e) =>
+                                  handleInvoicePaymentDraftChange(
+                                    selectedAccountingInvoice.id,
+                                    'paymentMethod',
+                                    e.target.value
+                                  )
+                                }
+                              >
+                                <option value="">Select method</option>
+                                <option value="ACH">ACH</option>
+                                <option value="Check">Check</option>
+                                <option value="Wire">Wire</option>
+                                <option value="Credit Card">Credit Card</option>
+                                <option value="Cash">Cash</option>
+                                <option value="Other">Other</option>
+                              </select>
+                            </label>
+                            <label className="settlement-entry-field accounting-payment-note-field">
+                              <span>Payment Note</span>
+                              <input
+                                type="text"
+                                value={paymentDraft.paymentNotes}
+                                placeholder="Check #, ACH ref, short note"
+                                onChange={(e) =>
+                                  handleInvoicePaymentDraftChange(
+                                    selectedAccountingInvoice.id,
+                                    'paymentNotes',
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              className="primary-btn"
+                              onClick={() => handleSaveInvoicePayment(selectedAccountingInvoice)}
+                            >
+                              Save Payment
+                            </button>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </>
+                ) : (
+                  <div className="empty-state compact-empty">
+                    <p>Create the invoice first, then you can record customer payments here.</p>
+                    <button
+                      type="button"
+                      className="primary-btn compact-btn"
+                      onClick={() => {
+                        setInvoiceLoadId(selectedAccountingLoad.id);
+                        setActiveView('invoices');
+                      }}
+                    >
+                      Create Invoice
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="documents-box accounting-documents-box">
@@ -9346,6 +9565,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             className="filter-select"
                           >
                             <option value="Unpaid">Unpaid</option>
+                            <option value="Partial">Partial</option>
                             <option value="Paid">Paid</option>
                             <option value="Overdue">Overdue</option>
                           </select>

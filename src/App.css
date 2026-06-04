@@ -2714,10 +2714,55 @@ button:disabled {
   margin-top: 0;
 }
 
+.accounting-payment-box {
+  margin-top: 0;
+}
+
+.accounting-payment-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.accounting-payment-summary > div {
+  padding: 12px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.accounting-payment-summary span {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.accounting-payment-summary strong {
+  display: block;
+  margin-top: 4px;
+  color: #111827;
+}
+
+.accounting-payment-form {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(140px, 0.8fr) minmax(140px, 0.8fr) minmax(220px, 1.4fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.accounting-payment-form .primary-btn {
+  min-height: 42px;
+}
+
 @media (max-width: 760px) {
   .accounting-summary-strip,
   .accounting-search-bar,
-  .accounting-details-grid {
+  .accounting-details-grid,
+  .accounting-payment-summary,
+  .accounting-payment-form {
     grid-template-columns: 1fr;
   }
 

@@ -563,6 +563,26 @@ db.run(`ALTER TABLE invoices ADD COLUMN referenceNumber TEXT`, (err) => {
     console.error('Error adding referenceNumber column to invoices:', err.message);
   }
 });
+db.run(`ALTER TABLE invoices ADD COLUMN paidAmount REAL DEFAULT 0`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding paidAmount column to invoices:', err.message);
+  }
+});
+db.run(`ALTER TABLE invoices ADD COLUMN paymentDate TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding paymentDate column to invoices:', err.message);
+  }
+});
+db.run(`ALTER TABLE invoices ADD COLUMN paymentMethod TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding paymentMethod column to invoices:', err.message);
+  }
+});
+db.run(`ALTER TABLE invoices ADD COLUMN paymentNotes TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding paymentNotes column to invoices:', err.message);
+  }
+});
     // Make invoiceNumber unique
     db.run(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_invoice_number
