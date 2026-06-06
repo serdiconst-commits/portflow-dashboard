@@ -219,6 +219,7 @@ export default function createInvoiceRoutes(db) {
     const companyId = req.company?.companyId;
     const {
       paidAmount = 0,
+      amount,
       paymentDate = '',
       paymentMethod = '',
       paymentNotes = '',
@@ -240,7 +241,15 @@ export default function createInvoiceRoutes(db) {
         return res.status(404).json({ error: 'Invoice not found' });
       }
 
-      const invoiceAmount = Number(invoice.amount || 0);
+      const invoiceAmount =
+        amount === undefined || amount === null || amount === ''
+          ? Number(invoice.amount || 0)
+          : Number(amount || 0);
+
+      if (Number.isNaN(invoiceAmount) || invoiceAmount < 0) {
+        return res.status(400).json({ error: 'Invoice amount must be a valid number.' });
+      }
+
       const nextStatus =
         status ||
         (normalizedPaidAmount >= invoiceAmount && invoiceAmount > 0
@@ -251,13 +260,15 @@ export default function createInvoiceRoutes(db) {
 
       db.run(
         `UPDATE invoices
-         SET paidAmount = ?,
+         SET amount = ?,
+             paidAmount = ?,
              paymentDate = ?,
              paymentMethod = ?,
              paymentNotes = ?,
              status = ?
          WHERE id = ? AND companyId = ?`,
         [
+          invoiceAmount,
           normalizedPaidAmount,
           String(paymentDate || ''),
           String(paymentMethod || ''),

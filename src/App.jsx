@@ -1118,6 +1118,7 @@ const [invoiceLoadId, setInvoiceLoadId] = useState('');
 const [savedInvoices, setSavedInvoices] = useState([]);
 const [invoiceStatusMessage, setInvoiceStatusMessage] = useState('');
 const [invoicePaymentDrafts, setInvoicePaymentDrafts] = useState({});
+const [accountingBillAmountDrafts, setAccountingBillAmountDrafts] = useState({});
 const [showNewPickupForm, setShowNewPickupForm] = useState(false);
 const [showNewPickup, setShowNewPickup] = useState(false);
 const [newPickupLocation, setNewPickupLocation] = useState({
@@ -3710,26 +3711,20 @@ const handleChangeUserRole = async (userId, newRole) => {
     printWindow.print();
   };
   
-const handleSaveInvoice = async () => {
-  if (!selectedInvoiceLoad) return;
-
-  if (!selectedInvoiceLoad?.pod) {
-    alert('POD is required before saving invoice');
-    return;
-  }
-
+const createInvoiceForLoad = async (load, amountOverride = null) => {
+  if (!load) return null;
   try {
     const invoicePayload = {
-      customerId: selectedCustomer?.id || '',
-      customerName: selectedInvoiceLoad.customer || 'Customer',
-      loadId: selectedInvoiceLoad.id,
-      referenceNumber: selectedInvoiceLoad.referenceNumber || '',
-      poNumber: selectedInvoiceLoad.poNumber || '',
-      amount: parseMoney(selectedInvoiceLoad.rate),
+      customerId: load.customerId || selectedCustomer?.id || '',
+      customerName: load.customer || 'Customer',
+      loadId: load.id,
+      referenceNumber: load.referenceNumber || '',
+      poNumber: load.poNumber || '',
+      amount: parseMoney(amountOverride === null || amountOverride === undefined ? load.rate : amountOverride),
       status: 'Unpaid',
       issueDate: getTodayDate(),
       dueDate: '',
-      notes: selectedInvoiceLoad.notes || '',
+      notes: load.notes || '',
     };
 
     const res = await fetch(`${API_BASE}/api/invoices`, {
@@ -3749,15 +3744,33 @@ const handleSaveInvoice = async () => {
 
     setSavedInvoices((prev) => {
       const withoutCurrent = prev.filter(
-        (inv) => inv.loadId !== selectedInvoiceLoad.id
+        (inv) => inv.loadId !== load.id
       );
       return [...withoutCurrent, data];
     });
 
     setInvoiceStatusMessage(`Invoice ${data.invoiceNumber} saved successfully.`);
+    return data;
   } catch (error) {
     console.error('Save invoice error:', error);
     setInvoiceStatusMessage(`Failed to save invoice: ${error.message}`);
+    return null;
+  }
+};
+
+const handleSaveInvoice = async () => {
+  await createInvoiceForLoad(selectedInvoiceLoad);
+};
+
+const handleCreateAccountingInvoice = async (load) => {
+  if (!load?.id) return;
+  const createdInvoice = await createInvoiceForLoad(load, getAccountingBillAmountDraft(load));
+  if (createdInvoice) {
+    setAccountingBillAmountDrafts((prev) => {
+      const next = { ...prev };
+      delete next[load.id];
+      return next;
+    });
   }
 };
 const handleInvoiceStatusChange = async (invoiceId, newStatus) => {
@@ -3790,6 +3803,7 @@ const handleInvoiceStatusChange = async (invoiceId, newStatus) => {
 const getInvoicePaymentDraft = (invoice) => {
   if (!invoice) {
     return {
+      amount: '',
       paidAmount: '',
       paymentDate: getTodayDate(),
       paymentMethod: '',
@@ -3798,6 +3812,10 @@ const getInvoicePaymentDraft = (invoice) => {
   }
 
   return invoicePaymentDrafts[invoice.id] || {
+    amount:
+      invoice.amount === null || invoice.amount === undefined || invoice.amount === ''
+        ? ''
+        : String(invoice.amount),
     paidAmount:
       invoice.paidAmount === null || invoice.paidAmount === undefined || invoice.paidAmount === ''
         ? ''
@@ -3811,7 +3829,20 @@ const getInvoicePaymentDraft = (invoice) => {
 const getInvoiceBalance = (invoice, draft = null) => {
   if (!invoice) return 0;
   const activeDraft = draft || getInvoicePaymentDraft(invoice);
-  return Math.max(0, parseMoney(invoice.amount) - parseMoney(activeDraft.paidAmount));
+  return Math.max(0, parseMoney(activeDraft.amount ?? invoice.amount) - parseMoney(activeDraft.paidAmount));
+};
+
+const getAccountingBillAmountDraft = (load) => {
+  if (!load?.id) return '';
+  return accountingBillAmountDrafts[load.id] ?? (load.rate || '');
+};
+
+const handleAccountingBillAmountChange = (loadId, value) => {
+  setAccountingBillAmountDrafts((prev) => ({
+    ...prev,
+    [loadId]: value,
+  }));
+  setInvoiceStatusMessage('');
 };
 
 const handleInvoicePaymentDraftChange = (invoiceId, field, value) => {
@@ -3837,6 +3868,7 @@ const handleSaveInvoicePayment = async (invoice) => {
         Authorization: `Bearer ${authToken}`,
       },
       body: JSON.stringify({
+        amount: parseMoney(draft.amount ?? invoice.amount),
         paidAmount: parseMoney(draft.paidAmount),
         paymentDate: draft.paymentDate || '',
         paymentMethod: draft.paymentMethod || '',
@@ -9068,7 +9100,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             {getLoadQuickStatus(load) || 'Completed'}
                           </span>
                         </td>
-                        <td>{formatMoney(parseMoney(load.rate))}</td>
+                        <td>{formatMoney(parseMoney(invoice?.amount ?? load.rate))}</td>
                         <td>{invoice ? formatMoney(parseMoney(invoice.paidAmount)) : '—'}</td>
                         <td>
                           {invoice
@@ -9201,7 +9233,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <div className="accounting-payment-summary">
                             <div>
                               <span>Invoice Total</span>
-                              <strong>{formatMoney(parseMoney(selectedAccountingInvoice.amount))}</strong>
+                              <strong>{formatMoney(parseMoney(paymentDraft.amount ?? selectedAccountingInvoice.amount))}</strong>
                             </div>
                             <div>
                               <span>Paid</span>
@@ -9218,6 +9250,22 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           </div>
 
                           <div className="accounting-payment-form">
+                            <label className="settlement-entry-field">
+                              <span>Final Bill Amount</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={paymentDraft.amount}
+                                placeholder="$0.00"
+                                onChange={(e) =>
+                                  handleInvoicePaymentDraftChange(
+                                    selectedAccountingInvoice.id,
+                                    'amount',
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </label>
                             <label className="settlement-entry-field">
                               <span>Paid Amount</span>
                               <input
@@ -9299,14 +9347,26 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </>
                 ) : (
                   <div className="empty-state compact-empty">
-                    <p>Create the invoice first, then you can record customer payments here.</p>
+                    <p>Add the final bill amount, then create the invoice for this completed load.</p>
+                    <label className="settlement-entry-field">
+                      <span>Final Bill Amount</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={getAccountingBillAmountDraft(selectedAccountingLoad)}
+                        placeholder="$0.00"
+                        onChange={(e) =>
+                          handleAccountingBillAmountChange(
+                            selectedAccountingLoad.id,
+                            e.target.value
+                          )
+                        }
+                      />
+                    </label>
                     <button
                       type="button"
                       className="primary-btn compact-btn"
-                      onClick={() => {
-                        setInvoiceLoadId(selectedAccountingLoad.id);
-                        setActiveView('invoices');
-                      }}
+                      onClick={() => handleCreateAccountingInvoice(selectedAccountingLoad)}
                     >
                       Create Invoice
                     </button>
