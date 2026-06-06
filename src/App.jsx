@@ -3222,6 +3222,11 @@ const handleAccountingDocumentUpload = async (e) => {
 const handleOpenDocument = async (doc) => {
   if (!doc) return;
 
+  const openedWindow = window.open('', '_blank');
+  if (openedWindow) {
+    openedWindow.document.write('<p style="font-family: Arial, sans-serif; padding: 16px;">Opening document...</p>');
+  }
+
   try {
     const fileUrl = getDocumentUrl(doc);
 
@@ -3239,14 +3244,19 @@ const handleOpenDocument = async (doc) => {
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
 
-    if (previewUrl) {
-      window.URL.revokeObjectURL(previewUrl);
+    if (openedWindow) {
+      openedWindow.location.href = url;
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+      return;
     }
 
     setPreviewDocument(doc);
     setPreviewUrl(url);
   } catch (error) {
     console.error('Open document error:', error);
+    if (openedWindow && !openedWindow.closed) {
+      openedWindow.close();
+    }
     alert(`Failed to open document: ${error.message}`);
   }
 };
