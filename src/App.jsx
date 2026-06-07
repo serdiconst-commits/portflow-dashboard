@@ -2868,6 +2868,17 @@ const handleCheckPortHouston = async (load) => {
       ...prev,
       [load.id]: { loading: false, error: '', result: data },
     }));
+    if (data.updatedLoad) {
+      setLoadsData((prev) =>
+        prev.map((item) => (item.id === data.updatedLoad.id ? data.updatedLoad : item))
+      );
+      setSelectedLoad((prev) =>
+        prev?.id === data.updatedLoad.id ? data.updatedLoad : prev
+      );
+      setEditingLoad((prev) =>
+        prev?.id === data.updatedLoad.id ? data.updatedLoad : prev
+      );
+    }
     await fetchSelectedLoadAuditLogs(load.id);
   } catch (error) {
     setPortHoustonChecksByLoad((prev) => ({

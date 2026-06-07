@@ -231,9 +231,14 @@ const attachDocumentsToLoads = (loads, callback) => {
       }
 
       const documentsByLoad = documents.reduce((groups, doc) => {
+        const isExternalUrl = /^https?:\/\//i.test(String(doc.filePath || ''));
         const normalizedDoc = {
           ...doc,
-          url: doc.filePath ? `/uploads/${path.basename(doc.filePath)}` : '',
+          url: doc.filePath
+            ? isExternalUrl
+              ? doc.filePath
+              : `/uploads/${path.basename(doc.filePath)}`
+            : '',
         };
         groups[doc.loadId] = groups[doc.loadId] || [];
         groups[doc.loadId].push(normalizedDoc);
@@ -250,6 +255,185 @@ const attachDocumentsToLoads = (loads, callback) => {
     }
   );
 };
+
+const flattenPortHoustonValues = (value, pathKey = '') => {
+  if (value === null || value === undefined) return [];
+  if (typeof value !== 'object') return [{ key: pathKey, value }];
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => flattenPortHoustonValues(item, `${pathKey}.${index}`));
+  }
+  return Object.entries(value).flatMap(([key, child]) =>
+    flattenPortHoustonValues(child, pathKey ? `${pathKey}.${key}` : key)
+  );
+};
+
+const findPortHoustonEirUrl = (source, direction) => {
+  const directionWords = direction === 'OUT EIR'
+    ? ['out', 'outgate', 'gateout', 'depart', 'pickup']
+    : ['in', 'ingate', 'gatein', 'return'];
+
+  return flattenPortHoustonValues(source)
+    .filter(({ value }) => typeof value === 'string' && /^https?:\/\//i.test(value))
+    .find(({ key, value }) => {
+      const haystack = `${key} ${value}`.toLowerCase();
+      return haystack.includes('eir') && directionWords.some((word) => haystack.includes(word));
+    })?.value || '';
+};
+
+const getExternalDocumentName = (category, loadId, url = '') => {
+  const cleanName = String(url).split('/').pop()?.split('?')[0] || '';
+  return cleanName || `${loadId}-${category.replace(/\s+/g, '-').toLowerCase()}.pdf`;
+};
+
+const ensureExternalDocumentRecord = ({
+  loadId,
+  companyId,
+  category,
+  url,
+}) =>
+  new Promise((resolve, reject) => {
+    if (!url) {
+      resolve(null);
+      return;
+    }
+
+    db.get(
+      `SELECT d.*
+       FROM documents d
+       JOIN loads l ON l.id = d.loadId
+       WHERE d.loadId = ?
+         AND l.companyId = ?
+         AND UPPER(TRIM(d.category)) = ?
+         AND d.filePath = ?`,
+      [loadId, companyId, category, url],
+      (findErr, existingDoc) => {
+        if (findErr) {
+          reject(findErr);
+          return;
+        }
+
+        if (existingDoc) {
+          resolve(existingDoc);
+          return;
+        }
+
+        const id = uuidv4();
+        const uploadedAt = new Date().toISOString();
+        const name = getExternalDocumentName(category, loadId, url);
+
+        db.run(
+          `INSERT INTO documents (id, loadId, name, size, type, category, filePath, uploadedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, loadId, name, 'External', 'application/pdf', category, url, uploadedAt],
+          (insertErr) => {
+            if (insertErr) {
+              reject(insertErr);
+              return;
+            }
+
+            resolve({
+              id,
+              loadId,
+              name,
+              size: 'External',
+              type: 'application/pdf',
+              category,
+              filePath: url,
+              uploadedAt,
+              url,
+            });
+          }
+        );
+      }
+    );
+  });
+
+const updateLoadFromPortHoustonCheck = ({
+  load,
+  companyId,
+  availability,
+  eir,
+}) =>
+  new Promise((resolve, reject) => {
+    const hasAvailability = typeof availability?.available === 'boolean';
+    const nextAvailabilityStatus = hasAvailability
+      ? availability.available
+        ? 'Available'
+        : 'Not Available'
+      : load.availabilityStatus || '';
+    const nextLastFreeDay = availability?.lastFreeDay || load.lastFreeDay || '';
+
+    db.run(
+      `UPDATE loads
+       SET availabilityStatus = ?,
+           lastFreeDay = ?
+       WHERE id = ? AND companyId = ?`,
+      [nextAvailabilityStatus, nextLastFreeDay, load.id, companyId],
+      async (updateErr) => {
+        if (updateErr) {
+          reject(updateErr);
+          return;
+        }
+
+        try {
+          const syncedDocuments = [];
+          const outDoc = await ensureExternalDocumentRecord({
+            loadId: load.id,
+            companyId,
+            category: 'OUT EIR',
+            url: eir?.out?.url || '',
+          });
+          if (outDoc) syncedDocuments.push(outDoc);
+
+          const inDoc = await ensureExternalDocumentRecord({
+            loadId: load.id,
+            companyId,
+            category: 'IN EIR',
+            url: eir?.in?.url || '',
+          });
+          if (inDoc) syncedDocuments.push(inDoc);
+
+          db.get(
+            `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
+            [load.id, companyId],
+            (findErr, updatedLoad) => {
+              if (findErr) {
+                reject(findErr);
+                return;
+              }
+
+              attachDocumentsToLoads([updatedLoad], (attachErr, rows) => {
+                if (attachErr) {
+                  reject(attachErr);
+                  return;
+                }
+                resolve({
+                  updatedLoad: rows[0] || updatedLoad,
+                  syncedDocuments,
+                  changedFields: {
+                    availabilityStatus: {
+                      oldValue: load.availabilityStatus || '',
+                      newValue: nextAvailabilityStatus,
+                    },
+                    lastFreeDay: {
+                      oldValue: load.lastFreeDay || '',
+                      newValue: nextLastFreeDay,
+                    },
+                    syncedDocuments: {
+                      oldValue: '',
+                      newValue: syncedDocuments.map((doc) => `${doc.category}: ${doc.name}`).join(', '),
+                    },
+                  },
+                });
+              });
+            }
+          );
+        } catch (syncErr) {
+          reject(syncErr);
+        }
+      }
+    );
+  });
 
 const hasRequiredCompletionDocuments = (documents = []) => {
   const uploaded = new Set(
@@ -995,6 +1179,25 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
     const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials) : null;
     const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials) : null;
     const gate = containerNumber ? await getGateHistory(containerNumber, credentials) : null;
+    const outEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate }, 'OUT EIR');
+    const inEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate }, 'IN EIR');
+    const eir = {
+      out: outEirUrl
+        ? {
+            url: outEirUrl,
+            source: 'Port Houston',
+          }
+        : null,
+      in: inEirUrl
+        ? {
+            url: inEirUrl,
+            source: 'Port Houston',
+          }
+        : null,
+      note: outEirUrl || inEirUrl
+        ? 'EIR document links were returned by Port Houston and synced to paperwork.'
+        : 'No EIR document link was returned by Port Houston for this check.',
+    };
     const response = {
       loadId,
       containerNumber,
@@ -1002,11 +1205,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       availability,
       bolAvailability,
       gate,
-      eir: {
-        out: null,
-        in: null,
-        note: 'EIR retrieval requires the exact Port Houston API contract/permission. No scraping is performed.',
-      },
+      eir,
     };
 
     const log = await insertPortCheckLog({
@@ -1020,6 +1219,13 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       checkedByUserId: req.user?.id || '',
     });
 
+    const syncResult = await updateLoadFromPortHoustonCheck({
+      load,
+      companyId,
+      availability,
+      eir,
+    });
+
     writeAuditLog(req, {
       action: 'PORT_HOUSTON_CHECK',
       entityType: 'LOAD',
@@ -1030,6 +1236,9 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
         containerNumber,
         terminal: availability?.terminal || '',
         available: availability?.available ?? null,
+        availabilityStatus: syncResult.updatedLoad?.availabilityStatus || '',
+        lastFreeDay: syncResult.updatedLoad?.lastFreeDay || '',
+        syncedDocuments: syncResult.syncedDocuments?.map((doc) => doc.category) || [],
         checkedAt: log.checkedAt,
       },
       changedFields: {
@@ -1037,11 +1246,14 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
           oldValue: '',
           newValue: `${containerNumber || bolNumber} checked at ${log.checkedAt}`,
         },
+        ...syncResult.changedFields,
       },
     });
 
     res.json({
       ...response,
+      updatedLoad: syncResult.updatedLoad,
+      syncedDocuments: syncResult.syncedDocuments,
       checkedBy: req.user?.name || req.user?.email || '',
       checkedAt: log.checkedAt,
     });
@@ -2806,6 +3018,10 @@ app.get('/api/documents/:id/file', authenticate, (req, res) => {
         return res.status(404).json({ error: 'Document not found' });
       }
 
+      if (/^https?:\/\//i.test(String(doc.filePath))) {
+        return res.redirect(doc.filePath);
+      }
+
       const absolutePath = path.isAbsolute(doc.filePath)
         ? doc.filePath
         : path.resolve(rootDir, doc.filePath);
@@ -2838,7 +3054,7 @@ app.delete('/api/documents/:id', authenticate, (req, res) => {
     (err, doc) => {
     if (err || !doc) return res.status(404).json({ error: 'Document not found' });
 
-    if (doc.filePath && fs.existsSync(doc.filePath)) {
+    if (doc.filePath && !/^https?:\/\//i.test(String(doc.filePath)) && fs.existsSync(doc.filePath)) {
       fs.unlinkSync(doc.filePath);
     }
 
