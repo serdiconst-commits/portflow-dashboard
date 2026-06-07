@@ -527,6 +527,7 @@ const uploadFileRef = useRef({});
 const [driverUploadStatusByLoad, setDriverUploadStatusByLoad] = useState({});
 const [driverCameraLoadId, setDriverCameraLoadId] = useState('');
 const [driverCameraError, setDriverCameraError] = useState('');
+const [driverScannerPreview, setDriverScannerPreview] = useState(null);
 const driverCameraVideoRef = useRef(null);
 const driverCameraStreamRef = useRef(null);
 const [dashboardFilter, setDashboardFilter] = useState('all');
@@ -954,6 +955,7 @@ const handleDriverDocumentUpload = async (loadId) => {
     const formData = new FormData();
     formData.append('files', file);
     formData.append('category', category);
+    formData.append('loadNumber', loadId);
 
     const res = await fetch(`${API_BASE}/api/loads/${loadId}/documents`, {
       method: 'POST',
@@ -1019,11 +1021,111 @@ const closeDriverCamera = () => {
   stopDriverCameraStream();
   setDriverCameraLoadId('');
   setDriverCameraError('');
+  setDriverScannerPreview(null);
 };
 
 const openDriverCamera = (loadId) => {
   setDriverCameraLoadId(loadId);
   setDriverCameraError('');
+  setDriverScannerPreview(null);
+};
+
+const getScannerGuideBounds = (width, height) => {
+  const guideWidth = Math.min(width * 0.86, height * 0.72);
+  const guideHeight = guideWidth * 1.32;
+  const safeHeight = Math.min(guideHeight, height * 0.82);
+  const safeWidth = safeHeight / 1.32;
+  return {
+    x: Math.round((width - safeWidth) / 2),
+    y: Math.round((height - safeHeight) / 2),
+    width: Math.round(safeWidth),
+    height: Math.round(safeHeight),
+  };
+};
+
+const detectDocumentBounds = (imageData, guideBounds) => {
+  const { data, width, height } = imageData;
+  const leftLimit = Math.max(0, guideBounds.x - Math.round(width * 0.08));
+  const rightLimit = Math.min(width - 1, guideBounds.x + guideBounds.width + Math.round(width * 0.08));
+  const topLimit = Math.max(0, guideBounds.y - Math.round(height * 0.08));
+  const bottomLimit = Math.min(height - 1, guideBounds.y + guideBounds.height + Math.round(height * 0.08));
+  let minX = rightLimit;
+  let maxX = leftLimit;
+  let minY = bottomLimit;
+  let maxY = topLimit;
+  let hits = 0;
+
+  for (let y = topLimit; y <= bottomLimit; y += 3) {
+    for (let x = leftLimit; x <= rightLimit; x += 3) {
+      const index = (y * width + x) * 4;
+      const r = data[index];
+      const g = data[index + 1];
+      const b = data[index + 2];
+      const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+      const colorSpread = Math.max(r, g, b) - Math.min(r, g, b);
+
+      if (luminance > 142 && colorSpread < 86) {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+        hits += 1;
+      }
+    }
+  }
+
+  const detectedWidth = maxX - minX;
+  const detectedHeight = maxY - minY;
+  const minimumArea = (guideBounds.width * guideBounds.height) / 8;
+
+  if (hits < 80 || detectedWidth * detectedHeight < minimumArea) {
+    return guideBounds;
+  }
+
+  const pad = Math.round(Math.min(width, height) * 0.015);
+  return {
+    x: Math.max(0, minX - pad),
+    y: Math.max(0, minY - pad),
+    width: Math.min(width - minX, detectedWidth + pad * 2),
+    height: Math.min(height - minY, detectedHeight + pad * 2),
+  };
+};
+
+const enhanceDocumentCanvas = (sourceCanvas, bounds) => {
+  const outputWidth = 1400;
+  const outputHeight = Math.round(outputWidth * 1.32);
+  const outputCanvas = document.createElement('canvas');
+  outputCanvas.width = outputWidth;
+  outputCanvas.height = outputHeight;
+  const outputContext = outputCanvas.getContext('2d');
+
+  outputContext.fillStyle = '#ffffff';
+  outputContext.fillRect(0, 0, outputWidth, outputHeight);
+  outputContext.drawImage(
+    sourceCanvas,
+    bounds.x,
+    bounds.y,
+    bounds.width,
+    bounds.height,
+    0,
+    0,
+    outputWidth,
+    outputHeight
+  );
+
+  const imageData = outputContext.getImageData(0, 0, outputWidth, outputHeight);
+  const { data } = imageData;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const grayscale = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    const contrasted = Math.max(0, Math.min(255, (grayscale - 118) * 1.55 + 138));
+    data[i] = contrasted;
+    data[i + 1] = contrasted;
+    data[i + 2] = contrasted;
+  }
+
+  outputContext.putImageData(imageData, 0, 0);
+  return outputCanvas;
 };
 
 const captureDriverCameraPhoto = () => {
@@ -1039,25 +1141,66 @@ const captureDriverCameraPhoto = () => {
   canvas.height = video.videoHeight;
   const context = canvas.getContext('2d');
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const guideBounds = getScannerGuideBounds(canvas.width, canvas.height);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const documentBounds = detectDocumentBounds(imageData, guideBounds);
+  const processedCanvas = enhanceDocumentCanvas(canvas, documentBounds);
 
-  canvas.toBlob(
-    (blob) => {
-      if (!blob) {
-        setDriverCameraError('Could not save the camera photo. Please try again.');
-        return;
-      }
+  const dataUrl = processedCanvas.toDataURL('image/jpeg', 0.92);
+  setDriverScannerPreview({
+    loadId,
+    dataUrl,
+    fileName: `driver-scan-${loadId}-${Date.now()}.jpg`,
+  });
+  stopDriverCameraStream();
+};
 
-      const file = new File([blob], `driver-photo-${loadId}-${Date.now()}.jpg`, {
+const useDriverScannerPreview = () => {
+  if (!driverScannerPreview?.loadId || !driverScannerPreview?.dataUrl) return;
+
+  const preview = driverScannerPreview;
+  fetch(preview.dataUrl)
+    .then((res) => res.blob())
+    .then((blob) => {
+      const file = new File([blob], preview.fileName, {
         type: 'image/jpeg',
         lastModified: Date.now(),
       });
 
-      handleDriverUploadFileChange(loadId, file, 'PortFlow camera');
+      handleDriverUploadFileChange(preview.loadId, file, 'PortFlow scanner');
       closeDriverCamera();
-    },
-    'image/jpeg',
-    0.9
-  );
+    })
+    .catch((error) => {
+      console.error('Scanner preview conversion failed:', error);
+      setDriverCameraError('Could not save the scanned document. Please try again.');
+    });
+};
+
+const retakeDriverScannerPhoto = async () => {
+  setDriverScannerPreview(null);
+  setDriverCameraError('');
+  if (!navigator.mediaDevices?.getUserMedia) return;
+
+  try {
+    await new Promise((resolve) => window.setTimeout(resolve, 80));
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 4096 },
+        height: { ideal: 3072 },
+      },
+      audio: false,
+    });
+
+    driverCameraStreamRef.current = stream;
+    if (driverCameraVideoRef.current) {
+      driverCameraVideoRef.current.srcObject = stream;
+      await driverCameraVideoRef.current.play();
+    }
+  } catch (error) {
+    console.error('Driver scanner retake failed:', error);
+    setDriverCameraError(`Camera blocked or unavailable: ${error.message}`);
+  }
 };
 
 useEffect(() => {
@@ -1075,6 +1218,8 @@ useEffect(() => {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
+          width: { ideal: 4096 },
+          height: { ideal: 3072 },
         },
         audio: false,
       });
@@ -5442,7 +5587,7 @@ const DriverLoadCard = ({ load }) => {
 
         <div className="driver-upload-actions">
           <button type="button" className="driver-upload-label driver-camera-button" onClick={() => openDriverCamera(load.id)}>
-            Take Photo
+            Scan Document
           </button>
 
           <label className="driver-upload-label" htmlFor={`upload-${load.id}`}>
@@ -5487,17 +5632,47 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       <NotificationStack />
 
       {driverCameraLoadId && (
-        <section className="driver-camera-modal" aria-label="PortFlow camera">
+        <section className="driver-camera-modal" aria-label="PortFlow document scanner">
           <div className="driver-camera-box">
             <div className="driver-camera-header">
-              <strong>Take Document Photo</strong>
+              <div>
+                <strong>{driverScannerPreview ? 'Review Scan' : 'Scan Document'}</strong>
+                <span>Load {driverCameraLoadId}</span>
+              </div>
               <button type="button" onClick={closeDriverCamera}>Close</button>
             </div>
-            <video ref={driverCameraVideoRef} autoPlay playsInline muted />
+            {driverScannerPreview ? (
+              <div className="driver-scanner-preview">
+                <img src={driverScannerPreview.dataUrl} alt="Processed scanned document preview" />
+              </div>
+            ) : (
+              <div className="driver-scanner-camera-frame">
+                <video ref={driverCameraVideoRef} autoPlay playsInline muted />
+                <div className="driver-scanner-overlay" aria-hidden="true">
+                  <div className="driver-scanner-guide">
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                </div>
+              </div>
+            )}
             {driverCameraError && <p className="driver-camera-error">{driverCameraError}</p>}
-            <button type="button" className="driver-camera-capture" onClick={captureDriverCameraPhoto}>
-              Capture Photo
-            </button>
+            {driverScannerPreview ? (
+              <div className="driver-scanner-actions">
+                <button type="button" className="driver-camera-retake" onClick={retakeDriverScannerPhoto}>
+                  Retake
+                </button>
+                <button type="button" className="driver-camera-capture" onClick={useDriverScannerPreview}>
+                  Use Scan
+                </button>
+              </div>
+            ) : (
+              <button type="button" className="driver-camera-capture" onClick={captureDriverCameraPhoto}>
+                Capture Scan
+              </button>
+            )}
           </div>
         </section>
       )}
