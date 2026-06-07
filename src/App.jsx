@@ -3896,6 +3896,48 @@ const handleSaveInvoicePayment = async (invoice) => {
     setInvoiceStatusMessage(`Failed to save payment: ${error.message}`);
   }
 };
+
+const handleMarkInvoiceUnpaid = async (invoice) => {
+  if (!invoice?.id) return;
+  const draft = getInvoicePaymentDraft(invoice);
+
+  try {
+    const res = await fetch(`${API_BASE}/api/invoices/${invoice.id}/payment`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        amount: parseMoney(draft.amount ?? invoice.amount),
+        paidAmount: 0,
+        paymentDate: '',
+        paymentMethod: '',
+        paymentNotes: '',
+        status: 'Unpaid',
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to mark invoice unpaid');
+    }
+
+    setSavedInvoices((prev) =>
+      prev.map((item) => (item.id === data.id ? data : item))
+    );
+    setInvoicePaymentDrafts((prev) => {
+      const next = { ...prev };
+      delete next[invoice.id];
+      return next;
+    });
+    setInvoiceStatusMessage(`${data.invoiceNumber} marked unpaid.`);
+  } catch (error) {
+    console.error('Failed to mark invoice unpaid:', error);
+    setInvoiceStatusMessage(`Failed to mark unpaid: ${error.message}`);
+  }
+};
 const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
   if (!loadForPod) return;
 
@@ -9339,6 +9381,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                               onClick={() => handleSaveInvoicePayment(selectedAccountingInvoice)}
                             >
                               Save Payment
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-btn"
+                              onClick={() => handleMarkInvoiceUnpaid(selectedAccountingInvoice)}
+                            >
+                              Mark Unpaid
                             </button>
                           </div>
                         </>
