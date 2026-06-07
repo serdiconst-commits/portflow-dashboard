@@ -2493,35 +2493,64 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
             size: 12,
           });
 
+          const parseMoney = (value) => {
+            const number = Number(String(value || 0).replace(/[^0-9.-]/g, ''));
+            return Number.isNaN(number) ? 0 : number;
+          };
+
           const formatMoney = (value) => {
-            const number = Number(value || 0);
+            const number = parseMoney(value);
             return `$${number.toLocaleString(undefined, {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}`;
           };
 
-          invoicePage.drawText(formatMoney(loadRow.rate), {
+          const linehaulAmount = parseMoney(loadRow.rate);
+          const detentionAmount = parseMoney(loadRow.detention);
+          const invoiceTotalAmount = linehaulAmount + detentionAmount;
+
+          invoicePage.drawText('Linehaul / Load Rate', {
+            x: 50,
+            y: 440,
+            size: 12,
+          });
+
+          invoicePage.drawText(formatMoney(linehaulAmount), {
             x: 450,
             y: 440,
             size: 12,
           });
 
+          if (detentionAmount > 0) {
+            invoicePage.drawText('Detention', {
+              x: 50,
+              y: 420,
+              size: 12,
+            });
+
+            invoicePage.drawText(formatMoney(detentionAmount), {
+              x: 450,
+              y: 420,
+              size: 12,
+            });
+          }
+
           invoicePage.drawLine({
-            start: { x: 50, y: 420 },
-            end: { x: 560, y: 420 },
+            start: { x: 50, y: detentionAmount > 0 ? 400 : 420 },
+            end: { x: 560, y: detentionAmount > 0 ? 400 : 420 },
             thickness: 1,
           });
 
           invoicePage.drawText('Total:', {
             x: 350,
-            y: 400,
+            y: detentionAmount > 0 ? 380 : 400,
             size: 14,
           });
 
-          invoicePage.drawText(formatMoney(loadRow.rate), {
+          invoicePage.drawText(formatMoney(invoiceTotalAmount), {
             x: 450,
-            y: 400,
+            y: detentionAmount > 0 ? 380 : 400,
             size: 14,
           });
 

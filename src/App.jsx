@@ -400,6 +400,12 @@ const handleAuthError = (message) => {
     return formatMoney(total);
   };
 
+  const getCustomerBillAmount = (load) =>
+    parseMoney(load?.rate) + parseMoney(load?.detention);
+
+  const getDriverPayWithDetention = (load) =>
+    parseMoney(load?.driverRate) + parseMoney(load?.detention);
+
 const getPaperworkStatusFromDocuments = (documents = []) => {
   return documents.length > 0 ? 'Submitted' : 'Pending';
 };
@@ -3720,7 +3726,10 @@ const createInvoiceForLoad = async (load, amountOverride = null) => {
       loadId: load.id,
       referenceNumber: load.referenceNumber || '',
       poNumber: load.poNumber || '',
-      amount: parseMoney(amountOverride === null || amountOverride === undefined ? load.rate : amountOverride),
+      amount:
+        amountOverride === null || amountOverride === undefined
+          ? getCustomerBillAmount(load)
+          : parseMoney(amountOverride),
       status: 'Unpaid',
       issueDate: getTodayDate(),
       dueDate: '',
@@ -3834,7 +3843,7 @@ const getInvoiceBalance = (invoice, draft = null) => {
 
 const getAccountingBillAmountDraft = (load) => {
   if (!load?.id) return '';
-  return accountingBillAmountDrafts[load.id] ?? (load.rate || '');
+  return accountingBillAmountDrafts[load.id] ?? formatMoney(getCustomerBillAmount(load));
 };
 
 const handleAccountingBillAmountChange = (loadId, value) => {
@@ -5329,8 +5338,12 @@ const DriverLoadCard = ({ load }) => {
           <strong>{load.chassisNumber || '-'}</strong>
         </div>
         <div className="driver-info-item">
-          <span>Pay</span>
-          <strong>{load.driverRate ? formatMoney(parseMoney(load.driverRate)) : '-'}</strong>
+          <span>Driver Pay</span>
+          <strong>{load.driverRate ? formatMoney(getDriverPayWithDetention(load)) : '-'}</strong>
+        </div>
+        <div className="driver-info-item">
+          <span>Detention</span>
+          <strong>{load.detention ? formatMoney(parseMoney(load.detention)) : '$0.00'}</strong>
         </div>
         <div className="driver-info-item">
           <span>Reservation</span>
@@ -7376,17 +7389,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 />
 
 </div>
-<div className="form-group">
-  <label>Detention</label>
-  <input
-    type="text"
-    name="detention"
-    placeholder="Enter Detention"
-    value={editingLoad?.detention || ''}
-    onChange={handleEditInputChange}
-  />
-</div>
-
 <select
   name="dropType"
   value={editingLoad.dropType || ''}
@@ -7468,7 +7470,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       <input type="text" name="bookingNumber" placeholder="Booking Number" value={editingLoad.bookingNumber || ''} onChange={handleEditInputChange} />
                       <input type="text" name="chassisNumber" placeholder="Chassis Number" value={editingLoad.chassisNumber} onChange={handleEditInputChange} />
                       <input type="text" name="sealNumber" placeholder="Seal Number" value={editingLoad.sealNumber} onChange={handleEditInputChange} />
+                      <label>Load Rate</label>
                       <input type="text" name="rate" placeholder="Load Rate" value={editingLoad.rate} onChange={handleEditInputChange} />
+                      <label>Driver Rate</label>
                       <input type="text" name="driverRate" placeholder="Driver Rate" value={editingLoad.driverRate} onChange={handleEditInputChange} />
 
                       <select name="status" value={editingLoad.status} onChange={handleEditInputChange}>
@@ -7489,6 +7493,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 </select>
 
                       
+                      <label>Detention</label>
                       <input type="text" name="detention" placeholder="Detention" value={editingLoad.detention} onChange={handleEditInputChange} />
                       <input type="text" name="lumper" placeholder="Lumper" value={editingLoad.lumper} onChange={handleEditInputChange} />
                       <input type="text" name="fuelAdvance" placeholder="Fuel Advance" value={editingLoad.fuelAdvance} onChange={handleEditInputChange} />
@@ -7668,7 +7673,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="detail-box"><span>Chassis Number</span><strong>{selectedLoad.chassisNumber}</strong></div>
                         <div className="detail-box"><span>Seal Number</span><strong>{selectedLoad.sealNumber}</strong></div>
                         <div className="detail-box"><span>Load Rate</span><strong>{selectedLoad.rate}</strong></div>
+                        <div className="detail-box"><span>Bill Total</span><strong>{formatMoney(getCustomerBillAmount(selectedLoad))}</strong></div>
                         <div className="detail-box"><span>Driver Rate</span><strong>{selectedLoad.driverRate}</strong></div>
+                        <div className="detail-box"><span>Driver Pay + Detention</span><strong>{formatMoney(getDriverPayWithDetention(selectedLoad))}</strong></div>
                         <div className="detail-box"><span>Paperwork</span><strong>{selectedLoad.paperwork}</strong></div>
                         <div className="detail-box"><span>Detention</span><strong>{selectedLoad.detention}</strong></div>
                         
@@ -7677,6 +7684,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       <div className="settlement-box">
                         <h4>Settlement Breakdown</h4>
                         <div className="settlement-row"><span>Load Rate</span><strong>{selectedLoad.rate}</strong></div>
+                        <div className="settlement-row"><span>Bill Total</span><strong>{formatMoney(getCustomerBillAmount(selectedLoad))}</strong></div>
                         <div className="settlement-row"><span>Driver Rate</span><strong>{selectedLoad.driverRate}</strong></div>
                         <div className="settlement-row"><span>Detention</span><strong>{selectedLoad.detention}</strong></div>
                         <div className="settlement-row"><span>Lumper</span><strong>{selectedLoad.lumper}</strong></div>
@@ -9087,7 +9095,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <span>Total Load Revenue</span>
               <strong>
                 {formatMoney(
-                  completedAccountingLoads.reduce((sum, load) => sum + parseMoney(load.rate), 0)
+                  completedAccountingLoads.reduce((sum, load) => sum + getCustomerBillAmount(load), 0)
                 )}
               </strong>
             </div>
@@ -9142,7 +9150,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             {getLoadQuickStatus(load) || 'Completed'}
                           </span>
                         </td>
-                        <td>{formatMoney(parseMoney(invoice?.amount ?? load.rate))}</td>
+                        <td>{formatMoney(parseMoney(invoice?.amount ?? getCustomerBillAmount(load)))}</td>
                         <td>{invoice ? formatMoney(parseMoney(invoice.paidAmount)) : '—'}</td>
                         <td>
                           {invoice
@@ -9246,12 +9254,15 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="detail-box"><span>Dropped By</span><strong>{getDroppedByDriverValue(selectedAccountingLoad) ? getDriverLabel(getDroppedByDriverValue(selectedAccountingLoad)) : '—'}</strong></div>
                 <div className="detail-box"><span>Drop Date/Time</span><strong>{formatDateTime(selectedAccountingLoad.dropDateTime)}</strong></div>
                 <div className="detail-box"><span>Load Rate</span><strong>{selectedAccountingLoad.rate || '$0.00'}</strong></div>
+                <div className="detail-box"><span>Bill Total</span><strong>{formatMoney(getCustomerBillAmount(selectedAccountingLoad))}</strong></div>
                 <div className="detail-box"><span>Driver Rate</span><strong>{selectedAccountingLoad.driverRate || '$0.00'}</strong></div>
+                <div className="detail-box"><span>Driver Pay + Detention</span><strong>{formatMoney(getDriverPayWithDetention(selectedAccountingLoad))}</strong></div>
               </div>
 
               <div className="settlement-box accounting-settlement-box">
                 <h4>Settlement Breakdown</h4>
                 <div className="settlement-row"><span>Load Rate</span><strong>{selectedAccountingLoad.rate || '$0.00'}</strong></div>
+                <div className="settlement-row"><span>Bill Total</span><strong>{formatMoney(getCustomerBillAmount(selectedAccountingLoad))}</strong></div>
                 <div className="settlement-row"><span>Driver Rate</span><strong>{selectedAccountingLoad.driverRate || '$0.00'}</strong></div>
                 <div className="settlement-row"><span>Detention</span><strong>{selectedAccountingLoad.detention || '$0.00'}</strong></div>
                 <div className="settlement-row"><span>Lumper</span><strong>{selectedAccountingLoad.lumper || '$0.00'}</strong></div>
@@ -9663,11 +9674,17 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <tbody>
                     <tr>
                       <td>Linehaul / Load Rate</td>
-                      <td>{selectedInvoiceLoad.rate}</td>
+                      <td>{formatMoney(parseMoney(selectedInvoiceLoad.rate))}</td>
                     </tr>
+                    {parseMoney(selectedInvoiceLoad.detention) > 0 && (
+                      <tr>
+                        <td>Detention</td>
+                        <td>{formatMoney(parseMoney(selectedInvoiceLoad.detention))}</td>
+                      </tr>
+                    )}
                     <tr className="invoice-total-row">
                       <td>Total Invoice</td>
-                      <td>{selectedInvoiceLoad.rate}</td>
+                      <td>{formatMoney(getCustomerBillAmount(selectedInvoiceLoad))}</td>
                     </tr>
                   </tbody>
                 </table>
