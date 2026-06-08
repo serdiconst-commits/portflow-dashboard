@@ -1270,6 +1270,7 @@ const [savedInvoices, setSavedInvoices] = useState([]);
 const [invoiceStatusMessage, setInvoiceStatusMessage] = useState('');
 const [invoicePaymentDrafts, setInvoicePaymentDrafts] = useState({});
 const [accountingBillAmountDrafts, setAccountingBillAmountDrafts] = useState({});
+const [activeLocationPicker, setActiveLocationPicker] = useState('');
 const [showNewPickupForm, setShowNewPickupForm] = useState(false);
 const [showNewPickup, setShowNewPickup] = useState(false);
 const [newPickupLocation, setNewPickupLocation] = useState({
@@ -5177,8 +5178,106 @@ const dispatchLoadColumnsByKey = {
 const orderedDispatchLoadColumns = dispatchColumnOrder
   .map((key) => ({ key, ...dispatchLoadColumnsByKey[key] }))
   .filter((column) => column.label);
-const selectedDeliveryLocationId =
-  (deliveryLocations || []).find((loc) => formatLocationAddress(loc) === newLoad.delivery)?.id || '';
+const getSelectedLocationIdForField = (field, options = []) =>
+  (options || []).find((loc) => formatLocationAddress(loc) === newLoad[field])?.id || '';
+
+const getFilteredLocationOptions = (field, options = []) => {
+  const term = String(newLoad[field] || '').trim().toLowerCase();
+  const cleanOptions = Array.isArray(options) ? options : [];
+  if (!term) return cleanOptions.slice(0, 8);
+
+  return cleanOptions
+    .filter((loc) => {
+      const label = getLocationOptionLabel(loc).toLowerCase();
+      const address = formatLocationAddress(loc).toLowerCase();
+      return label.includes(term) || address.includes(term);
+    })
+    .slice(0, 8);
+};
+
+const renderLocationSearchField = ({
+  field,
+  label,
+  options,
+  placeholder,
+  emptyText = 'No saved locations found.',
+  allowDelete = false,
+}) => {
+  const selectedLocationId = getSelectedLocationIdForField(field, options);
+  const filteredOptions = getFilteredLocationOptions(field, options);
+  const isOpen = activeLocationPicker === field;
+  const inputId = `location-search-${field}`;
+  const menuId = `${inputId}-menu`;
+
+  return (
+    <div className="location-search-field">
+      <label htmlFor={inputId}>{label}</label>
+      <div className="location-search-row">
+        <input
+          id={inputId}
+          type="text"
+          name={field}
+          value={newLoad[field] || ''}
+          placeholder={placeholder}
+          autoComplete="off"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={isOpen}
+          aria-controls={menuId}
+          onFocus={() => setActiveLocationPicker(field)}
+          onBlur={() => window.setTimeout(() => {
+            setActiveLocationPicker((current) => (current === field ? '' : current));
+          }, 160)}
+          onChange={(e) => {
+            setNewLoad((prev) => ({ ...prev, [field]: e.target.value }));
+            setActiveLocationPicker(field);
+          }}
+        />
+        {allowDelete && (
+          <button
+            type="button"
+            className="secondary-btn compact-btn danger-btn location-delete-btn"
+            onClick={async () => {
+              if (!selectedLocationId) return;
+              await handleDeleteLocation(selectedLocationId);
+              setNewLoad((prev) => ({ ...prev, [field]: '' }));
+            }}
+            disabled={!selectedLocationId}
+            title={`Delete selected ${label.toLowerCase()}`}
+            aria-label={`Delete selected ${label.toLowerCase()}`}
+          >
+            X
+          </button>
+        )}
+      </div>
+      {isOpen && (
+        <div id={menuId} className="location-search-menu" role="listbox">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((loc) => (
+              <button
+                key={loc.id}
+                type="button"
+                className="location-search-option"
+                role="option"
+                aria-selected={formatLocationAddress(loc) === newLoad[field]}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  handleSelectSavedLocation(field, loc.id);
+                  setActiveLocationPicker('');
+                }}
+              >
+                <strong>{loc.name || getLocationOptionLabel(loc)}</strong>
+                <span>{formatLocationAddress(loc)}</span>
+              </button>
+            ))
+          ) : (
+            <div className="location-search-empty">{emptyText}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 const activeLoads = filteredLoadsData.length;
 
 const driverInTransitLoads = filteredLoadsData.filter(
@@ -6728,39 +6827,15 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 >
 <h3 style={{ marginBottom: '10px' }}>Locations</h3>
 
-<label>Pickup Location</label>
-
 {!showNewPickup ? (
   <>
-<select
-  value={
-    (pickupLocations || []).find((loc) => formatLocationAddress(loc) === newLoad.pickup)?.id || ''
-  }
-  onChange={(e) => {
-    const selectedId = e.target.value;
-
-    if (!selectedId) {
-      setNewLoad((prev) => ({ ...prev, pickup: '' }));
-      return;
-    }
-
-    const selectedLocation = (pickupLocations || []).find(
-      (loc) => String(loc.id) === String(selectedId)
-    );
-
-    setNewLoad((prev) => ({
-      ...prev,
-      pickup: selectedLocation ? formatLocationAddress(selectedLocation) : '',
-    }));
-  }}
->
-  <option value="">Select saved pickup location</option>
-  {(pickupLocations || []).map((loc) => (
-    <option key={loc.id} value={loc.id}>
-      {getLocationOptionLabel(loc)}
-    </option>
-  ))}
-</select>
+    {renderLocationSearchField({
+      field: 'pickup',
+      label: 'Pickup Location',
+      options: pickupLocations,
+      placeholder: 'Type or select pickup location',
+      emptyText: 'No pickup locations found.',
+    })}
 
     <button
       type="button"
@@ -6870,44 +6945,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   </div>
 )}
 
-
-<label>Delivery Location</label>
-<div className="location-select-row">
-  <select
-    value={selectedDeliveryLocationId}
-    onChange={(e) => {
-      const selectedId = e.target.value;
-
-      if (!selectedId) {
-        setNewLoad((prev) => ({ ...prev, delivery: '' }));
-        return;
-      }
-
-      handleSelectSavedLocation('delivery', selectedId);
-    }}
-  >
-    <option value="">Select saved delivery location</option>
-    {(deliveryLocations || []).map((loc) => (
-      <option key={loc.id} value={loc.id}>
-        {getLocationOptionLabel(loc)}
-      </option>
-    ))}
-  </select>
-  <button
-    type="button"
-    className="secondary-btn compact-btn danger-btn location-delete-btn"
-    onClick={async () => {
-      if (!selectedDeliveryLocationId) return;
-      await handleDeleteLocation(selectedDeliveryLocationId);
-      setNewLoad((prev) => ({ ...prev, delivery: '' }));
-    }}
-    disabled={!selectedDeliveryLocationId}
-    title="Delete selected delivery location"
-    aria-label="Delete selected delivery location"
-  >
-    X
-  </button>
-</div>
+{renderLocationSearchField({
+  field: 'delivery',
+  label: 'Delivery Location',
+  options: deliveryLocations,
+  placeholder: 'Type or select delivery location',
+  emptyText: 'No delivery locations found.',
+  allowDelete: true,
+})}
 
 <div className="inline-action-row location-action-row">
   <button
@@ -6996,29 +7041,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   onChange={handleInputChange}
 />
 
-<label>Return Location</label>
-<select
-  value={
-    (returnLocations || []).find((loc) => formatLocationAddress(loc) === newLoad.returnLocation)?.id || ''
-  }
-  onChange={(e) => {
-    const selectedId = e.target.value;
-
-    if (!selectedId) {
-      setNewLoad((prev) => ({ ...prev, returnLocation: '' }));
-      return;
-    }
-
-    handleSelectSavedLocation('returnLocation', selectedId);
-  }}
->
-  <option value="">Select return location</option>
-  {(returnLocations || []).map((loc) => (
-    <option key={loc.id} value={loc.id}>
-      {getLocationOptionLabel(loc)}
-    </option>
-  ))}
-</select>
+{renderLocationSearchField({
+  field: 'returnLocation',
+  label: 'Return Location',
+  options: returnLocations,
+  placeholder: 'Type or select return location',
+  emptyText: 'No return locations found.',
+})}
 
 <label>LFD</label>
 <input
