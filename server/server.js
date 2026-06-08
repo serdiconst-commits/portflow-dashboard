@@ -755,6 +755,263 @@ const requireRoles = (allowedRoles) => (req, res, next) => {
 
 app.use('/api/invoices', authenticate, createInvoiceRoutes(db));
 
+const fuelAccessRoles = new Set(['dispatcher', 'payroll', 'manager', ...adminRoles]);
+const getFuelReceiptUrl = (fuel = {}) =>
+  fuel.receiptImagePath ? `/api/fuel/${encodeURIComponent(fuel.id)}/receipt` : '';
+const mapFuelTransaction = (row = {}) => {
+  const amountPaid = Number(row.amountPaid || 0);
+  const gallons = Number(row.gallons || 0);
+  return {
+    id: row.id,
+    companyId: row.companyId,
+    driverId: row.driverId,
+    truckId: row.truckId || '',
+    dateTime: row.dateTime,
+    amountPaid,
+    gallons,
+    pricePerGallon: gallons > 0 ? amountPaid / gallons : 0,
+    fuelStation: row.fuelStation || '',
+    loadNumber: row.loadNumber || '',
+    receiptImageUrl: getFuelReceiptUrl(row),
+    receiptOriginalName: row.receiptOriginalName || '',
+    receiptMimeType: row.receiptMimeType || '',
+    createdAt: row.createdAt,
+    driverName: row.driverName || '',
+  };
+};
+const parsePositiveFuelNumber = (value) => {
+  const numeric = Number(String(value ?? '').replace(/[$,\s]/g, ''));
+  return Number.isFinite(numeric) ? numeric : NaN;
+};
+
+app.post('/api/fuel', authenticate, upload.single('receipt'), (req, res) => {
+  const role = normalizeRole(req.user?.role);
+  const companyId = req.company.companyId;
+  const driverId = String(req.body.driverId || req.user?.driverId || '').trim();
+  const truckId = String(req.body.truckId || '').trim().slice(0, 80);
+  const dateTime = String(req.body.dateTime || new Date().toISOString()).trim();
+  const amountPaid = parsePositiveFuelNumber(req.body.amountPaid);
+  const gallons = parsePositiveFuelNumber(req.body.gallons);
+  const fuelStation = String(req.body.fuelStation || '').trim().slice(0, 180);
+  const loadNumber = String(req.body.loadNumber || '').trim().slice(0, 80);
+
+  if (role === 'driver' && driverId !== String(req.user?.driverId || '').trim()) {
+    return res.status(403).json({ error: 'Drivers can only add fuel for their own account.' });
+  }
+
+  if (!driverId) {
+    return res.status(400).json({ error: 'Driver is required.' });
+  }
+
+  if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
+    return res.status(400).json({ error: 'Total amount must be greater than zero.' });
+  }
+
+  if (!Number.isFinite(gallons) || gallons <= 0) {
+    return res.status(400).json({ error: 'Gallons must be greater than zero.' });
+  }
+
+  const id = uuidv4();
+  const createdAt = new Date().toISOString();
+  const receiptPath = req.file?.path || '';
+  const receiptOriginalName = req.file?.originalname || '';
+  const receiptMimeType = req.file?.mimetype || '';
+
+  db.get(
+    `SELECT id, name FROM drivers WHERE id = ? AND companyId = ?`,
+    [driverId, companyId],
+    (driverErr, driver) => {
+      if (driverErr) {
+        console.error('Fuel driver lookup error:', driverErr.message);
+        return res.status(500).json({ error: 'Failed to validate driver.' });
+      }
+
+      if (!driver) {
+        return res.status(404).json({ error: 'Driver not found.' });
+      }
+
+      db.run(
+        `INSERT INTO fuel_transactions (
+           id, companyId, driverId, truckId, dateTime, amountPaid, gallons,
+           fuelStation, loadNumber, receiptImagePath, receiptOriginalName,
+           receiptMimeType, createdAt
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          companyId,
+          driverId,
+          truckId,
+          dateTime,
+          amountPaid,
+          gallons,
+          fuelStation,
+          loadNumber,
+          receiptPath,
+          receiptOriginalName,
+          receiptMimeType,
+          createdAt,
+        ],
+        function (insertErr) {
+          if (insertErr) {
+            console.error('Fuel insert error:', insertErr.message);
+            return res.status(500).json({ error: 'Failed to save fuel transaction.' });
+          }
+
+          const transaction = mapFuelTransaction({
+            id,
+            companyId,
+            driverId,
+            driverName: driver.name,
+            truckId,
+            dateTime,
+            amountPaid,
+            gallons,
+            fuelStation,
+            loadNumber,
+            receiptImagePath: receiptPath,
+            receiptOriginalName,
+            receiptMimeType,
+            createdAt,
+          });
+
+          writeAuditLog(req, {
+            action: 'CREATE_FUEL_TRANSACTION',
+            entityType: 'FUEL',
+            entityId: id,
+            entityLabel: `${driverId} ${fuelStation || ''}`.trim(),
+            oldValue: null,
+            newValue: transaction,
+            changedFields: {
+              amountPaid: { oldValue: '', newValue: amountPaid },
+              gallons: { oldValue: '', newValue: gallons },
+            },
+          });
+
+          return res.status(201).json(transaction);
+        }
+      );
+    }
+  );
+});
+
+app.get('/api/fuel/summary', authenticate, requireRoles(fuelAccessRoles), (req, res) => {
+  const companyId = req.company.companyId;
+  const { from = '', to = '', driverId = '', truckId = '' } = req.query;
+  const clauses = ['f.companyId = ?'];
+  const params = [companyId];
+
+  if (from) {
+    clauses.push('date(f.dateTime) >= date(?)');
+    params.push(String(from));
+  }
+  if (to) {
+    clauses.push('date(f.dateTime) <= date(?)');
+    params.push(String(to));
+  }
+  if (driverId) {
+    clauses.push('f.driverId = ?');
+    params.push(String(driverId));
+  }
+  if (truckId) {
+    clauses.push('LOWER(f.truckId) LIKE LOWER(?)');
+    params.push(`%${String(truckId)}%`);
+  }
+
+  const where = clauses.join(' AND ');
+
+  db.all(
+    `SELECT f.*, d.name AS driverName
+     FROM fuel_transactions f
+     LEFT JOIN drivers d ON d.id = f.driverId AND d.companyId = f.companyId
+     WHERE ${where}
+     ORDER BY f.dateTime DESC`,
+    params,
+    (err, rows = []) => {
+      if (err) {
+        console.error('Fuel summary error:', err.message);
+        return res.status(500).json({ error: 'Failed to load fuel summary.' });
+      }
+
+      const transactions = rows.map(mapFuelTransaction);
+      const totalFuelSpend = transactions.reduce((sum, item) => sum + item.amountPaid, 0);
+      const totalGallons = transactions.reduce((sum, item) => sum + item.gallons, 0);
+
+      return res.json({
+        totalFuelSpend,
+        totalGallons,
+        averagePricePerGallon: totalGallons > 0 ? totalFuelSpend / totalGallons : 0,
+        count: transactions.length,
+        transactions,
+      });
+    }
+  );
+});
+
+app.get('/api/fuel/driver/:id', authenticate, (req, res) => {
+  const companyId = req.company.companyId;
+  const requestedDriverId = String(req.params.id || '').trim();
+  const role = normalizeRole(req.user?.role);
+
+  if (role === 'driver' && requestedDriverId !== String(req.user?.driverId || '').trim()) {
+    return res.status(403).json({ error: 'Drivers can only view their own fuel history.' });
+  }
+
+  if (role !== 'driver' && !fuelAccessRoles.has(role)) {
+    return res.status(403).json({ error: 'You do not have permission to view fuel history.' });
+  }
+
+  db.all(
+    `SELECT f.*, d.name AS driverName
+     FROM fuel_transactions f
+     LEFT JOIN drivers d ON d.id = f.driverId AND d.companyId = f.companyId
+     WHERE f.companyId = ? AND f.driverId = ?
+     ORDER BY f.dateTime DESC`,
+    [companyId, requestedDriverId],
+    (err, rows = []) => {
+      if (err) {
+        console.error('Fuel driver history error:', err.message);
+        return res.status(500).json({ error: 'Failed to load fuel history.' });
+      }
+
+      return res.json(rows.map(mapFuelTransaction));
+    }
+  );
+});
+
+app.get('/api/fuel/:id/receipt', authenticate, (req, res) => {
+  const companyId = req.company.companyId;
+  const fuelId = String(req.params.id || '').trim();
+  const role = normalizeRole(req.user?.role);
+  const driverId = String(req.user?.driverId || '').trim();
+  const roleClause = role === 'driver' ? ' AND f.driverId = ?' : '';
+  const params = role === 'driver' ? [fuelId, companyId, driverId] : [fuelId, companyId];
+
+  if (role !== 'driver' && !fuelAccessRoles.has(role)) {
+    return res.status(403).json({ error: 'You do not have permission to open this receipt.' });
+  }
+
+  db.get(
+    `SELECT f.*
+     FROM fuel_transactions f
+     WHERE f.id = ? AND f.companyId = ?${roleClause}`,
+    params,
+    (err, fuel) => {
+      if (err) {
+        console.error('Fuel receipt lookup error:', err.message);
+        return res.status(500).json({ error: 'Failed to open receipt.' });
+      }
+
+      if (!fuel?.receiptImagePath || !fs.existsSync(fuel.receiptImagePath)) {
+        return res.status(404).json({ error: 'Receipt not found.' });
+      }
+
+      res.setHeader('Content-Type', fuel.receiptMimeType || getMimeTypeFromName(fuel.receiptOriginalName || 'receipt.jpg'));
+      return res.sendFile(path.resolve(fuel.receiptImagePath));
+    }
+  );
+});
+
 app.get('/api/company-logo/:filename', (req, res) => {
   const filename = path.basename(req.params.filename);
   const logoPath = path.join(uploadsDir, filename);

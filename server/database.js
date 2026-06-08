@@ -65,6 +65,31 @@ db.run(`
   CREATE INDEX IF NOT EXISTS idx_driver_locations_company_updated
   ON driver_locations(companyId, updatedAt)
 `);
+db.run(`
+  CREATE TABLE IF NOT EXISTS fuel_transactions (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    driverId TEXT NOT NULL,
+    truckId TEXT,
+    dateTime TEXT NOT NULL,
+    amountPaid REAL NOT NULL,
+    gallons REAL NOT NULL,
+    fuelStation TEXT,
+    loadNumber TEXT,
+    receiptImagePath TEXT,
+    receiptOriginalName TEXT,
+    receiptMimeType TEXT,
+    createdAt TEXT NOT NULL
+  )
+`);
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_fuel_transactions_company_date
+  ON fuel_transactions(companyId, dateTime)
+`);
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_fuel_transactions_driver_date
+  ON fuel_transactions(driverId, dateTime)
+`);
 // DEFAULT DRIVERS
 const defaultDrivers = [
   ['DRV-001', 'Juan Driver', 'juan@portflow.com', '1234', '104', '', 'COMP-001', 1],

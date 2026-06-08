@@ -1044,6 +1044,242 @@ const handleDriverUploadFileChange = (loadId, fileOrFiles, source = 'camera') =>
   }));
 };
 
+const getFuelPricePerGallon = (amount = fuelForm.amountPaid, gallons = fuelForm.gallons) => {
+  const amountValue = Number(String(amount || '').replace(/[$,\s]/g, ''));
+  const gallonsValue = Number(String(gallons || '').replace(/[,\s]/g, ''));
+  if (!Number.isFinite(amountValue) || !Number.isFinite(gallonsValue) || gallonsValue <= 0) return 0;
+  return amountValue / gallonsValue;
+};
+
+const getDriverDefaultTruck = () =>
+  getDriverRecord(currentUser?.driverId)?.truck || currentUser?.truck || '';
+
+const fetchFuelSummary = async (filters = fuelFilters) => {
+  if (!authToken || currentUser?.role === 'driver') return;
+
+  try {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
+
+    const res = await fetch(`${API_BASE}/api/fuel/summary?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+      cache: 'no-store',
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      if (res.status === 401 && handleAuthError('Unauthorized')) return;
+      throw new Error(data.error || 'Failed to load fuel summary');
+    }
+
+    setFuelSummary({
+      totalFuelSpend: Number(data.totalFuelSpend || 0),
+      totalGallons: Number(data.totalGallons || 0),
+      averagePricePerGallon: Number(data.averagePricePerGallon || 0),
+      count: Number(data.count || 0),
+    });
+    setFuelTransactions(Array.isArray(data.transactions) ? data.transactions : []);
+  } catch (error) {
+    console.error('Fuel summary error:', error);
+  }
+};
+
+const fetchDriverFuelHistory = async () => {
+  if (!authToken || currentUser?.role !== 'driver' || !currentUser?.driverId) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/fuel/driver/${encodeURIComponent(currentUser.driverId)}`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+      cache: 'no-store',
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      if (res.status === 401 && handleAuthError('Unauthorized')) return;
+      throw new Error(data.error || 'Failed to load fuel history');
+    }
+
+    setFuelTransactions(Array.isArray(data) ? data : []);
+  } catch (error) {
+    console.error('Driver fuel history error:', error);
+  }
+};
+
+const startFuelReceiptScan = async () => {
+  setFuelStatus('');
+
+  if (!Capacitor.isNativePlatform?.()) {
+    setFuelStatus('Use Choose Receipt on this browser. Native scan is available in the Android app.');
+    return;
+  }
+
+  try {
+    const result = await DocumentScanner.scanDocument({
+      responseType: ResponseType.Base64,
+      scannerMode: ScannerMode.Full,
+      letUserAdjustCrop: true,
+      reviewCapturedDocument: false,
+      maxNumDocuments: 1,
+      croppedImageQuality: 95,
+      brightness: 4,
+      contrast: 1.12,
+    });
+
+    if (result?.status === ScanDocumentResponseStatus.Cancel) {
+      setFuelStatus('Receipt scan cancelled.');
+      return;
+    }
+
+    const dataUrl = getNativeScannerDataUrl(result?.scannedImages?.[0] || '');
+    if (!dataUrl) {
+      setFuelStatus('No receipt image was returned. Please try again.');
+      return;
+    }
+
+    const blob = await blobFromDataUrl(dataUrl);
+    const file = new File([blob], `fuel-receipt-${currentUser?.driverId || 'driver'}-${Date.now()}.jpg`, {
+      type: 'image/jpeg',
+      lastModified: Date.now(),
+    });
+
+    setFuelReceiptFile(file);
+    setFuelStatus(`Receipt ready: ${file.name}`);
+  } catch (error) {
+    console.error('Fuel receipt scanner failed:', error);
+    setFuelStatus(`Receipt scanner failed: ${error.message}`);
+  }
+};
+
+const handleFuelSubmit = async (event) => {
+  event.preventDefault();
+  if (!authToken || !currentUser?.driverId) return;
+
+  const amountPaid = Number(String(fuelForm.amountPaid || '').replace(/[$,\s]/g, ''));
+  const gallons = Number(String(fuelForm.gallons || '').replace(/[,\s]/g, ''));
+
+  if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
+    setFuelStatus('Total amount must be greater than zero.');
+    return;
+  }
+
+  if (!Number.isFinite(gallons) || gallons <= 0) {
+    setFuelStatus('Gallons must be greater than zero.');
+    return;
+  }
+
+  setFuelSubmitting(true);
+  setFuelStatus('Saving fuel transaction...');
+
+  try {
+    const formData = new FormData();
+    formData.append('driverId', currentUser.driverId);
+    formData.append('truckId', fuelForm.truckId || getDriverDefaultTruck());
+    formData.append('dateTime', fuelForm.dateTime || new Date().toISOString());
+    formData.append('amountPaid', String(amountPaid));
+    formData.append('gallons', String(gallons));
+    formData.append('fuelStation', fuelForm.fuelStation);
+    formData.append('loadNumber', fuelForm.loadNumber);
+    if (fuelReceiptFile) {
+      formData.append('receipt', fuelReceiptFile);
+    }
+
+    const res = await fetch(`${API_BASE}/api/fuel`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: formData,
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      if (res.status === 401 && handleAuthError('Unauthorized')) return;
+      throw new Error(data.error || 'Failed to save fuel transaction');
+    }
+
+    setFuelStatus('Fuel saved successfully.');
+    setFuelForm({
+      amountPaid: '',
+      gallons: '',
+      truckId: getDriverDefaultTruck(),
+      fuelStation: '',
+      loadNumber: '',
+      dateTime: '',
+    });
+    setFuelReceiptFile(null);
+    await fetchDriverFuelHistory();
+  } catch (error) {
+    console.error('Fuel submit error:', error);
+    setFuelStatus(`Failed to save fuel: ${error.message}`);
+  } finally {
+    setFuelSubmitting(false);
+  }
+};
+
+const handleOpenFuelReceipt = async (fuel) => {
+  if (!fuel?.receiptImageUrl) return;
+
+  try {
+    const res = await fetch(`${API_BASE}${fuel.receiptImageUrl}`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Failed to open receipt');
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(url);
+    setPreviewDocument({
+      name: fuel.receiptOriginalName || `Fuel receipt ${fuel.id}`,
+      type: fuel.receiptMimeType || blob.type,
+    });
+  } catch (error) {
+    console.error('Open fuel receipt error:', error);
+    alert(`Failed to open receipt: ${error.message}`);
+  }
+};
+
+const exportFuelCsv = () => {
+  const rows = [
+    ['Date/Time', 'Driver', 'Driver ID', 'Truck', 'Station', 'Load Number', 'Amount Paid', 'Gallons', 'Price Per Gallon'],
+    ...fuelTransactions.map((fuel) => [
+      fuel.dateTime || '',
+      fuel.driverName || '',
+      fuel.driverId || '',
+      fuel.truckId || '',
+      fuel.fuelStation || '',
+      fuel.loadNumber || '',
+      Number(fuel.amountPaid || 0).toFixed(2),
+      Number(fuel.gallons || 0).toFixed(3),
+      Number(fuel.pricePerGallon || 0).toFixed(2),
+    ]),
+  ];
+  const csv = rows
+    .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `portflow-fuel-${fuelFilters.from || 'all'}-${fuelFilters.to || 'today'}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
 const stopDriverCameraStream = () => {
   if (driverCameraStreamRef.current) {
     driverCameraStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -1420,6 +1656,30 @@ const [settlementNote, setSettlementNote] = useState('');
 const [settlementContainerSearch, setSettlementContainerSearch] = useState('');
 const [settlementDeductionReasonInput, setSettlementDeductionReasonInput] = useState('');
 const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
+const [fuelTransactions, setFuelTransactions] = useState([]);
+const [fuelSummary, setFuelSummary] = useState({
+  totalFuelSpend: 0,
+  totalGallons: 0,
+  averagePricePerGallon: 0,
+  count: 0,
+});
+const [fuelFilters, setFuelFilters] = useState({
+  from: getDateStringWithOffsetInAppTimeZone(-7),
+  to: getDateStringInAppTimeZone(),
+  driverId: '',
+  truckId: '',
+});
+const [fuelForm, setFuelForm] = useState({
+  amountPaid: '',
+  gallons: '',
+  truckId: '',
+  fuelStation: '',
+  loadNumber: '',
+  dateTime: '',
+});
+const [fuelReceiptFile, setFuelReceiptFile] = useState(null);
+const [fuelStatus, setFuelStatus] = useState('');
+const [fuelSubmitting, setFuelSubmitting] = useState(false);
 const [selectedAccountingLoadId, setSelectedAccountingLoadId] = useState('');
 const [selectedSettlementLoadId, setSelectedSettlementLoadId] = useState('');
 const [settlementPayDrafts, setSettlementPayDrafts] = useState({});
@@ -2363,7 +2623,7 @@ useEffect(() => {
 }, [activeView, authToken]);
 
 
- useEffect(() => {
+useEffect(() => {
   if (!authToken) return;
 
   fetchLoads();
@@ -2373,7 +2633,29 @@ useEffect(() => {
   fetchDrivers();
   fetchCompanyProfile();
   fetchDriverLocations();
+  if (currentUser?.role === 'driver') {
+    fetchDriverFuelHistory();
+    setFuelForm((prev) => ({
+      ...prev,
+      truckId: prev.truckId || getDriverDefaultTruck(),
+    }));
+  } else if (roleCanAccessView(currentUser?.role, 'accounting')) {
+    fetchFuelSummary();
+  }
 }, [authToken]);
+
+useEffect(() => {
+  if (!authToken || currentUser?.role === 'driver' || activeView !== 'accounting') return;
+  fetchFuelSummary();
+}, [authToken, activeView, fuelFilters.from, fuelFilters.to, fuelFilters.driverId, fuelFilters.truckId]);
+
+useEffect(() => {
+  if (currentUser?.role !== 'driver') return;
+  setFuelForm((prev) => ({
+    ...prev,
+    truckId: prev.truckId || getDriverDefaultTruck(),
+  }));
+}, [currentUser?.driverId, currentUser?.role, driversList]);
 
 useEffect(() => {
   if (!authToken || activeView === 'driver') return;
@@ -6079,9 +6361,157 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         >
           Completed
         </button>
+        <button
+          type="button"
+          className={driverMobileTab === 'fuel' ? 'active' : ''}
+          onClick={() => setDriverMobileTab('fuel')}
+        >
+          Fuel
+        </button>
       </nav>
 
-      {driverVisibleLoads.length === 0 ? (
+      {driverMobileTab === 'fuel' ? (
+        <section className="driver-fuel-panel">
+          <div className="driver-paperwork-header">
+            <div>
+              <span>Fuel</span>
+              <strong>Add Fuel Purchase</strong>
+            </div>
+            <span className="status-pill active">
+              {formatMoney(getFuelPricePerGallon())}/gal
+            </span>
+          </div>
+
+          <form className="driver-fuel-form" onSubmit={handleFuelSubmit}>
+            <label>
+              <span>Total Amount ($)</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={fuelForm.amountPaid}
+                onChange={(e) => setFuelForm((prev) => ({ ...prev, amountPaid: e.target.value }))}
+                placeholder="0.00"
+                required
+              />
+            </label>
+            <label>
+              <span>Gallons</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.001"
+                value={fuelForm.gallons}
+                onChange={(e) => setFuelForm((prev) => ({ ...prev, gallons: e.target.value }))}
+                placeholder="0.000"
+                required
+              />
+            </label>
+            <label>
+              <span>Truck Number</span>
+              <input
+                type="text"
+                value={fuelForm.truckId}
+                onChange={(e) => setFuelForm((prev) => ({ ...prev, truckId: e.target.value }))}
+                placeholder={getDriverDefaultTruck() || 'Truck / Unit'}
+              />
+            </label>
+            <label>
+              <span>Station Name</span>
+              <input
+                type="text"
+                value={fuelForm.fuelStation}
+                onChange={(e) => setFuelForm((prev) => ({ ...prev, fuelStation: e.target.value }))}
+                placeholder="Fuel station"
+              />
+            </label>
+            <label>
+              <span>Load Number</span>
+              <select
+                value={fuelForm.loadNumber}
+                onChange={(e) => setFuelForm((prev) => ({ ...prev, loadNumber: e.target.value }))}
+              >
+                <option value="">No load selected</option>
+                {driverActiveLoads.map((load) => (
+                  <option key={load.id} value={load.id}>
+                    {load.id} - {load.containerNumber || load.referenceNumber || 'Load'}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Date / Time</span>
+              <input
+                type="datetime-local"
+                value={normalizeDateTimeInputValue(fuelForm.dateTime)}
+                onChange={(e) => setFuelForm((prev) => ({ ...prev, dateTime: e.target.value }))}
+              />
+            </label>
+
+            <div className="driver-fuel-total">
+              <span>Price Per Gallon</span>
+              <strong>{formatMoney(getFuelPricePerGallon())}</strong>
+            </div>
+
+            <div className="driver-upload-actions">
+              <button type="button" className="driver-upload-label driver-camera-button" onClick={startFuelReceiptScan}>
+                Scan Receipt
+              </button>
+              <label className="driver-upload-label" htmlFor="fuel-receipt-upload">
+                Choose Receipt
+              </label>
+              <input
+                id="fuel-receipt-upload"
+                type="file"
+                accept="image/*,.pdf"
+                className="driver-native-file-input"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setFuelReceiptFile(file);
+                  setFuelStatus(file ? `Receipt ready: ${file.name}` : 'No receipt selected.');
+                }}
+              />
+            </div>
+
+            <p className="driver-upload-name">
+              {fuelReceiptFile?.name || 'No receipt selected'}
+            </p>
+            {fuelStatus && <p className="driver-upload-debug">{fuelStatus}</p>}
+
+            <button type="submit" className="driver-upload-submit" disabled={fuelSubmitting}>
+              {fuelSubmitting ? 'Saving...' : 'Save Fuel'}
+            </button>
+          </form>
+
+          <div className="driver-fuel-history">
+            <div className="driver-paperwork-header">
+              <div>
+                <span>History</span>
+                <strong>{fuelTransactions.length} fuel records</strong>
+              </div>
+            </div>
+            {fuelTransactions.length === 0 ? (
+              <p className="driver-upload-name">No fuel purchases saved yet.</p>
+            ) : (
+              fuelTransactions.slice(0, 8).map((fuel) => (
+                <div key={fuel.id} className="driver-fuel-row">
+                  <div>
+                    <strong>{formatMoney(fuel.amountPaid)} / {Number(fuel.gallons || 0).toFixed(2)} gal</strong>
+                    <span>{fuel.fuelStation || 'Fuel station'} - {formatDateTime(fuel.dateTime)}</span>
+                  </div>
+                  {fuel.receiptImageUrl && (
+                    <button type="button" onClick={() => handleOpenFuelReceipt(fuel)}>
+                      Receipt
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      ) : driverVisibleLoads.length === 0 ? (
         <section className="driver-empty-state">
           <strong>No loads here.</strong>
           <p>{driverMobileTab === 'paperwork' ? 'Paperwork is caught up.' : 'Assigned loads will appear here.'}</p>
@@ -9674,6 +10104,122 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <p>{completedAccountingLoads.length > 0 ? 'No completed loads match that search.' : 'No completed loads in billing yet.'}</p>
             </div>
           )}
+
+          <div className="accounting-fuel-panel">
+            <div className="panel-header">
+              <div>
+                <h3>Fuel Accounting</h3>
+                <span>{fuelSummary.count} fuel transactions</span>
+              </div>
+              <button type="button" className="secondary-btn compact-btn" onClick={exportFuelCsv}>
+                Export CSV
+              </button>
+            </div>
+
+            <div className="accounting-summary-strip">
+              <div>
+                <span>Total Fuel Spend</span>
+                <strong>{formatMoney(fuelSummary.totalFuelSpend)}</strong>
+              </div>
+              <div>
+                <span>Total Gallons</span>
+                <strong>{Number(fuelSummary.totalGallons || 0).toFixed(2)}</strong>
+              </div>
+              <div>
+                <span>Avg Price / Gal</span>
+                <strong>{formatMoney(fuelSummary.averagePricePerGallon)}</strong>
+              </div>
+            </div>
+
+            <div className="fuel-filter-grid">
+              <label>
+                <span>From</span>
+                <input
+                  type="date"
+                  value={fuelFilters.from}
+                  onChange={(e) => setFuelFilters((prev) => ({ ...prev, from: e.target.value }))}
+                />
+              </label>
+              <label>
+                <span>To</span>
+                <input
+                  type="date"
+                  value={fuelFilters.to}
+                  onChange={(e) => setFuelFilters((prev) => ({ ...prev, to: e.target.value }))}
+                />
+              </label>
+              <label>
+                <span>Driver</span>
+                <select
+                  value={fuelFilters.driverId}
+                  onChange={(e) => setFuelFilters((prev) => ({ ...prev, driverId: e.target.value }))}
+                >
+                  <option value="">All drivers</option>
+                  {driversList.map((driver) => (
+                    <option key={driver.id} value={driver.id}>
+                      {driver.id} - {driver.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Truck</span>
+                <input
+                  type="text"
+                  value={fuelFilters.truckId}
+                  onChange={(e) => setFuelFilters((prev) => ({ ...prev, truckId: e.target.value }))}
+                  placeholder="Truck number"
+                />
+              </label>
+            </div>
+
+            {fuelTransactions.length > 0 ? (
+              <div className="table-wrap accounting-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Driver</th>
+                      <th>Truck</th>
+                      <th>Station</th>
+                      <th>Load #</th>
+                      <th>Amount</th>
+                      <th>Gallons</th>
+                      <th>$/Gal</th>
+                      <th>Receipt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fuelTransactions.map((fuel) => (
+                      <tr key={fuel.id}>
+                        <td>{formatDateTime(fuel.dateTime)}</td>
+                        <td>{fuel.driverName || getDriverLabel(fuel.driverId)}</td>
+                        <td>{fuel.truckId || '—'}</td>
+                        <td>{fuel.fuelStation || '—'}</td>
+                        <td>{fuel.loadNumber || '—'}</td>
+                        <td>{formatMoney(fuel.amountPaid)}</td>
+                        <td>{Number(fuel.gallons || 0).toFixed(2)}</td>
+                        <td>{formatMoney(fuel.pricePerGallon)}</td>
+                        <td>
+                          {fuel.receiptImageUrl ? (
+                            <button type="button" className="secondary-btn compact-btn" onClick={() => handleOpenFuelReceipt(fuel)}>
+                              Open
+                            </button>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <p>No fuel transactions match these filters.</p>
+              </div>
+            )}
+          </div>
 
           {selectedAccountingLoad && (
             <div className="accounting-detail-panel">

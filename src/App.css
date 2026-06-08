@@ -2834,8 +2834,99 @@ button:disabled {
 
 .accounting-summary-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+.driver-fuel-panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 20px;
+  padding: 15px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.driver-fuel-form {
+  display: grid;
+  gap: 12px;
+}
+
+.driver-fuel-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.driver-fuel-form label span,
+.driver-fuel-total span {
+  color: #64748b;
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.driver-fuel-form input,
+.driver-fuel-form select {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #111827;
+}
+
+.driver-fuel-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  background: #eff6ff;
+}
+
+.driver-fuel-total strong {
+  color: #111827;
+  font-size: 22px;
+}
+
+.driver-fuel-history {
+  margin-top: 16px;
+}
+
+.driver-fuel-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid #e5e7eb;
+}
+
+.driver-fuel-row strong,
+.driver-fuel-row span {
+  display: block;
+}
+
+.driver-fuel-row strong {
+  color: #111827;
+}
+
+.driver-fuel-row span {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.driver-fuel-row button {
+  flex: none;
+  min-height: 38px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 900;
 }
 
 .accounting-summary-strip > div {
@@ -2960,12 +3051,49 @@ button:disabled {
   min-height: 42px;
 }
 
+.accounting-fuel-panel {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.fuel-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.fuel-filter-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.fuel-filter-grid span {
+  color: #64748b;
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.fuel-filter-grid input,
+.fuel-filter-grid select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #111827;
+}
+
 @media (max-width: 760px) {
   .accounting-summary-strip,
   .accounting-search-bar,
   .accounting-details-grid,
   .accounting-payment-summary,
-  .accounting-payment-form {
+  .accounting-payment-form,
+  .fuel-filter-grid {
     grid-template-columns: 1fr;
   }
 
