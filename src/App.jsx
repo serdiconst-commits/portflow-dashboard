@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import SignatureCanvas from 'react-signature-canvas';
+import { Capacitor } from '@capacitor/core';
+import {
+  DocumentScanner,
+  ResponseType,
+  ScannerMode,
+  ScanDocumentResponseStatus,
+} from '@capgo/capacitor-document-scanner';
 // 'dispatcher' | 'driver'
 import './App.css';
 
@@ -528,6 +535,8 @@ const [driverUploadStatusByLoad, setDriverUploadStatusByLoad] = useState({});
 const [driverCameraLoadId, setDriverCameraLoadId] = useState('');
 const [driverCameraError, setDriverCameraError] = useState('');
 const [driverScannerPreview, setDriverScannerPreview] = useState(null);
+const [driverScannerMode, setDriverScannerMode] = useState('web');
+const [driverScannerUploading, setDriverScannerUploading] = useState(false);
 const driverCameraVideoRef = useRef(null);
 const driverCameraStreamRef = useRef(null);
 const [dashboardFilter, setDashboardFilter] = useState('all');
@@ -944,16 +953,21 @@ const handleRegister = async (e) => {
 };
 const handleDriverDocumentUpload = async (loadId) => {
   try {
-    const file = uploadFileByLoad[loadId] || uploadFileRef.current[loadId];
+    const selectedUpload = uploadFileByLoad[loadId] || uploadFileRef.current[loadId];
+    const files = Array.isArray(selectedUpload)
+      ? selectedUpload.filter(Boolean)
+      : selectedUpload
+        ? [selectedUpload]
+        : [];
     const category = uploadDocType[loadId] || 'POD';
 
-    if (!file) {
+    if (!files.length) {
       alert('Please choose a file first.');
       return;
     }
 
     const formData = new FormData();
-    formData.append('files', file);
+    files.forEach((file) => formData.append('files', file));
     formData.append('category', category);
     formData.append('loadNumber', loadId);
 
@@ -990,8 +1004,24 @@ const handleDriverDocumentUpload = async (loadId) => {
   }
 };
 
-const handleDriverUploadFileChange = (loadId, file, source = 'camera') => {
-  if (!file) {
+const getUploadSelectionLabel = (selectedUpload) => {
+  if (Array.isArray(selectedUpload)) {
+    if (!selectedUpload.length) return 'No document selected';
+    if (selectedUpload.length === 1) return selectedUpload[0]?.name || '1 document selected';
+    return `${selectedUpload.length} scanned pages selected`;
+  }
+
+  return selectedUpload?.name || 'No document selected';
+};
+
+const handleDriverUploadFileChange = (loadId, fileOrFiles, source = 'camera') => {
+  const files = Array.isArray(fileOrFiles)
+    ? fileOrFiles.filter(Boolean)
+    : fileOrFiles
+      ? [fileOrFiles]
+      : [];
+
+  if (!files.length) {
     setDriverUploadStatusByLoad((prev) => ({
       ...prev,
       [loadId]: `No file received from ${source}. Please try again.`,
@@ -999,14 +1029,18 @@ const handleDriverUploadFileChange = (loadId, file, source = 'camera') => {
     return;
   }
 
-  uploadFileRef.current[loadId] = file;
+  const uploadValue = files.length === 1 ? files[0] : files;
+  uploadFileRef.current[loadId] = uploadValue;
   setUploadFileByLoad((prev) => ({
     ...prev,
-    [loadId]: file,
+    [loadId]: uploadValue,
   }));
   setDriverUploadStatusByLoad((prev) => ({
     ...prev,
-    [loadId]: `Ready: ${file.name || 'camera photo'} (${file.type || 'photo'}, ${file.size || 0} bytes)`,
+    [loadId]:
+      files.length === 1
+        ? `Ready: ${files[0].name || 'camera photo'} (${files[0].type || 'photo'}, ${files[0].size || 0} bytes)`
+        : `Ready: ${files.length} scanned pages from ${source}`,
   }));
 };
 
@@ -1022,12 +1056,93 @@ const closeDriverCamera = () => {
   setDriverCameraLoadId('');
   setDriverCameraError('');
   setDriverScannerPreview(null);
+  setDriverScannerMode('web');
+  setDriverScannerUploading(false);
+};
+
+const getNativeScannerDataUrl = (image) => {
+  if (!image) return '';
+  if (image.startsWith('data:')) return image;
+  return `data:image/jpeg;base64,${image}`;
+};
+
+const blobFromDataUrl = async (dataUrl) => {
+  const response = await fetch(dataUrl);
+  return response.blob();
+};
+
+const startNativeDocumentScan = async (loadId) => {
+  setDriverCameraLoadId(loadId);
+  setDriverScannerMode('native');
+  setDriverCameraError('');
+  setDriverScannerPreview(null);
+  setDriverScannerUploading(false);
+
+  try {
+    const result = await DocumentScanner.scanDocument({
+      responseType: ResponseType.Base64,
+      scannerMode: ScannerMode.Full,
+      letUserAdjustCrop: true,
+      reviewCapturedDocument: true,
+      maxNumDocuments: 8,
+      croppedImageQuality: 95,
+      brightness: 6,
+      contrast: 1.18,
+    });
+
+    if (result?.status === ScanDocumentResponseStatus.Cancel) {
+      closeDriverCamera();
+      setDriverUploadStatusByLoad((prev) => ({
+        ...prev,
+        [loadId]: 'Scan cancelled.',
+      }));
+      return;
+    }
+
+    const dataUrls = (result?.scannedImages || []).map(getNativeScannerDataUrl).filter(Boolean);
+    if (!dataUrls.length) {
+      setDriverCameraError('The scanner did not return a document. Please try again.');
+      return;
+    }
+
+    setDriverScannerPreview({
+      loadId,
+      dataUrls,
+      fileNames: dataUrls.map((_, index) =>
+        `driver-scan-${loadId}-${Date.now()}-${index + 1}.jpg`
+      ),
+      source: 'native',
+    });
+  } catch (error) {
+    console.error('Native document scanner failed:', error);
+    const message = String(error?.message || error || '');
+    if (/cancel/i.test(message)) {
+      closeDriverCamera();
+      setDriverUploadStatusByLoad((prev) => ({
+        ...prev,
+        [loadId]: 'Scan cancelled.',
+      }));
+      return;
+    }
+
+    setDriverScannerMode('web');
+    setDriverCameraError(
+      `Native scanner unavailable on this device, using web camera instead. ${message}`
+    );
+  }
 };
 
 const openDriverCamera = (loadId) => {
+  if (Capacitor.isNativePlatform?.()) {
+    startNativeDocumentScan(loadId);
+    return;
+  }
+
   setDriverCameraLoadId(loadId);
+  setDriverScannerMode('web');
   setDriverCameraError('');
   setDriverScannerPreview(null);
+  setDriverScannerUploading(false);
 };
 
 const getScannerGuideBounds = (width, height) => {
@@ -1149,34 +1264,78 @@ const captureDriverCameraPhoto = () => {
   const dataUrl = processedCanvas.toDataURL('image/jpeg', 0.92);
   setDriverScannerPreview({
     loadId,
-    dataUrl,
-    fileName: `driver-scan-${loadId}-${Date.now()}.jpg`,
+    dataUrls: [dataUrl],
+    fileNames: [`driver-scan-${loadId}-${Date.now()}.jpg`],
+    source: 'web',
   });
   stopDriverCameraStream();
 };
 
-const useDriverScannerPreview = () => {
-  if (!driverScannerPreview?.loadId || !driverScannerPreview?.dataUrl) return;
+const useDriverScannerPreview = async () => {
+  if (!driverScannerPreview?.loadId || !driverScannerPreview?.dataUrls?.length) return;
 
-  const preview = driverScannerPreview;
-  fetch(preview.dataUrl)
-    .then((res) => res.blob())
-    .then((blob) => {
-      const file = new File([blob], preview.fileName, {
+  try {
+    setDriverScannerUploading(true);
+    const preview = driverScannerPreview;
+    const files = await Promise.all(
+      preview.dataUrls.map(async (dataUrl, index) => {
+        const blob = await blobFromDataUrl(dataUrl);
+        return new File([blob], preview.fileNames?.[index] || `driver-scan-${preview.loadId}-${index + 1}.jpg`, {
+          type: 'image/jpeg',
+          lastModified: Date.now(),
+        });
+      })
+    );
+
+    handleDriverUploadFileChange(
+      preview.loadId,
+      files.length === 1 ? files[0] : files,
+      preview.source === 'native' ? 'native scanner' : 'PortFlow scanner'
+    );
+    closeDriverCamera();
+  } catch (error) {
+    console.error('Scanner preview conversion failed:', error);
+    setDriverCameraError('Could not save the scanned document. Please try again.');
+    setDriverScannerUploading(false);
+  }
+};
+
+const confirmAndUploadDriverScannerPreview = async () => {
+  if (!driverScannerPreview?.loadId || !driverScannerPreview?.dataUrls?.length) return;
+
+  try {
+    setDriverScannerUploading(true);
+    const preview = driverScannerPreview;
+    const files = await Promise.all(
+      preview.dataUrls.map(async (dataUrl, index) => {
+        const blob = await blobFromDataUrl(dataUrl);
+        return new File([blob], preview.fileNames?.[index] || `driver-scan-${preview.loadId}-${index + 1}.jpg`, {
         type: 'image/jpeg',
         lastModified: Date.now(),
-      });
+        });
+      })
+    );
 
-      handleDriverUploadFileChange(preview.loadId, file, 'PortFlow scanner');
-      closeDriverCamera();
-    })
-    .catch((error) => {
-      console.error('Scanner preview conversion failed:', error);
-      setDriverCameraError('Could not save the scanned document. Please try again.');
-    });
+    handleDriverUploadFileChange(
+      preview.loadId,
+      files.length === 1 ? files[0] : files,
+      preview.source === 'native' ? 'native scanner' : 'PortFlow scanner'
+    );
+    await handleDriverDocumentUpload(preview.loadId);
+    closeDriverCamera();
+  } catch (error) {
+    console.error('Scanner upload failed:', error);
+    setDriverCameraError(`Could not upload the scanned document: ${error.message}`);
+    setDriverScannerUploading(false);
+  }
 };
 
 const retakeDriverScannerPhoto = async () => {
+  if (driverScannerMode === 'native' && driverCameraLoadId) {
+    await startNativeDocumentScan(driverCameraLoadId);
+    return;
+  }
+
   setDriverScannerPreview(null);
   setDriverCameraError('');
   if (!navigator.mediaDevices?.getUserMedia) return;
@@ -1204,7 +1363,7 @@ const retakeDriverScannerPhoto = async () => {
 };
 
 useEffect(() => {
-  if (!driverCameraLoadId) return;
+  if (!driverCameraLoadId || driverScannerMode !== 'web') return;
 
   let cancelled = false;
 
@@ -1246,7 +1405,7 @@ useEffect(() => {
     cancelled = true;
     stopDriverCameraStream();
   };
-}, [driverCameraLoadId]);
+}, [driverCameraLoadId, driverScannerMode]);
 
 
 const [searchTerm, setSearchTerm] = useState('');
@@ -5778,7 +5937,7 @@ const DriverLoadCard = ({ load }) => {
           />
         </div>
 
-        <p className="driver-upload-name">{selectedFile?.name || 'No document selected'}</p>
+        <p className="driver-upload-name">{getUploadSelectionLabel(selectedFile)}</p>
         {uploadStatus && <p className="driver-upload-debug">{uploadStatus}</p>}
 
         <button type="button" className="driver-upload-submit" onClick={() => handleDriverDocumentUpload(load.id)}>
@@ -5817,7 +5976,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             </div>
             {driverScannerPreview ? (
               <div className="driver-scanner-preview">
-                <img src={driverScannerPreview.dataUrl} alt="Processed scanned document preview" />
+                <img src={driverScannerPreview.dataUrls?.[0]} alt="Processed scanned document preview" />
+                {driverScannerPreview.dataUrls?.length > 1 && (
+                  <p>{driverScannerPreview.dataUrls.length} scanned pages ready</p>
+                )}
               </div>
             ) : (
               <div className="driver-scanner-camera-frame">
@@ -5838,8 +6000,21 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <button type="button" className="driver-camera-retake" onClick={retakeDriverScannerPhoto}>
                   Retake
                 </button>
-                <button type="button" className="driver-camera-capture" onClick={useDriverScannerPreview}>
+                <button
+                  type="button"
+                  className="driver-camera-retake"
+                  onClick={useDriverScannerPreview}
+                  disabled={driverScannerUploading}
+                >
                   Use Scan
+                </button>
+                <button
+                  type="button"
+                  className="driver-camera-capture"
+                  onClick={confirmAndUploadDriverScannerPreview}
+                  disabled={driverScannerUploading}
+                >
+                  {driverScannerUploading ? 'Uploading...' : 'Confirm & Upload'}
                 </button>
               </div>
             ) : (
@@ -6298,6 +6473,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 </select>
 
   <div className="driver-upload-actions">
+    <button type="button" className="driver-upload-label driver-camera-button" onClick={() => openDriverCamera(load.id)}>
+      Scan Document
+    </button>
     <label className="driver-upload-label" htmlFor={`scan-${load.id}`}>
       Take Photo
     </label>
@@ -6328,7 +6506,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   </div>
 
   <p className="driver-upload-name">
-    {(uploadFileByLoad[load.id] || uploadFileRef.current[load.id])?.name || 'No document selected'}
+    {getUploadSelectionLabel(uploadFileByLoad[load.id] || uploadFileRef.current[load.id])}
   </p>
   {driverUploadStatusByLoad[load.id] && (
     <p className="driver-upload-debug">{driverUploadStatusByLoad[load.id]}</p>

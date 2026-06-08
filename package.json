@@ -27,6 +27,7 @@
     "backup:db:local": "node --env-file=.env.production server/backup-database.js"
   },
   "dependencies": {
+    "@capgo/capacitor-document-scanner": "^8.3.29",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
