@@ -1083,7 +1083,7 @@ const startNativeDocumentScan = async (loadId) => {
       responseType: ResponseType.Base64,
       scannerMode: ScannerMode.Full,
       letUserAdjustCrop: true,
-      reviewCapturedDocument: true,
+      reviewCapturedDocument: false,
       maxNumDocuments: 8,
       croppedImageQuality: 95,
       brightness: 6,
