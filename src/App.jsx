@@ -3183,7 +3183,9 @@ const handleSaveDropDetails = async () => {
     ...selectedLoad,
     status: 'Dropped',
     availabilityStatus: '',
-    droppedBy: normalizeDriverForStorage(selectedLoad.driver),
+    droppedBy:
+      normalizeDriverForStorage(selectedLoad.droppedBy) ||
+      normalizeDriverForStorage(selectedLoad.driver),
     dropDateTime: selectedLoad.dropDateTime || new Date().toISOString(),
   };
 
@@ -3213,6 +3215,68 @@ const handleSaveDropDetails = async () => {
   } catch (error) {
     console.error('Failed to save drop details:', error);
     alert(`Failed to save drop details: ${error.message}`);
+  }
+};
+
+const getDroppedLoadPickup = (load = {}) =>
+  String(load.dropLocation || '').trim() ||
+  (String(load.dropType || '').toLowerCase().includes('customer')
+    ? load.delivery
+    : load.returnLocation) ||
+  load.pickup ||
+  '';
+
+const handleReopenDroppedLoad = async () => {
+  if (!selectedLoad?.id) return;
+
+  const nextDriver = normalizeDriverForStorage(selectedLoad.driver);
+  if (!nextDriver) {
+    alert('Please assign a driver before reopening this load.');
+    return;
+  }
+
+  const droppedPickup = getDroppedLoadPickup(selectedLoad);
+  if (!String(droppedPickup || '').trim()) {
+    alert('Please save the drop location before reopening this load.');
+    return;
+  }
+
+  const updatedLoad = {
+    ...selectedLoad,
+    status: 'Dispatched',
+    availabilityStatus: '',
+    driver: nextDriver,
+    truck: getDriverTruck(nextDriver),
+    pickup: droppedPickup,
+  };
+
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${updatedLoad.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(updatedLoad),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to reopen load');
+    }
+
+    setLoadsData((prevLoads) =>
+      prevLoads.map((load) => (load.id === data.id ? data : load))
+    );
+    setSelectedLoad(data);
+    setEditingLoad((prev) => (prev?.id === data.id ? data : prev));
+    await fetchLoads();
+    await fetchSelectedLoadAuditLogs(data.id);
+    alert('Load reopened and assigned to driver.');
+  } catch (error) {
+    console.error('Failed to reopen dropped load:', error);
+    alert(`Failed to reopen load: ${error.message}`);
   }
 };
 
@@ -7581,8 +7645,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   onChange={handleEditInputChange}
 >
   <option value="">Select Drop Type</option>
-  <option value="Dropped at Customer">Dropped at Customer</option>
-  <option value="Dropped at Yard">Dropped at Yard</option>
+  <option value="Customer">Customer</option>
+  <option value="Yard">Yard / Pre-pull</option>
 </select>
 
 <input
@@ -7644,15 +7708,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 />
 
                       <input type="text" name="returnLocation" placeholder="Return Location" value={editingLoad.returnLocation} onChange={handleEditInputChange} />
-                      <select
-  name="dropType"
-  value={editingLoad.dropType || ''}
-  onChange={handleEditInputChange}
->
-  <option value="">Select Drop Type</option>
-  <option value="Yard">Yard</option>
-  <option value="Customer">Customer</option>
-</select>
                       <input type="text" name="bookingNumber" placeholder="Booking Number" value={editingLoad.bookingNumber || ''} onChange={handleEditInputChange} />
                       <input type="text" name="chassisNumber" placeholder="Chassis Number" value={editingLoad.chassisNumber} onChange={handleEditInputChange} />
                       <input type="text" name="sealNumber" placeholder="Seal Number" value={editingLoad.sealNumber} onChange={handleEditInputChange} />
@@ -7741,9 +7796,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                               <h3>Drop Details</h3>
                               <p className="panel-subtitle">Record where dispatch wants the container tracked after the driver drops it.</p>
                             </div>
-                            <button type="button" className="primary-btn compact-btn" onClick={handleSaveDropDetails}>
-                              Save Drop
-                            </button>
+                            <div className="details-actions">
+                              <button type="button" className="secondary-btn compact-btn" onClick={handleReopenDroppedLoad}>
+                                Reopen for Driver
+                              </button>
+                              <button type="button" className="primary-btn compact-btn" onClick={handleSaveDropDetails}>
+                                Save Drop
+                              </button>
+                            </div>
                           </div>
 
                           <div className="drop-details-grid">
@@ -7784,6 +7844,38 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                   );
                                 })}
                               </select>
+                            </label>
+                            <label>
+                              <span>Dropped By</span>
+                              <select
+                                value={normalizeDriverForStorage(selectedLoad.droppedBy) || normalizeDriverForStorage(selectedLoad.driver)}
+                                onChange={(e) =>
+                                  setSelectedLoad((prev) => ({
+                                    ...prev,
+                                    droppedBy: e.target.value,
+                                  }))
+                                }
+                              >
+                                <option value="">Select driver</option>
+                                {driversList.map((d) => (
+                                  <option key={d.id} value={d.id}>
+                                    {d.id} - {d.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              <span>Drop Date/Time</span>
+                              <input
+                                type="datetime-local"
+                                value={normalizeDateTimeInputValue(selectedLoad.dropDateTime || '')}
+                                onChange={(e) =>
+                                  setSelectedLoad((prev) => ({
+                                    ...prev,
+                                    dropDateTime: e.target.value,
+                                  }))
+                                }
+                              />
                             </label>
                           </div>
                         </div>
