@@ -613,6 +613,8 @@ const getSavedDeductionDetailsKey = (companySource, userSource) =>
   `portflow-settlement-deduction-details-${companySource?.id || userSource?.companyId || userSource?.id || 'default'}`;
 const getSavedSettlementCustomDeductionsKey = (companySource, userSource) =>
   `portflow-settlement-custom-deductions-${companySource?.id || userSource?.companyId || userSource?.id || 'default'}`;
+const getSavedSettlementManualLoadsKey = (companySource, userSource) =>
+  `portflow-settlement-manual-loads-${companySource?.id || userSource?.companyId || userSource?.id || 'default'}`;
 const getValidDispatchColumnOrder = (order = []) => {
   const allowed = new Set(defaultDispatchLoadColumnOrder);
   const cleanOrder = Array.isArray(order)
@@ -737,6 +739,7 @@ const dispatchColumnStorageKey = getSavedDispatchColumnKey(company, currentUser)
 const deductionReasonsStorageKey = getSavedDeductionReasonsKey(company, currentUser);
 const deductionDetailsStorageKey = getSavedDeductionDetailsKey(company, currentUser);
 const customDeductionsStorageKey = getSavedSettlementCustomDeductionsKey(company, currentUser);
+const settlementManualLoadsStorageKey = getSavedSettlementManualLoadsKey(company, currentUser);
 const [savedDeductionReasons, setSavedDeductionReasons] = useState(() => {
   try {
     const stored = JSON.parse(localStorage.getItem(getSavedDeductionReasonsKey(savedCompany, savedUser)) || '[]');
@@ -756,6 +759,14 @@ const [settlementDeductionDetails, setSettlementDeductionDetails] = useState(() 
 const [settlementCustomDeductions, setSettlementCustomDeductions] = useState(() => {
   try {
     const stored = JSON.parse(localStorage.getItem(getSavedSettlementCustomDeductionsKey(savedCompany, savedUser)) || '{}');
+    return stored && typeof stored === 'object' ? stored : {};
+  } catch {
+    return {};
+  }
+});
+const [settlementManualLoadIds, setSettlementManualLoadIds] = useState(() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(getSavedSettlementManualLoadsKey(savedCompany, savedUser)) || '{}');
     return stored && typeof stored === 'object' ? stored : {};
   } catch {
     return {};
@@ -845,6 +856,23 @@ useEffect(() => {
     console.error('Failed to save custom settlement deductions:', error);
   }
 }, [customDeductionsStorageKey, settlementCustomDeductions]);
+
+useEffect(() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(settlementManualLoadsStorageKey) || '{}');
+    setSettlementManualLoadIds(stored && typeof stored === 'object' ? stored : {});
+  } catch {
+    setSettlementManualLoadIds({});
+  }
+}, [settlementManualLoadsStorageKey]);
+
+useEffect(() => {
+  try {
+    localStorage.setItem(settlementManualLoadsStorageKey, JSON.stringify(settlementManualLoadIds));
+  } catch (error) {
+    console.error('Failed to save manual settlement loads:', error);
+  }
+}, [settlementManualLoadsStorageKey, settlementManualLoadIds]);
 
 const getCompanyLogoSrc = () => {
   if (!company?.logoUrl) return '';
@@ -1654,6 +1682,7 @@ const [settlementStartDate, setSettlementStartDate] = useState('');
 const [settlementEndDate, setSettlementEndDate] = useState('');
 const [settlementNote, setSettlementNote] = useState('');
 const [settlementContainerSearch, setSettlementContainerSearch] = useState('');
+const [settlementManualLoadSearch, setSettlementManualLoadSearch] = useState('');
 const [settlementDeductionReasonInput, setSettlementDeductionReasonInput] = useState('');
 const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
 const [fuelTransactions, setFuelTransactions] = useState([]);
@@ -2726,21 +2755,27 @@ useEffect(() => {
     };
   });
 
+  const activeSettlementDriverId = selectedSettlementDriverId || driversList[0]?.id || '';
+  const settlementManualLoadKey = [
+    activeSettlementDriverId || 'no-driver',
+    settlementStartDate || 'all-start',
+    settlementEndDate || 'all-end',
+  ].join('|');
+  const currentSettlementManualLoadIds = settlementManualLoadIds[settlementManualLoadKey] || [];
+  const getSettlementAppointmentDate = (load) => {
+    const rawAppointment = String(load.appointmentTime || '').trim();
+    if (!rawAppointment) return null;
+
+    const localDate = getLocalDatePortion(rawAppointment);
+    if (localDate) return localDate;
+
+    return getDateStringInAppTimeZone(rawAppointment) || null;
+  };
+
   const filteredSettlementLoads = useMemo(() => {
-    const activeDriverId = selectedSettlementDriverId || driversList[0]?.id || '';
-    const getSettlementAppointmentDate = (load) => {
-      const rawAppointment = String(load.appointmentTime || '').trim();
-      if (!rawAppointment) return null;
-
-      const localDate = getLocalDatePortion(rawAppointment);
-      if (localDate) return localDate;
-
-      return getDateStringInAppTimeZone(rawAppointment) || null;
-    };
-
-    return loadsData.filter((load) => {
-      const matchesDriver = activeDriverId
-        ? normalizeDriverForStorage(load.driver) === activeDriverId
+    const periodLoads = loadsData.filter((load) => {
+      const matchesDriver = activeSettlementDriverId
+        ? normalizeDriverForStorage(load.driver) === activeSettlementDriverId
         : true;
       const settlementAppointmentDate = getSettlementAppointmentDate(load);
       const matchesStart =
@@ -2749,10 +2784,28 @@ useEffect(() => {
         !settlementEndDate || (settlementAppointmentDate && settlementAppointmentDate <= settlementEndDate);
       return matchesDriver && matchesStart && matchesEnd;
     });
-  }, [loadsData, selectedSettlementDriverId, driversList, settlementStartDate, settlementEndDate]);
+
+    const loadMap = new Map(periodLoads.map((load) => [load.id, load]));
+    currentSettlementManualLoadIds.forEach((loadId) => {
+      const manualLoad = loadsData.find(
+        (load) =>
+          load.id === loadId &&
+          (!activeSettlementDriverId || normalizeDriverForStorage(load.driver) === activeSettlementDriverId)
+      );
+      if (manualLoad) loadMap.set(manualLoad.id, manualLoad);
+    });
+
+    return Array.from(loadMap.values());
+  }, [
+    loadsData,
+    activeSettlementDriverId,
+    settlementStartDate,
+    settlementEndDate,
+    currentSettlementManualLoadIds,
+  ]);
 
   const activeSettlementDriver =
-    driversList.find((driver) => driver.id === (selectedSettlementDriverId || driversList[0]?.id)) ||
+    driversList.find((driver) => driver.id === activeSettlementDriverId) ||
     null;
 
   const settlementCustomDeductionKey = [
@@ -2909,6 +2962,32 @@ useEffect(() => {
         String(load.containerNumber || '').toLowerCase().includes(normalizedSettlementContainerSearch)
       )
     : settlementDetailLoads;
+
+  const settlementManualLoadCandidates = useMemo(() => {
+    const term = settlementManualLoadSearch.trim().toLowerCase();
+    if (!activeSettlementDriverId || !term) return [];
+    const existingLoadIds = new Set(filteredSettlementLoads.map((load) => load.id));
+
+    return (loadsData || [])
+      .filter((load) => normalizeDriverForStorage(load.driver) === activeSettlementDriverId)
+      .filter((load) => !existingLoadIds.has(load.id))
+      .filter((load) => {
+        const haystack = [
+          load.id,
+          load.containerNumber,
+          load.referenceNumber,
+          load.poNumber,
+          load.bookingNumber,
+          load.customer,
+          formatAppointmentTime(load.appointmentTime),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(term);
+      })
+      .slice(0, 8);
+  }, [activeSettlementDriverId, filteredSettlementLoads, loadsData, settlementManualLoadSearch]);
 
   const selectedSettlementLoad =
     visibleSettlementLoads.find((load) => load.id === selectedSettlementLoadId) ||
@@ -3365,6 +3444,33 @@ const handleSaveDeductionReason = () => {
 
 const getSettlementDeductionDetail = (load) =>
   settlementDeductionDetails[load.id] || '';
+
+const handleAddManualSettlementLoad = (loadId) => {
+  const load = loadsData.find((item) => item.id === loadId);
+  if (!load) return;
+
+  setSettlementManualLoadIds((prev) => {
+    const existing = prev[settlementManualLoadKey] || [];
+    if (existing.includes(loadId)) return prev;
+    return {
+      ...prev,
+      [settlementManualLoadKey]: [...existing, loadId],
+    };
+  });
+  setSelectedSettlementLoadId(loadId);
+  setSettlementManualLoadSearch('');
+  setSettlementPayStatus(`Added ${load.containerNumber || load.id} to this settlement.`);
+};
+
+const handleRemoveManualSettlementLoad = (loadId) => {
+  const load = loadsData.find((item) => item.id === loadId);
+  setSettlementManualLoadIds((prev) => ({
+    ...prev,
+    [settlementManualLoadKey]: (prev[settlementManualLoadKey] || []).filter((id) => id !== loadId),
+  }));
+  setSelectedSettlementLoadId((current) => (current === loadId ? '' : current));
+  setSettlementPayStatus(`Removed ${load?.containerNumber || loadId} from this settlement.`);
+};
 
 const handleCustomDeductionDraftChange = (field, value) => {
   setSettlementCustomDeductionDraft((prev) => ({
@@ -8948,6 +9054,42 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               </button>
             </div>
 
+            <div className="settlement-entry-field settlement-manual-load-field">
+              <span>Add Load Outside Period</span>
+              <input
+                type="search"
+                placeholder="Search by container, load ID, reference, PO, customer"
+                value={settlementManualLoadSearch}
+                onChange={(e) => setSettlementManualLoadSearch(e.target.value)}
+              />
+              {settlementManualLoadSearch.trim() && (
+                <div className="settlement-manual-results">
+                  {settlementManualLoadCandidates.length === 0 ? (
+                    <p>No outside-period loads found for this driver.</p>
+                  ) : (
+                    settlementManualLoadCandidates.map((load) => (
+                      <button
+                        key={load.id}
+                        type="button"
+                        className="settlement-manual-result"
+                        onClick={() => handleAddManualSettlementLoad(load.id)}
+                      >
+                        <strong>{load.containerNumber || load.id}</strong>
+                        <span>
+                          {formatAppointmentTime(load.appointmentTime) || 'No appointment'} - {load.customer || 'No customer'} - {load.referenceNumber || load.poNumber || load.id}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+              {currentSettlementManualLoadIds.length > 0 && (
+                <p className="settlement-manual-note">
+                  {currentSettlementManualLoadIds.length} manually added load{currentSettlementManualLoadIds.length === 1 ? '' : 's'} in this settlement.
+                </p>
+              )}
+            </div>
+
             <label className="settlement-entry-field settlement-container-search">
               <span>Search Container</span>
               <input
@@ -9290,6 +9432,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 ) : (
                   visibleSettlementLoads.map((load) => {
                     const hasDraft = Boolean(settlementPayDrafts[load.id]);
+                    const isManualSettlementLoad = currentSettlementManualLoadIds.includes(load.id);
                     return (
                       <tr key={load.id}>
                         <td>{load.loadDate || '-'}</td>
@@ -9297,6 +9440,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <td>
                           <strong>{load.id}</strong>
                           <span>{load.referenceNumber || load.bookingNumber || 'No reference'}</span>
+                          {isManualSettlementLoad && <span>Manual add</span>}
                         </td>
                         <td>{load.customer || '-'}</td>
                         <td>{load.containerNumber || '-'}</td>
@@ -9344,6 +9488,15 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             >
                               Reset
                             </button>
+                            {isManualSettlementLoad && (
+                              <button
+                                type="button"
+                                className="secondary-btn"
+                                onClick={() => handleRemoveManualSettlementLoad(load.id)}
+                              >
+                                Remove
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
