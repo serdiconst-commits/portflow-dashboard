@@ -465,6 +465,7 @@ const getMissingDriverDocuments = (load) => {
     truck: '',
     pickup: '',
     delivery: '',
+    deliveryType: '',
     referenceNumber: '',
     poNumber: '',
     pickupNumber: '',
@@ -542,6 +543,7 @@ const driverCameraVideoRef = useRef(null);
 const driverCameraStreamRef = useRef(null);
 const [dashboardFilter, setDashboardFilter] = useState('all');
 const [appointmentDateFilter, setAppointmentDateFilter] = useState('today');
+const [appointmentDeliveryTypeFilter, setAppointmentDeliveryTypeFilter] = useState('all');
 const [customAppointmentDate, setCustomAppointmentDate] = useState(getTodayDate());
 const [driverMobileTab, setDriverMobileTab] = useState('active');
 const [driverTrackingEnabled, setDriverTrackingEnabled] = useState(false);
@@ -3060,6 +3062,17 @@ const matchesAppointmentDateFilter = (load) => {
   if (!targetDate) return hasAppointment(load);
   return getLoadAppointmentDate(load) === targetDate;
 };
+const getDeliveryTypeKey = (load = {}) =>
+  String(load.deliveryType || '').trim().toLowerCase();
+const getDeliveryTypeLabel = (value = '') => {
+  const key = String(value || '').trim().toLowerCase();
+  if (key === 'local') return 'Local Delivery';
+  if (key === 'highway') return 'Highway Delivery';
+  return 'Not Set';
+};
+const matchesAppointmentDeliveryTypeFilter = (load) =>
+  appointmentDeliveryTypeFilter === 'all' ||
+  getDeliveryTypeKey(load) === appointmentDeliveryTypeFilter;
 const hasAssignedDriver = (load) => {
   const rawDriver = String(load?.driver || '').trim();
   return Boolean(rawDriver && !/^(-+\s*)?(no driver|assign later|select driver|not assigned)$/i.test(rawDriver));
@@ -5548,7 +5561,12 @@ const baseFilteredLoadsData =
   dashboardFilter === 'lfd'
     ? activeOperationsLoads.filter((load) => hasLastFreeDay(load))
     : dashboardFilter === 'appointments'
-    ? activeOperationsLoads.filter((load) => hasAppointment(load) && matchesAppointmentDateFilter(load))
+    ? activeOperationsLoads.filter(
+        (load) =>
+          hasAppointment(load) &&
+          matchesAppointmentDateFilter(load) &&
+          matchesAppointmentDeliveryTypeFilter(load)
+      )
     : dashboardFilter === 'available'
     ? activeOperationsLoads.filter(
         (load) => getAvailabilityStatusKey(load) === 'available'
@@ -7539,6 +7557,19 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     />
   </div>
 
+  <div className="form-group">
+    <label>Delivery Type</label>
+    <select
+      name="deliveryType"
+      value={newLoad.deliveryType || ''}
+      onChange={handleInputChange}
+    >
+      <option value="">Select Delivery Type</option>
+      <option value="local">Local Delivery</option>
+      <option value="highway">Highway Delivery</option>
+    </select>
+  </div>
+
   <input
     type="text"
     name="sealNumber"
@@ -7932,6 +7963,15 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <option value="today">Today</option>
                 <option value="tomorrow">Tomorrow</option>
                 <option value="custom">Custom</option>
+              </select>
+              <select
+                value={appointmentDeliveryTypeFilter}
+                onChange={(e) => setAppointmentDeliveryTypeFilter(e.target.value)}
+                className="filter-select"
+              >
+                <option value="all">All Delivery Types</option>
+                <option value="local">Local Delivery</option>
+                <option value="highway">Highway Delivery</option>
               </select>
               {appointmentDateFilter === 'custom' && (
                 <input
@@ -8415,6 +8455,16 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   onChange={handleEditInputChange}
 />
 
+<select
+  name="deliveryType"
+  value={editingLoad?.deliveryType || ''}
+  onChange={handleEditInputChange}
+>
+  <option value="">Select Delivery Type</option>
+  <option value="local">Local Delivery</option>
+  <option value="highway">Highway Delivery</option>
+</select>
+
 <input
   type="text"
   name="reservationNumber"
@@ -8727,6 +8777,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 </div>
                         <div className="detail-box"><span>Truck</span><strong>{selectedLoad.truck}</strong></div>
                         <div className="detail-box"><span>Availability</span><strong>{selectedLoad.availabilityStatus || 'Not Available'}</strong></div>
+                        <div className="detail-box"><span>Delivery Type</span><strong>{getDeliveryTypeLabel(selectedLoad.deliveryType)}</strong></div>
                         <div className="detail-box"><span>Pick Up Location</span><strong>{selectedLoad.pickup}</strong></div>
                         <div className="detail-box"><span>Delivery Location</span><strong>{getDeliveryDisplay(selectedLoad.delivery) || '—'}</strong></div>
                         <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedLoad.appointmentTime)}</strong></div>

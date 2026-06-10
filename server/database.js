@@ -383,6 +383,7 @@ db.run(`
   truck TEXT,
   pickup TEXT,
   delivery TEXT,
+  deliveryType TEXT,
   appointmentTime TEXT,
   eta TEXT,
   returnLocation TEXT,
@@ -503,6 +504,11 @@ db.run(`ALTER TABLE loads ADD COLUMN poNumber TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN pickupNumber TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding pickupNumber column:', err.message);
+  }
+});
+db.run(`ALTER TABLE loads ADD COLUMN deliveryType TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding deliveryType column:', err.message);
   }
 });
 
