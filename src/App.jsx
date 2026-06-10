@@ -467,6 +467,7 @@ const getMissingDriverDocuments = (load) => {
     delivery: '',
     referenceNumber: '',
     poNumber: '',
+    pickupNumber: '',
     reservationNumber: '',
     returnNumber: '',
     returnLocation: '',
@@ -603,6 +604,7 @@ const defaultDispatchLoadColumnOrder = [
   'status',
   'referenceNumber',
   'poNumber',
+  'pickupNumber',
   'paperwork',
 ];
 const getSavedDispatchColumnKey = (companySource, userSource) =>
@@ -3018,9 +3020,13 @@ const filteredAccountingLoads = normalizedAccountingSearchTerm
   ? completedAccountingLoads.filter((load) => {
       const container = String(load.containerNumber || '').toLowerCase();
       const reference = String(load.referenceNumber || '').toLowerCase();
+      const poNumber = String(load.poNumber || '').toLowerCase();
+      const pickupNumber = String(load.pickupNumber || '').toLowerCase();
       return (
         container.includes(normalizedAccountingSearchTerm) ||
-        reference.includes(normalizedAccountingSearchTerm)
+        reference.includes(normalizedAccountingSearchTerm) ||
+        poNumber.includes(normalizedAccountingSearchTerm) ||
+        pickupNumber.includes(normalizedAccountingSearchTerm)
       );
     })
   : completedAccountingLoads;
@@ -5578,6 +5584,7 @@ const filteredLoadsData = viewFilteredLoadsData.filter((load) => {
   const loadDriver = String(getDriverLabel(load.driver) || load.driver || '').trim().toLowerCase();
   const loadReference = String(load.referenceNumber || '').trim().toLowerCase();
   const loadPo = String(load.poNumber || '').trim().toLowerCase();
+  const loadPickupNumber = String(load.pickupNumber || '').trim().toLowerCase();
   const loadContainer = String(load.containerNumber || '').trim().toLowerCase();
   const loadBooking = String(load.bookingNumber || '').trim().toLowerCase();
   return (
@@ -5586,6 +5593,7 @@ const filteredLoadsData = viewFilteredLoadsData.filter((load) => {
     loadDriver.includes(normalizedSearchTerm) ||
     loadReference.includes(normalizedSearchTerm) ||
     loadPo.includes(normalizedSearchTerm) ||
+    loadPickupNumber.includes(normalizedSearchTerm) ||
     loadContainer.includes(normalizedSearchTerm) ||
     loadBooking.includes(normalizedSearchTerm)
   );
@@ -5708,6 +5716,10 @@ const dispatchLoadColumnsByKey = {
   poNumber: {
     label: 'PO #',
     render: (load) => load.poNumber || '-',
+  },
+  pickupNumber: {
+    label: 'Pick Up #',
+    render: (load) => load.pickupNumber || '-',
   },
   paperwork: {
     label: 'Paperwork',
@@ -6210,6 +6222,14 @@ const DriverLoadCard = ({ load }) => {
         <div className="driver-info-item">
           <span>Detention</span>
           <strong>{load.detention ? formatMoney(parseMoney(load.detention)) : '$0.00'}</strong>
+        </div>
+        <div className="driver-info-item">
+          <span>PO #</span>
+          <strong>{load.poNumber || '-'}</strong>
+        </div>
+        <div className="driver-info-item">
+          <span>Pick Up #</span>
+          <strong>{load.pickupNumber || '-'}</strong>
         </div>
         <div className="driver-info-item">
           <span>Reservation</span>
@@ -7489,6 +7509,16 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     />
   </div>
 
+  <div className="form-group">
+    <label>Pick Up #</label>
+    <input
+      type="text"
+      name="pickupNumber"
+      value={newLoad.pickupNumber || ''}
+      onChange={handleInputChange}
+    />
+  </div>
+
   <input
     type="text"
     name="sealNumber"
@@ -7958,7 +7988,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <div className="filters-bar">
                 <input
                   type="text"
-                  placeholder="Search by container#, PO#, driver, customer, or reference#"
+                  placeholder="Search by container#, PO#, pick up #, driver, customer, or reference#"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="search-input"
@@ -8132,6 +8162,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
 
 
+
+<div className="load-field">
+  <strong>Pick Up #</strong>
+  {load.pickupNumber || '—'}
+</div>
 
   {userRole !== 'driver' && (
     <div className="load-field">
@@ -8349,6 +8384,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   name="poNumber"
   placeholder="PO#"
   value={editingLoad?.poNumber || ''}
+  onChange={handleEditInputChange}
+/>
+
+<input
+  type="text"
+  name="pickupNumber"
+  placeholder="Pick Up #"
+  value={editingLoad?.pickupNumber || ''}
   onChange={handleEditInputChange}
 />
 
@@ -8644,6 +8687,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       <div className="details-grid">
                         <div className="detail-box"><span>Load Date</span><strong>{selectedLoad.loadDate}</strong></div>
                         <div className="detail-box"><span>Reference #</span><strong>{selectedLoad.referenceNumber || '—'}</strong></div>
+                        <div className="detail-box"><span>PO #</span><strong>{selectedLoad.poNumber || '—'}</strong></div>
+                        <div className="detail-box"><span>Pick Up #</span><strong>{selectedLoad.pickupNumber || '—'}</strong></div>
                         <div className="detail-box">
   <span>Return #</span>
   <strong>{selectedLoad.returnNumber || '—'}</strong>
@@ -10179,7 +10224,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               value={accountingSearchTerm}
               onChange={(e) => setAccountingSearchTerm(e.target.value)}
               className="search-input"
-              placeholder="Search billing by container or reference #"
+              placeholder="Search billing by container, reference #, PO #, or pick up #"
             />
             <span>{filteredAccountingLoads.length} shown</span>
           </div>
@@ -10194,6 +10239,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     <th>Container</th>
                     <th>Reference #</th>
                     <th>PO #</th>
+                    <th>Pick Up #</th>
                     <th>Driver</th>
                     <th>Status</th>
                     <th>Amount</th>
@@ -10212,6 +10258,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <td>{load.containerNumber || '—'}</td>
                         <td>{load.referenceNumber || '—'}</td>
                         <td>{load.poNumber || '—'}</td>
+                        <td>{load.pickupNumber || '—'}</td>
                         <td>{load.driver ? getDriverLabel(load.driver) : 'Not Assigned'}</td>
                         <td>
                           <span className={`sheet-status ${String(getLoadQuickStatus(load) || '').toLowerCase().replace(/\s/g, '-')}`}>
@@ -10429,6 +10476,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="detail-box"><span>Container</span><strong>{selectedAccountingLoad.containerNumber || '—'}</strong></div>
                 <div className="detail-box"><span>Container Size</span><strong>{selectedAccountingLoad.containerSize || '—'}</strong></div>
                 <div className="detail-box"><span>Ship Line</span><strong>{selectedAccountingLoad.shipLine || '—'}</strong></div>
+                <div className="detail-box"><span>Pick Up #</span><strong>{selectedAccountingLoad.pickupNumber || '—'}</strong></div>
                 <div className="detail-box"><span>Driver</span><strong>{selectedAccountingLoad.driver ? getDriverLabel(selectedAccountingLoad.driver) : 'Not Assigned'}</strong></div>
                 <div className="detail-box"><span>Truck</span><strong>{selectedAccountingLoad.truck || '—'}</strong></div>
                 <div className="detail-box"><span>Pickup</span><strong>{selectedAccountingLoad.pickup || '—'}</strong></div>

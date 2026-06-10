@@ -376,6 +376,7 @@ db.run(`
   customer TEXT,
   referenceNumber TEXT,
   poNumber TEXT,
+  pickupNumber TEXT,
   returnNumber TEXT,
   reservationNumber TEXT,
   driver TEXT,
@@ -497,6 +498,11 @@ db.run(`ALTER TABLE loads ADD COLUMN eta TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN poNumber TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding poNumber column:', err.message);
+  }
+});
+db.run(`ALTER TABLE loads ADD COLUMN pickupNumber TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding pickupNumber column:', err.message);
   }
 });
 
