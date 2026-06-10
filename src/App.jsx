@@ -397,7 +397,7 @@ const handleAuthError = (message) => {
   setLoginError('Your session expired after the latest update. Please log in again.');
   return true;
 };
-  const calculateSettlement = ({ driverRate, detention, lumper, fuelAdvance }) => {
+  const calculateLoadSettlement = ({ driverRate, detention, lumper, fuelAdvance }) => {
     const total =
       parseMoney(driverRate) +
       parseMoney(detention) +
@@ -405,6 +405,41 @@ const handleAuthError = (message) => {
       parseMoney(fuelAdvance);
 
     return formatMoney(total);
+  };
+
+  const roundMoney = (value = 0) => Math.round((Number(value) || 0) * 100) / 100;
+
+  const calculateSettlement = (data = {}) => {
+    const loadRates = Array.isArray(data.loadRates) ? data.loadRates : [];
+    const grossPay = loadRates.reduce((sum, value) => sum + parseMoney(value), 0);
+    const dispatchRate = Number(data.dispatchRate) || 0;
+    const driverSplitRate = Number(data.driverSplitRate) || 0;
+    const insurance = parseMoney(data.insurance);
+    const fuel = parseMoney(data.fuel);
+    const parking = parseMoney(data.parking);
+    const loanRepayment = parseMoney(data.loanRepayment);
+    const detentionPay = parseMoney(data.detentionPay);
+    const dispatchFee = grossPay * dispatchRate;
+    const sharedDeductions = insurance + dispatchFee + fuel;
+    const splitAmount = grossPay - sharedDeductions;
+    const driverShare = splitAmount * driverSplitRate;
+    const finalPayCheck = driverShare - parking - loanRepayment + detentionPay;
+
+    return {
+      grossPay: roundMoney(grossPay),
+      dispatchRate,
+      dispatchFee: roundMoney(dispatchFee),
+      insurance: roundMoney(insurance),
+      fuel: roundMoney(fuel),
+      sharedDeductions: roundMoney(sharedDeductions),
+      splitAmount: roundMoney(splitAmount),
+      driverSplitRate,
+      driverShare: roundMoney(driverShare),
+      parking: roundMoney(parking),
+      loanRepayment: roundMoney(loanRepayment),
+      detentionPay: roundMoney(detentionPay),
+      finalPayCheck: roundMoney(finalPayCheck),
+    };
   };
 
   const getCustomerBillAmount = (load) =>
@@ -1688,6 +1723,14 @@ const [settlementNote, setSettlementNote] = useState('');
 const [settlementContainerSearch, setSettlementContainerSearch] = useState('');
 const [settlementManualLoadSearch, setSettlementManualLoadSearch] = useState('');
 const [settlementDeductionReasonInput, setSettlementDeductionReasonInput] = useState('');
+const [settlementCalculatorInputs, setSettlementCalculatorInputs] = useState({
+  dispatchRate: '10',
+  driverSplitRate: '50',
+  insurance: '350',
+  fuel: '',
+  parking: '',
+  loanRepayment: '',
+});
 const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
 const [fuelTransactions, setFuelTransactions] = useState([]);
 const [fuelSummary, setFuelSummary] = useState({
@@ -2852,36 +2895,65 @@ useEffect(() => {
       ? `${settlementStartDate || 'Start'} to ${settlementEndDate || 'End'}`
       : 'All appointment dates';
 
+  const settlementLoadRates = filteredSettlementLoads.map((load) =>
+    parseMoney(load.rate || load.driverRate)
+  );
+  const settlementDetentionPayNumber = filteredSettlementLoads.reduce(
+    (sum, load) => sum + parseMoney(load.detention),
+    0
+  );
+  const settlementCalculation = calculateSettlement({
+    loadRates: settlementLoadRates,
+    dispatchRate: parseMoney(settlementCalculatorInputs.dispatchRate) / 100,
+    driverSplitRate: parseMoney(settlementCalculatorInputs.driverSplitRate) / 100,
+    insurance: settlementCalculatorInputs.insurance,
+    fuel: settlementCalculatorInputs.fuel,
+    parking: settlementCalculatorInputs.parking,
+    loanRepayment: settlementCalculatorInputs.loanRepayment,
+    detentionPay: settlementDetentionPayNumber,
+  });
+
   const settlementReport = activeSettlementDriver
     ? [
         {
           driverId: activeSettlementDriver.id,
           driverName: activeSettlementDriver.name,
           loadsCount: filteredSettlementLoads.length,
-          totalDriverRate: formatMoney(settlementTripPayTotalNumber),
-          totalDetention: formatMoney(
-            filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.detention), 0)
-          ),
+          grossPay: formatMoney(settlementCalculation.grossPay),
+          dispatchFee: formatMoney(settlementCalculation.dispatchFee),
+          insurance: formatMoney(settlementCalculation.insurance),
+          fuel: formatMoney(settlementCalculation.fuel),
+          sharedDeductions: formatMoney(settlementCalculation.sharedDeductions),
+          splitAmount: formatMoney(settlementCalculation.splitAmount),
+          driverShare: formatMoney(settlementCalculation.driverShare),
+          parking: formatMoney(settlementCalculation.parking),
+          loanRepayment: formatMoney(settlementCalculation.loanRepayment),
+          finalPayCheck: formatMoney(settlementCalculation.finalPayCheck),
+          totalDriverRate: formatMoney(settlementCalculation.grossPay),
+          totalDetention: formatMoney(settlementCalculation.detentionPay),
           totalLumper: formatMoney(
             filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.lumper), 0)
           ),
-          totalFuelAdvance: formatMoney(
-            filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.fuelAdvance), 0)
-          ),
+          totalFuelAdvance: formatMoney(settlementCalculation.fuel),
           totalCustomDeductions: formatMoney(settlementCustomDeductionTotalNumber),
-          totalSettlement: formatMoney(
-            filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.settlement), 0)
-          ),
-          finalPayment: formatMoney(
-            filteredSettlementLoads.reduce((sum, load) => sum + parseMoney(load.settlement), 0) -
-              settlementCustomDeductionTotalNumber
-          ),
+          totalSettlement: formatMoney(settlementCalculation.driverShare),
+          finalPayment: formatMoney(settlementCalculation.finalPayCheck),
         },
       ]
     : [];
 
   const settlementTotals = settlementReport[0] || {
     loadsCount: 0,
+    grossPay: formatMoney(0),
+    dispatchFee: formatMoney(0),
+    insurance: formatMoney(0),
+    fuel: formatMoney(0),
+    sharedDeductions: formatMoney(0),
+    splitAmount: formatMoney(0),
+    driverShare: formatMoney(0),
+    parking: formatMoney(0),
+    loanRepayment: formatMoney(0),
+    finalPayCheck: formatMoney(0),
     totalDriverRate: formatMoney(0),
     totalDetention: formatMoney(0),
     totalLumper: formatMoney(0),
@@ -3002,7 +3074,7 @@ useEffect(() => {
     settlementPayDrafts[load.id]?.[field] ?? load[field] ?? '$0.00';
 
   const getSettlementPayTotal = (load) =>
-    calculateSettlement({
+    calculateLoadSettlement({
       driverRate: getSettlementPayValue(load, 'driverRate'),
       detention: getSettlementPayValue(load, 'detention'),
       lumper: getSettlementPayValue(load, 'lumper'),
@@ -3158,7 +3230,7 @@ const filteredLoads = loadsData.filter((load) => {
         truck: name === 'driver' ? (value ? getDriverTruck(value) : '') : prev.truck,
       };
 
-      updated.settlement = calculateSettlement({
+      updated.settlement = calculateLoadSettlement({
         driverRate: updated.driverRate,
         detention: updated.detention,
         lumper: updated.lumper,
@@ -3186,7 +3258,7 @@ if (name === 'driver' && prev.status === 'Dropped') {
       : prev.returnLocation || prev.pickup;
 }
 
-      updated.settlement = calculateSettlement({
+      updated.settlement = calculateLoadSettlement({
         driverRate: updated.driverRate,
         detention: updated.detention,
         lumper: updated.lumper,
@@ -3229,7 +3301,7 @@ const handleAddLoad = async (e) => {
       detention: newLoad.detention || '$0.00',
       lumper: newLoad.lumper || '$0.00',
       fuelAdvance: newLoad.fuelAdvance || '$0.00',
-      settlement: calculateSettlement({
+      settlement: calculateLoadSettlement({
         driverRate: newLoad.driverRate || '$0.00',
         detention: newLoad.detention || '$0.00',
         lumper: newLoad.lumper || '$0.00',
@@ -3314,7 +3386,7 @@ const handleUpdateLoad = async (e) => {
     detention: editingLoad.detention || '$0.00',
     lumper: editingLoad.lumper || '$0.00',
     fuelAdvance: editingLoad.fuelAdvance || '$0.00',
-    settlement: calculateSettlement({
+    settlement: calculateLoadSettlement({
       driverRate: editingLoad.driverRate || '$0.00',
       detention: editingLoad.detention || '$0.00',
       lumper: editingLoad.lumper || '$0.00',
@@ -3449,6 +3521,14 @@ const handleSettlementDeductionDetailChange = (loadId, value) => {
   setSettlementPayStatus('');
 };
 
+const handleSettlementCalculatorInputChange = (field, value) => {
+  setSettlementCalculatorInputs((prev) => ({
+    ...prev,
+    [field]: value,
+  }));
+  setSettlementPayStatus('');
+};
+
 const handleSaveDeductionReason = () => {
   const reason = settlementDeductionReasonInput.trim();
   if (!reason) return;
@@ -3574,7 +3654,7 @@ const handleSaveSettlementPay = async (load) => {
     fuelAdvance: draft.fuelAdvance ?? load.fuelAdvance ?? '$0.00',
   };
 
-  updatedLoad.settlement = calculateSettlement({
+  updatedLoad.settlement = calculateLoadSettlement({
     driverRate: updatedLoad.driverRate,
     detention: updatedLoad.detention,
     lumper: updatedLoad.lumper,
@@ -4347,7 +4427,40 @@ const handleChangeUserRole = async (userId, newRole) => {
       Note: settlementNote,
     }));
 
-    const exportRows = [...rows, ...customDeductionRows];
+    const settlementSummaryRows = [
+      ['Gross Pay', settlementTotals.grossPay],
+      ['Dispatch Fee', settlementTotals.dispatchFee],
+      ['Insurance', settlementTotals.insurance],
+      ['Fuel', settlementTotals.fuel],
+      ['Shared Deductions', settlementTotals.sharedDeductions],
+      ['Split Amount', settlementTotals.splitAmount],
+      ['Driver Share', settlementTotals.driverShare],
+      ['Parking', settlementTotals.parking],
+      ['Loan Repayment', settlementTotals.loanRepayment],
+      ['Detention Pay', settlementTotals.totalDetention],
+      ['Final Pay Check', settlementTotals.finalPayCheck],
+    ].map(([label, amount]) => ({
+      Type: 'Settlement Summary',
+      Driver: activeSettlementDriver
+        ? `${activeSettlementDriver.id} - ${activeSettlementDriver.name}`
+        : '',
+      Period: settlementPeriodLabel,
+      Date: '',
+      Load: '',
+      Customer: '',
+      Container: '',
+      Reference: label,
+      LoadPay: '',
+      Detention: '',
+      Lumper: '',
+      Deductions: '',
+      DeductionReason: '',
+      DeductionDescription: '',
+      NetSettlement: amount,
+      Note: settlementNote,
+    }));
+
+    const exportRows = [...settlementSummaryRows, ...rows, ...customDeductionRows];
 
     const headers = Object.keys(exportRows[0] || {
       Type: '',
@@ -4455,12 +4568,12 @@ const handleChangeUserRole = async (userId, newRole) => {
           <p>Period: ${periodLabel}</p>
           <div class="summary">
             <div class="box"><span>Loads</span><strong>${settlementTotals.loadsCount}</strong></div>
-            <div class="box"><span>Load Pay</span><strong>${settlementTotals.totalDriverRate}</strong></div>
-            <div class="box"><span>Detention</span><strong>${settlementTotals.totalDetention}</strong></div>
-            <div class="box"><span>Lumper</span><strong>${settlementTotals.totalLumper}</strong></div>
-            <div class="box"><span>Net Pay</span><strong>${settlementTotals.totalSettlement}</strong></div>
-            <div class="box"><span>Custom Deductions</span><strong>${settlementTotals.totalCustomDeductions}</strong></div>
-            <div class="box"><span>Final Payment</span><strong>${settlementTotals.finalPayment}</strong></div>
+            <div class="box"><span>Gross Pay</span><strong>${settlementTotals.grossPay}</strong></div>
+            <div class="box"><span>Dispatch Fee</span><strong>${settlementTotals.dispatchFee}</strong></div>
+            <div class="box"><span>Shared Deductions</span><strong>${settlementTotals.sharedDeductions}</strong></div>
+            <div class="box"><span>Split Amount</span><strong>${settlementTotals.splitAmount}</strong></div>
+            <div class="box"><span>Driver Share</span><strong>${settlementTotals.driverShare}</strong></div>
+            <div class="box"><span>Final Pay Check</span><strong>${settlementTotals.finalPayCheck}</strong></div>
           </div>
           ${settlementNote ? `<div class="note"><strong>Payroll Note</strong><br>${settlementNote}</div>` : ''}
           <h2>Custom Deductions</h2>
@@ -9375,6 +9488,91 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         <section className="panel settlement-deductions-panel">
           <div className="panel-header">
             <div>
+              <h3>Settlement Calculator</h3>
+              <p className="panel-subtitle">Excel-style paycheck calculation for the selected driver and period.</p>
+            </div>
+            <span>{settlementTotals.finalPayCheck}</span>
+          </div>
+
+          <div className="settlement-custom-deduction-form">
+            <label className="settlement-entry-field">
+              <span>Dispatch %</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={settlementCalculatorInputs.dispatchRate}
+                onChange={(e) => handleSettlementCalculatorInputChange('dispatchRate', e.target.value)}
+              />
+            </label>
+            <label className="settlement-entry-field">
+              <span>Driver Split %</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={settlementCalculatorInputs.driverSplitRate}
+                onChange={(e) => handleSettlementCalculatorInputChange('driverSplitRate', e.target.value)}
+              />
+            </label>
+            <label className="settlement-entry-field">
+              <span>Insurance</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={settlementCalculatorInputs.insurance}
+                onChange={(e) => handleSettlementCalculatorInputChange('insurance', e.target.value)}
+              />
+            </label>
+            <label className="settlement-entry-field">
+              <span>Fuel</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={settlementCalculatorInputs.fuel}
+                onChange={(e) => handleSettlementCalculatorInputChange('fuel', e.target.value)}
+              />
+            </label>
+            <label className="settlement-entry-field">
+              <span>Parking</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={settlementCalculatorInputs.parking}
+                onChange={(e) => handleSettlementCalculatorInputChange('parking', e.target.value)}
+              />
+            </label>
+            <label className="settlement-entry-field">
+              <span>Loan Repayment</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={settlementCalculatorInputs.loanRepayment}
+                onChange={(e) => handleSettlementCalculatorInputChange('loanRepayment', e.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="table-wrap">
+            <table>
+              <tbody>
+                <tr><th>Gross Pay</th><td>{settlementTotals.grossPay}</td></tr>
+                <tr><th>Dispatch Fee</th><td>{settlementTotals.dispatchFee}</td></tr>
+                <tr><th>Insurance</th><td>{settlementTotals.insurance}</td></tr>
+                <tr><th>Fuel</th><td>{settlementTotals.fuel}</td></tr>
+                <tr><th>Shared Deductions</th><td>{settlementTotals.sharedDeductions}</td></tr>
+                <tr><th>Split Amount</th><td>{settlementTotals.splitAmount}</td></tr>
+                <tr><th>Driver Share</th><td>{settlementTotals.driverShare}</td></tr>
+                <tr><th>Parking</th><td>{settlementTotals.parking}</td></tr>
+                <tr><th>Loan Repayment</th><td>{settlementTotals.loanRepayment}</td></tr>
+                <tr><th>Detention Pay</th><td>{settlementTotals.totalDetention}</td></tr>
+                <tr><th>Final Pay Check</th><td><strong>{settlementTotals.finalPayCheck}</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="panel settlement-deductions-panel">
+          <div className="panel-header">
+            <div>
               <h3>Custom Deductions</h3>
               <p className="panel-subtitle">Add payroll deductions like insurance, parking, dispatch, fuel, loan, or any custom detail.</p>
             </div>
@@ -9483,13 +9681,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <tr>
                   <th>Driver</th>
                   <th>Loads</th>
-                  <th>Driver Rate</th>
+                  <th>Gross Pay</th>
+                  <th>Shared Deductions</th>
+                  <th>Driver Share</th>
+                  <th>Parking</th>
+                  <th>Loan</th>
                   <th>Detention</th>
-                  <th>Lumper</th>
-                  <th>Load Deductions</th>
-                  <th>Custom Deductions</th>
-                  <th>Total Settlement</th>
-                  <th>Final Payment</th>
+                  <th>Final Pay Check</th>
                 </tr>
               </thead>
               <tbody>
@@ -9497,13 +9695,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <tr key={item.driverId}>
                     <td>{item.driverId} - {item.driverName}</td>
                     <td>{item.loadsCount}</td>
-                    <td>{item.totalDriverRate}</td>
+                    <td>{item.grossPay}</td>
+                    <td>{item.sharedDeductions}</td>
+                    <td>{item.driverShare}</td>
+                    <td>{item.parking}</td>
+                    <td>{item.loanRepayment}</td>
                     <td>{item.totalDetention}</td>
-                    <td>{item.totalLumper}</td>
-                    <td>{item.totalFuelAdvance}</td>
-                    <td>{item.totalCustomDeductions}</td>
-                    <td>{item.totalSettlement}</td>
-                    <td>{item.finalPayment}</td>
+                    <td>{item.finalPayCheck}</td>
                   </tr>
                 ))}
               </tbody>
