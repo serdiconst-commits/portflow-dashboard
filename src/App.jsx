@@ -4908,7 +4908,7 @@ const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
           <h2 class="section-title">Route</h2>
           <section class="addresses">
             ${podAddress('Pickup', loadForPod.pickup)}
-            ${podAddress('Delivery', loadForPod.delivery)}
+            ${podAddress('Delivery', getDeliveryDisplay(loadForPod.delivery))}
             ${podAddress('Return', loadForPod.returnLocation)}
           </section>
 
@@ -4980,7 +4980,7 @@ const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
 
         <div class="section">
           <strong>Pickup:</strong> ${selectedInvoiceLoad.pickup || '—'}<br/>
-          <strong>Delivery:</strong> ${selectedInvoiceLoad.delivery || '—'}<br/>
+          <strong>Delivery:</strong> ${getDeliveryDisplay(selectedInvoiceLoad.delivery) || '—'}<br/>
           <strong>Return:</strong> ${selectedInvoiceLoad.returnLocation || '—'}
         </div>
 
@@ -5097,7 +5097,7 @@ const handlePrintInvoice = () => {
             <div class="line"><strong>Broker Reference:</strong> ${selectedInvoiceLoad.referenceNumber || '—'}</div>
             <div class="line"><strong>POD:</strong> ${selectedInvoiceLoad.pod || '—'}</div>
             <div class="line"><strong>Pickup:</strong> ${selectedInvoiceLoad.pickup || '—'}</div>
-            <div class="line"><strong>Delivery:</strong> ${selectedInvoiceLoad.delivery || '—'}</div>
+            <div class="line"><strong>Delivery:</strong> ${getDeliveryDisplay(selectedInvoiceLoad.delivery) || '—'}</div>
             <div class="line"><strong>Return:</strong> ${selectedInvoiceLoad.returnLocation || '—'}</div>
             <div class="line"><strong>Container:</strong> ${selectedInvoiceLoad.containerNumber || '—'}</div>
             <div class="line"><strong>Chassis:</strong> ${selectedInvoiceLoad.chassisNumber || '—'}</div>
@@ -5147,6 +5147,26 @@ const returnLocations = Array.isArray(locations)
         loc.type === 'warehouse'
     )
   : [];
+
+const normalizeLocationText = (value = '') =>
+  String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+const getSavedLocationDisplay = (value = '', options = []) => {
+  const rawValue = String(value || '').trim();
+  if (!rawValue) return '';
+
+  const normalizedValue = normalizeLocationText(rawValue);
+  const match = (options || []).find((loc) => {
+    const address = normalizeLocationText(formatLocationAddress(loc));
+    const label = normalizeLocationText(getLocationOptionLabel(loc));
+    return normalizedValue === address || normalizedValue === label;
+  });
+
+  return match ? getLocationOptionLabel(match) : rawValue;
+};
+
+const getDeliveryDisplay = (value = '') =>
+  getSavedLocationDisplay(value, deliveryLocations);
            
   const handleSaveNewPickupLocation = async () => {
   try {
@@ -5684,7 +5704,7 @@ const dispatchLoadColumnsByKey = {
   },
   delivery: {
     label: 'Delivery',
-    render: (load) => shortLocation(load.delivery),
+    render: (load) => getDeliveryDisplay(load.delivery) || '-',
   },
   appointmentTime: {
     label: 'Appointment',
@@ -6189,7 +6209,7 @@ const DriverLoadCard = ({ load }) => {
           <span>Delivery</span>
           {load.delivery ? (
             <a href={getGoogleMapsLink(load.delivery)} target="_blank" rel="noopener noreferrer">
-              {load.delivery}
+              {getDeliveryDisplay(load.delivery)}
             </a>
           ) : (
             <strong>-</strong>
@@ -6849,7 +6869,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         target="_blank"
         rel="noopener noreferrer"
       >
-        {load.delivery}
+        {getDeliveryDisplay(load.delivery)}
       </a>
     ) : (
       '-'
@@ -8134,7 +8154,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
    <div className="load-field">
   <strong>📦 Delivery</strong>
-  {shortLocation(load.delivery)}
+  {getDeliveryDisplay(load.delivery) || '-'}
 </div>
    <p>📍 <strong>Drop Type:</strong><br /> {load.dropType || '-'}</p>
    <p>📍 <strong>Drop Location:</strong><br /> {load.dropLocation || '-'}</p>
@@ -8150,7 +8170,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   <p>
     📍 <strong>Dropped:</strong> {load.dropType || '-'} <br />
     📌 {load.dropType === 'Customer'
-      ? load.delivery || '-'
+      ? getDeliveryDisplay(load.delivery) || '-'
       : load.returnLocation || '-'}
   </p>
 )}
@@ -8708,7 +8728,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="detail-box"><span>Truck</span><strong>{selectedLoad.truck}</strong></div>
                         <div className="detail-box"><span>Availability</span><strong>{selectedLoad.availabilityStatus || 'Not Available'}</strong></div>
                         <div className="detail-box"><span>Pick Up Location</span><strong>{selectedLoad.pickup}</strong></div>
-                        <div className="detail-box"><span>Delivery Location</span><strong>{selectedLoad.delivery}</strong></div>
+                        <div className="detail-box"><span>Delivery Location</span><strong>{getDeliveryDisplay(selectedLoad.delivery) || '—'}</strong></div>
                         <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedLoad.appointmentTime)}</strong></div>
                         <div className="detail-box"><span>ETA</span><strong>{formatAppointmentTime(selectedLoad.eta)}</strong></div>
                         <div className="detail-box"><span>Return Location</span><strong>{selectedLoad.returnLocation}</strong></div>
@@ -10480,7 +10500,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="detail-box"><span>Driver</span><strong>{selectedAccountingLoad.driver ? getDriverLabel(selectedAccountingLoad.driver) : 'Not Assigned'}</strong></div>
                 <div className="detail-box"><span>Truck</span><strong>{selectedAccountingLoad.truck || '—'}</strong></div>
                 <div className="detail-box"><span>Pickup</span><strong>{selectedAccountingLoad.pickup || '—'}</strong></div>
-                <div className="detail-box"><span>Delivery</span><strong>{selectedAccountingLoad.delivery || '—'}</strong></div>
+                <div className="detail-box"><span>Delivery</span><strong>{getDeliveryDisplay(selectedAccountingLoad.delivery) || '—'}</strong></div>
                 <div className="detail-box"><span>Return Location</span><strong>{selectedAccountingLoad.returnLocation || '—'}</strong></div>
                 <div className="detail-box"><span>Drop Location</span><strong>{selectedAccountingLoad.dropLocation || '—'}</strong></div>
                 <div className="detail-box"><span>Dropped By</span><strong>{getDroppedByDriverValue(selectedAccountingLoad) ? getDriverLabel(getDroppedByDriverValue(selectedAccountingLoad)) : '—'}</strong></div>
@@ -10888,7 +10908,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <p><strong>PO#:</strong> {selectedInvoiceLoad.poNumber || '—'}</p>
 
                   <p><strong>Pick up Location:</strong> {selectedInvoiceLoad.pickup}</p>
-                  <p><strong>Delivery Location:</strong> {selectedInvoiceLoad.delivery}</p>
+                  <p><strong>Delivery Location:</strong> {getDeliveryDisplay(selectedInvoiceLoad.delivery) || '—'}</p>
                   <p><strong>Appointment:</strong> {selectedInvoiceLoad.appointmentTime || '—'}</p>
                   <p><strong>Return Location:</strong> {selectedInvoiceLoad.returnLocation || '—'}</p>
                   <p><strong>Container:</strong> {selectedInvoiceLoad.containerNumber || '—'}</p>
