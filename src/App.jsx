@@ -849,6 +849,14 @@ const notAvailableLoads = loadsData.filter(
 
 const [selectedPresetName, setSelectedPresetName] = useState('');
 const [selectedLoad, setSelectedLoad] = useState(null);
+const buildDropDetailsDraft = (load = {}) => ({
+  dropType: load.dropType || '',
+  dropLocation: load.dropLocation || '',
+  droppedBy: normalizeDriverForStorage(load.droppedBy) || normalizeDriverForStorage(load.driver) || '',
+  dropDateTime: normalizeDateTimeInputValue(load.dropDateTime || ''),
+  nextDriver: normalizeDriverForStorage(load.driver) || '',
+});
+const [dropDetailsDraft, setDropDetailsDraft] = useState(buildDropDetailsDraft());
 const [dispatchColumnOrder, setDispatchColumnOrder] = useState(() => {
   try {
     return getValidDispatchColumnOrder(
@@ -2816,6 +2824,10 @@ useEffect(() => {
 }, [activeView, authToken, currentUser?.role]);
 
 useEffect(() => {
+  setDropDetailsDraft(selectedLoad ? buildDropDetailsDraft(selectedLoad) : buildDropDetailsDraft());
+}, [selectedLoad?.id]);
+
+useEffect(() => {
   if (selectedLoad?.id && roleCanAccessView(currentUser?.role, 'dispatch')) {
     fetchSelectedLoadAuditLogs(selectedLoad.id);
   } else {
@@ -3402,10 +3414,7 @@ const filteredLoads = loadsData.filter((load) => {
 };
 
 if (name === 'driver' && prev.status === 'Dropped') {
-  updated.pickup =
-    prev.dropType === 'Customer'
-      ? prev.delivery || prev.pickup
-      : prev.returnLocation || prev.pickup;
+  updated.pickup = getDroppedLoadPickup(prev);
 }
 
       updated.settlement = calculateLoadSettlement({
@@ -3891,9 +3900,7 @@ const updatedLoad = {
   truck: newDriver ? getDriverTruck(newDriver) : '',
   pickup:
     selectedLoad.status === 'Dropped'
-      ? selectedLoad.dropType === 'Customer'
-        ? selectedLoad.delivery || selectedLoad.pickup
-        : selectedLoad.returnLocation || selectedLoad.pickup
+      ? getDroppedLoadPickup(selectedLoad)
       : selectedLoad.pickup,
 };
 
@@ -3941,6 +3948,9 @@ const updatedLoad = {
 };
 
   setSelectedLoad(updatedLoad);
+  if (!isAvailabilityStatus && newStatus === 'Dropped') {
+    setDropDetailsDraft(buildDropDetailsDraft(updatedLoad));
+  }
 
   try {
     const res = await fetch(`${API_BASE}/api/loads/${updatedLoad.id}`, {
@@ -3971,7 +3981,7 @@ const updatedLoad = {
 
 const handleSaveDropDetails = async () => {
   if (!selectedLoad?.id) return;
-  if (!String(selectedLoad.dropLocation || '').trim()) {
+  if (!String(dropDetailsDraft.dropLocation || '').trim()) {
     alert('Please select where the container was dropped.');
     return;
   }
@@ -3980,10 +3990,12 @@ const handleSaveDropDetails = async () => {
     ...selectedLoad,
     status: 'Dropped',
     availabilityStatus: '',
+    dropType: dropDetailsDraft.dropType || selectedLoad.dropType || '',
+    dropLocation: dropDetailsDraft.dropLocation || '',
     droppedBy:
-      normalizeDriverForStorage(selectedLoad.droppedBy) ||
+      normalizeDriverForStorage(dropDetailsDraft.droppedBy) ||
       normalizeDriverForStorage(selectedLoad.driver),
-    dropDateTime: selectedLoad.dropDateTime || new Date().toISOString(),
+    dropDateTime: dropDetailsDraft.dropDateTime || new Date().toISOString(),
   };
 
   try {
@@ -4003,6 +4015,7 @@ const handleSaveDropDetails = async () => {
 
     const data = await res.json();
     setSelectedLoad(data);
+    setDropDetailsDraft(buildDropDetailsDraft(data));
     setLoadsData((prevLoads) =>
       prevLoads.map((load) => (load.id === data.id ? data : load))
     );
@@ -4026,15 +4039,20 @@ const getDroppedLoadPickup = (load = {}) =>
 const handleReopenDroppedLoad = async () => {
   if (!selectedLoad?.id) return;
 
-  const nextDriver = normalizeDriverForStorage(selectedLoad.driver);
+  const nextDriver = normalizeDriverForStorage(dropDetailsDraft.nextDriver || selectedLoad.driver);
   if (!nextDriver) {
     alert('Please assign a driver before reopening this load.');
     return;
   }
 
-  const droppedPickup = getDroppedLoadPickup(selectedLoad);
+  const dropLoadForPickup = {
+    ...selectedLoad,
+    dropType: dropDetailsDraft.dropType || selectedLoad.dropType,
+    dropLocation: dropDetailsDraft.dropLocation || selectedLoad.dropLocation,
+  };
+  const droppedPickup = getDroppedLoadPickup(dropLoadForPickup);
   if (!String(droppedPickup || '').trim()) {
-    alert('Please save the drop location before reopening this load.');
+    alert('Please select the drop location before reopening this load.');
     return;
   }
 
@@ -4045,6 +4063,13 @@ const handleReopenDroppedLoad = async () => {
     driver: nextDriver,
     truck: getDriverTruck(nextDriver),
     pickup: droppedPickup,
+    dropType: dropDetailsDraft.dropType || selectedLoad.dropType || '',
+    dropLocation: dropDetailsDraft.dropLocation || selectedLoad.dropLocation || '',
+    droppedBy:
+      normalizeDriverForStorage(dropDetailsDraft.droppedBy) ||
+      normalizeDriverForStorage(selectedLoad.droppedBy) ||
+      normalizeDriverForStorage(selectedLoad.driver),
+    dropDateTime: dropDetailsDraft.dropDateTime || selectedLoad.dropDateTime || new Date().toISOString(),
   };
 
   try {
@@ -4067,6 +4092,7 @@ const handleReopenDroppedLoad = async () => {
       prevLoads.map((load) => (load.id === data.id ? data : load))
     );
     setSelectedLoad(data);
+    setDropDetailsDraft(buildDropDetailsDraft(data));
     setEditingLoad((prev) => (prev?.id === data.id ? data : prev));
     await fetchLoads();
     await fetchSelectedLoadAuditLogs(data.id);
@@ -8934,11 +8960,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <label>
                               <span>Drop Type</span>
                               <select
-                                value={selectedLoad.dropType || ''}
+                                value={dropDetailsDraft.dropType || ''}
                                 onChange={(e) =>
-                                  setSelectedLoad((prev) => ({
+                                  setDropDetailsDraft((prev) => ({
                                     ...prev,
                                     dropType: e.target.value,
+                                    dropLocation: '',
                                   }))
                                 }
                               >
@@ -8950,16 +8977,19 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <label>
                               <span>Drop Location</span>
                               <select
-                                value={selectedLoad.dropLocation || ''}
+                                value={dropDetailsDraft.dropLocation || ''}
                                 onChange={(e) =>
-                                  setSelectedLoad((prev) => ({
+                                  setDropDetailsDraft((prev) => ({
                                     ...prev,
                                     dropLocation: e.target.value,
                                   }))
                                 }
                               >
-                                <option value="">Select delivery location</option>
-                                {(deliveryLocations || []).map((loc) => {
+                                <option value="">Select drop location</option>
+                                {((dropDetailsDraft.dropType || selectedLoad.dropType) === 'Yard'
+                                  ? returnLocations
+                                  : deliveryLocations
+                                ).map((loc) => {
                                   const address = formatLocationAddress(loc);
                                   return (
                                     <option key={loc.id} value={address}>
@@ -8972,9 +9002,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <label>
                               <span>Dropped By</span>
                               <select
-                                value={normalizeDriverForStorage(selectedLoad.droppedBy) || normalizeDriverForStorage(selectedLoad.driver)}
+                                value={normalizeDriverForStorage(dropDetailsDraft.droppedBy)}
                                 onChange={(e) =>
-                                  setSelectedLoad((prev) => ({
+                                  setDropDetailsDraft((prev) => ({
                                     ...prev,
                                     droppedBy: e.target.value,
                                   }))
@@ -8992,14 +9022,33 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                               <span>Drop Date/Time</span>
                               <input
                                 type="datetime-local"
-                                value={normalizeDateTimeInputValue(selectedLoad.dropDateTime || '')}
+                                value={dropDetailsDraft.dropDateTime || ''}
                                 onChange={(e) =>
-                                  setSelectedLoad((prev) => ({
+                                  setDropDetailsDraft((prev) => ({
                                     ...prev,
                                     dropDateTime: e.target.value,
                                   }))
                                 }
                               />
+                            </label>
+                            <label>
+                              <span>Next Driver</span>
+                              <select
+                                value={normalizeDriverForStorage(dropDetailsDraft.nextDriver)}
+                                onChange={(e) =>
+                                  setDropDetailsDraft((prev) => ({
+                                    ...prev,
+                                    nextDriver: e.target.value,
+                                  }))
+                                }
+                              >
+                                <option value="">Select driver to move it</option>
+                                {driversList.map((d) => (
+                                  <option key={d.id} value={d.id}>
+                                    {d.id} - {d.name}
+                                  </option>
+                                ))}
+                              </select>
                             </label>
                           </div>
                         </div>
