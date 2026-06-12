@@ -69,6 +69,14 @@ Associated equipment:
 curl "http://localhost:3010/porthouston/associated-equipment?facility=BPT&departOrderNbr=BOOKING123"
 ```
 
+Use `facility=BPT` for Bayport and `facility=BCT` for Barbours Cut. Leave
+`facility` off to request results across all Port Houston facilities when the
+endpoint supports it:
+
+```bash
+curl "http://localhost:3010/porthouston/associated-equipment?departOrderNbr=BOOKING123"
+```
+
 Available containers by BOL:
 
 ```bash
@@ -115,6 +123,12 @@ Equipment history:
 
 ```bash
 curl "http://localhost:3010/porthouston/equipment-history/ABCD1234567"
+```
+
+Barbours Cut equipment history:
+
+```bash
+curl "http://localhost:3010/porthouston/equipment-history/ABCD1234567?facility=BCT"
 ```
 
 Gate transactions:

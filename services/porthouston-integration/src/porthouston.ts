@@ -13,6 +13,19 @@ const getEnv = (key: string, fallback = "") => process.env[key] || fallback;
 
 const normalizeBaseUrl = (url: string) => (url.endsWith("/") ? url : `${url}/`);
 
+const normalizeFacility = (facility = "") => {
+  const normalized = facility.trim().toUpperCase();
+  if (normalized === "BCT" || normalized === "BPT") return normalized;
+  return normalized;
+};
+
+const withOptionalFacility = (params: Record<string, string>) => {
+  const facility = normalizeFacility(params.facility || "");
+  const nextParams = { ...params };
+  delete nextParams.facility;
+  return facility ? { facility, ...nextParams } : nextParams;
+};
+
 const apiBaseUrl = normalizeBaseUrl(
   getEnv("PORT_HOUSTON_API_BASE_URL", DEFAULT_API_BASE_URL),
 );
@@ -174,7 +187,7 @@ export const getAssociatedEquipment = (
   departOrderNbr: string,
 ) =>
   requestPortHouston("GET", "GetAssociatedEquipment", {
-    params: { facility, departOrderNbr },
+    params: withOptionalFacility({ facility, departOrderNbr }),
   });
 
 export const getAvailableContainersByBol = (blNbr: string) =>
@@ -201,9 +214,9 @@ export const getBookingInquiry = (bookingNumber: string) =>
     params: { bookingNumber },
   });
 
-export const getEquipmentHistory = (unitId: string) =>
+export const getEquipmentHistory = (unitId: string, facility = "") =>
   requestPortHouston("GET", "GetEquipmentHistory", {
-    params: { unitId },
+    params: withOptionalFacility({ facility, unitId }),
   });
 
 export const getGateTransactions = (nbr: string) =>

@@ -30,6 +30,9 @@ const requireParam = (value: string | string[] | undefined, name: string) => {
   return normalized;
 };
 
+const optionalQuery = (value: unknown) =>
+  typeof value === "string" ? value : "";
+
 const handleRoute = (
   fn: (req: express.Request) => Promise<unknown>,
 ): express.RequestHandler => {
@@ -65,7 +68,7 @@ router.get(
   "/associated-equipment",
   handleRoute((req) =>
     getAssociatedEquipment(
-      requireQuery(req.query.facility, "facility"),
+      optionalQuery(req.query.facility),
       requireQuery(req.query.departOrderNbr, "departOrderNbr"),
     ),
   ),
@@ -110,7 +113,10 @@ router.get(
 router.get(
   "/equipment-history/:unitId",
   handleRoute((req) =>
-    getEquipmentHistory(requireParam(req.params.unitId, "unitId")),
+    getEquipmentHistory(
+      requireParam(req.params.unitId, "unitId"),
+      optionalQuery(req.query.facility),
+    ),
   ),
 );
 

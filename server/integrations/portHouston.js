@@ -37,6 +37,17 @@ const normalizeCredentialValue = (value = '') => {
   return quoteMatch ? quoteMatch[2].trim() : trimmed;
 };
 
+export const getPortHoustonFacilityCode = (terminal = '') => {
+  const normalized = String(terminal || '').toLowerCase();
+  if (normalized.includes('barbours') || normalized.includes('barbour') || normalized.includes('bct')) {
+    return 'BCT';
+  }
+  if (normalized.includes('bayport') || normalized.includes('bpt')) {
+    return 'BPT';
+  }
+  return '';
+};
+
 const maskValue = (value = '') => {
   const text = String(value || '');
   if (!text) return '';
@@ -251,14 +262,15 @@ export const getBolAvailability = async (bolNumber, credentials = {}) => {
   };
 };
 
-export const getGateHistory = async (containerNumber, credentials = {}) => {
+export const getGateHistory = async (containerNumber, credentials = {}, facility = '') => {
   // Port Houston docs map container movement history to GetEquipmentHistory:
   // GET /service/events?predicate=appliedToNaturalKey = <container>.
   // GetGateTransactions exists for transaction number lookup; container lookup should
   // use equipment history unless Port Houston grants a container-based gate endpoint.
+  // BCT and BPT use the same connection; omit facility to search all terminals.
   const response = await portHoustonFetch('/service/events', {
     operator: 'POHA',
-    facility: 'BPT',
+    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
     predicate: `appliedToNaturalKey = ${containerNumber}`,
     fields: EQUIPMENT_HISTORY_FIELDS,
   }, credentials);

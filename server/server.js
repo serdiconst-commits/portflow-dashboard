@@ -104,6 +104,7 @@ import {
   getBolAvailability,
   getContainerAvailability,
   getGateHistory,
+  getPortHoustonFacilityCode,
 } from './integrations/portHouston.js';
 
 const isProduction = process.env.NODE_ENV === 'production' || process.env.APP_ENV === 'production';
@@ -583,6 +584,9 @@ const getPreferredPortHoustonCredentialKey = (terminal = '') => {
   }
   return '';
 };
+
+const getLoadPortHoustonFacility = (load = {}) =>
+  getPortHoustonFacilityCode(`${load.pickup || ''} ${load.returnLocation || ''}`);
 
 const pickPortHoustonCredentials = (credentials = {}, preferredKey = '') => {
   const order = [
@@ -1399,6 +1403,7 @@ app.get('/api/port-houston/bol/:bolNumber/availability', authenticate, async (re
 app.get('/api/port-houston/gate/:containerNumber', authenticate, async (req, res) => {
   const companyId = req.company.companyId;
   const containerNumber = String(req.params.containerNumber || '').trim().toUpperCase();
+  const facility = getPortHoustonFacilityCode(req.query.facility || '');
 
   if (!containerNumber) {
     return res.status(400).json({ error: 'Container number is required.' });
@@ -1406,17 +1411,18 @@ app.get('/api/port-houston/gate/:containerNumber', authenticate, async (req, res
 
   try {
     const credentials = await getCompanyPortHoustonCredentials(companyId);
-    const result = await getGateHistory(containerNumber, credentials);
+    const result = await getGateHistory(containerNumber, credentials, facility);
     const log = await insertPortCheckLog({
       companyId,
       containerNumber,
+      terminal: facility || 'ALL',
       requestType: 'GATE_HISTORY',
       status: 'SUCCESS',
       response: result,
       checkedByUserId: req.user?.id || '',
     });
 
-    res.json({ ...result, checkedBy: req.user?.name || req.user?.email || '', checkedAt: log.checkedAt });
+    res.json({ ...result, facility: facility || 'ALL', checkedBy: req.user?.name || req.user?.email || '', checkedAt: log.checkedAt });
   } catch (error) {
     const status = error.status || 502;
     await insertPortCheckLog({
@@ -1459,9 +1465,10 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       companyId,
       `${load.pickup || ''} ${load.returnLocation || ''}`
     );
+    const facility = getLoadPortHoustonFacility(load);
     const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials) : null;
     const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials) : null;
-    const gate = containerNumber ? await getGateHistory(containerNumber, credentials) : null;
+    const gate = containerNumber ? await getGateHistory(containerNumber, credentials, facility) : null;
     const outEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate }, 'OUT EIR');
     const inEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate }, 'IN EIR');
     const eir = {
@@ -1485,6 +1492,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       loadId,
       containerNumber,
       bolNumber,
+      facility: facility || 'ALL',
       availability,
       bolAvailability,
       gate,
@@ -1495,7 +1503,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       companyId,
       loadId,
       containerNumber,
-      terminal: availability?.terminal || load.pickup || '',
+      terminal: availability?.terminal || facility || load.pickup || '',
       requestType: 'LOAD_PORT_CHECK',
       status: 'SUCCESS',
       response,
@@ -1517,7 +1525,8 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       oldValue: null,
       newValue: {
         containerNumber,
-        terminal: availability?.terminal || '',
+        terminal: availability?.terminal || facility || '',
+        requestedFacility: facility || 'ALL',
         available: availability?.available ?? null,
         availabilityStatus: syncResult.updatedLoad?.availabilityStatus || '',
         lastFreeDay: syncResult.updatedLoad?.lastFreeDay || '',
