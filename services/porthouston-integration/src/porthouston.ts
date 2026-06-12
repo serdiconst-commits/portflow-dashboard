@@ -5,9 +5,14 @@ import axios, {
   Method,
 } from "axios";
 import { AppointmentPayload, JsonObject, TokenState } from "./types.js";
+import type {
+  PortHoustonSubscriptionPayload,
+  RetrievedEirDocument,
+} from "./types.js";
 
 const DEFAULT_API_BASE_URL = "https://api.america.naviscloudops.com/v3/";
 const TOKEN_REFRESH_SAFETY_MS = 60_000;
+const REQUEST_RETRY_COUNT = 2;
 
 const getEnv = (key: string, fallback = "") => process.env[key] || fallback;
 
@@ -29,6 +34,8 @@ const withOptionalFacility = (params: Record<string, string>) => {
 const apiBaseUrl = normalizeBaseUrl(
   getEnv("PORT_HOUSTON_API_BASE_URL", DEFAULT_API_BASE_URL),
 );
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const getDefaultAuthUrl = () => new URL("oauth/token", apiBaseUrl).toString();
 
@@ -137,39 +144,66 @@ const requestPortHouston = async <T = unknown>(
 ): Promise<T> => {
   const token = await authenticate();
 
-  try {
-    const response = await client.request<T>({
-      method,
-      url: endpoint,
-      ...options,
-      headers: {
-        ...options.headers,
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    return response.data;
-  } catch (error) {
-    const axiosError = error as AxiosError<JsonObject>;
-    if (axiosError.response?.status === 401) {
-      const refreshedToken = await authenticate(true);
-      const retry = await client.request<T>({
+  for (let attempt = 0; attempt <= REQUEST_RETRY_COUNT; attempt += 1) {
+    try {
+      const response = await client.request<T>({
         method,
         url: endpoint,
         ...options,
         headers: {
           ...options.headers,
-          Authorization: `Bearer ${refreshedToken}`,
+          Authorization: `Bearer ${attempt === 0 ? token : await authenticate(attempt > 0)}`,
         },
       });
-      return retry.data;
-    }
 
-    const details = axiosError.response?.data
-      ? JSON.stringify(axiosError.response.data)
-      : axiosError.message;
-    throw new Error(`Port Houston API request failed: ${details}`);
+      return response.data;
+    } catch (error) {
+      const axiosError = error as AxiosError<JsonObject>;
+      const canRetry =
+        axiosError.response?.status === 401 ||
+        axiosError.response?.status === 429 ||
+        (axiosError.response?.status !== undefined &&
+          axiosError.response.status >= 500) ||
+        !axiosError.response;
+
+      if (attempt < REQUEST_RETRY_COUNT && canRetry) {
+        if (axiosError.response?.status === 401) {
+          await authenticate(true);
+        }
+        await wait(300 * (attempt + 1));
+        continue;
+      }
+
+      const details = axiosError.response?.data
+        ? JSON.stringify(axiosError.response.data)
+        : axiosError.message;
+      throw new Error(`Port Houston API request failed: ${details}`);
+    }
   }
+
+  throw new Error("Port Houston API request failed.");
+};
+
+const requestPortHoustonBuffer = async (
+  endpoint: string,
+  options: AxiosRequestConfig = {},
+): Promise<{ data: Buffer; contentType: string }> => {
+  const token = await authenticate();
+  const response = await client.request<ArrayBuffer>({
+    method: "GET",
+    url: endpoint,
+    ...options,
+    responseType: "arraybuffer",
+    headers: {
+      ...options.headers,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return {
+    data: Buffer.from(response.data),
+    contentType: String(response.headers["content-type"] || "application/pdf"),
+  };
 };
 
 export const getVesselSchedule = (fromDate: string, toDate: string) =>
@@ -223,3 +257,41 @@ export const getGateTransactions = (nbr: string) =>
   requestPortHouston("GET", "GetGateTransactions", {
     params: { nbr },
   });
+
+export const getRoadGateTransaction = (nbr: string) =>
+  requestPortHouston("GET", "evp/road/gatetransactions", {
+    params: { nbr },
+  });
+
+export const createSubscription = (payload: PortHoustonSubscriptionPayload) =>
+  requestPortHouston("POST", "notify/subscribers", { data: payload });
+
+const getEirDocumentEndpoint = (transactionId: string) => {
+  const pattern = getEnv("PORT_HOUSTON_EIR_DOCUMENT_URL_PATTERN");
+  if (pattern) {
+    return pattern.replaceAll("{id}", encodeURIComponent(transactionId));
+  }
+  return `evp/road/gatetransactions/${encodeURIComponent(transactionId)}/documents`;
+};
+
+const getEirCategory = (subType = ""): "IN EIR" | "OUT EIR" => {
+  const normalized = subType.trim().toUpperCase();
+  return normalized === "RI" ? "IN EIR" : "OUT EIR";
+};
+
+export const downloadEirDocument = async (
+  transactionId: string,
+  subType = "",
+): Promise<RetrievedEirDocument> => {
+  const endpoint = getEirDocumentEndpoint(transactionId);
+  const { data, contentType } = await requestPortHoustonBuffer(endpoint);
+  const category = getEirCategory(subType);
+  const extension = contentType.includes("image") ? "jpg" : "pdf";
+
+  return {
+    category,
+    fileName: `${category.replace(" ", "-").toLowerCase()}-${transactionId}.${extension}`,
+    contentType,
+    data,
+  };
+};

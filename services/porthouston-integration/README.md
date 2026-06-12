@@ -26,6 +26,7 @@ PORT=3010
 PORT_HOUSTON_CLIENT_ID=your-client-id
 PORT_HOUSTON_CLIENT_SECRET=your-client-secret
 PORT_HOUSTON_API_BASE_URL=https://api.america.naviscloudops.com/v3/
+PORT_HOUSTON_WEBHOOK_SECRET=choose-a-private-secret
 ```
 
 If Port Houston gives you a separate token URL, also set:
@@ -33,6 +34,25 @@ If Port Houston gives you a separate token URL, also set:
 ```env
 PORT_HOUSTON_AUTH_URL=https://their-token-url.example.com/oauth/token
 ```
+
+Optional TMS callback variables:
+
+```env
+PORTFLOW_TMS_API_BASE_URL=https://your-portflow-api.example.com
+PORTFLOW_TMS_API_TOKEN=your-internal-token
+PORTFLOW_TMS_EIR_UPLOAD_URL=https://your-portflow-api.example.com/api/port-houston/eir-upload
+PORTFLOW_DISPATCH_ALERT_URL=https://your-portflow-api.example.com/api/dispatch-alerts
+```
+
+Set the same token in the main Portflow server as `PORT_HOUSTON_INTERNAL_TOKEN`
+or `PORTFLOW_TMS_API_TOKEN`. The integration service uses:
+
+- `POST /api/port-houston/events` to update a matching load by container/BOL.
+- `POST /api/port-houston/eir-upload` to attach retrieved EIR files as load paperwork.
+
+If Port Houston gives a document download path that differs from the default,
+set `PORT_HOUSTON_EIR_DOCUMENT_URL_PATTERN` and include `{id}` where the gate
+transaction number or gkey belongs.
 
 ## Commands
 
@@ -137,6 +157,26 @@ Gate transactions:
 curl "http://localhost:3010/porthouston/gate-transactions/TICKET123"
 ```
 
+Create the default Port Houston event subscriptions:
+
+```bash
+curl -X POST http://localhost:3010/porthouston/subscriptions/default
+```
+
+Webhook endpoint for Port Houston notifications:
+
+```bash
+curl -X POST "http://localhost:3010/porthouston/webhook/porthouston?secret=choose-a-private-secret" \
+  -H "Content-Type: application/json" \
+  -d "{\"eventName\":\"TruckTransaction\",\"nbr\":\"20173766\",\"subType\":\"RO\",\"ctrId\":\"ABCD1234567\",\"blNbr\":\"BOL123\",\"hasDocuments\":true}"
+```
+
 ## Notes
 
 Endpoint names in this first MVP follow the Port Houston service operation names you provided, such as `GetVesselSchedule` and `GetAvailableContainers`. If Port Houston’s downloaded documentation shows facility-specific paths or a different token URL, update `src/porthouston.ts` endpoint strings and `PORT_HOUSTON_AUTH_URL`.
+
+Webhook processing maps Port Houston `TruckTransaction` records into Portflow
+shipments using `ctrId` as the container number and `blNbr` as the bill of
+lading. `subType=RI` becomes `IN EIR`; `subType=RO` becomes `OUT EIR`. The
+service logs every incoming event for auditing and alerts dispatch when a Unit
+event indicates an SSL hold.

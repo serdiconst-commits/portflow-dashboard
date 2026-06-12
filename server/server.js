@@ -750,6 +750,163 @@ const upload = multer({
   },
 });
 
+const requirePortHoustonInternalToken = (req, res, next) => {
+  const expectedToken = process.env.PORT_HOUSTON_INTERNAL_TOKEN || process.env.PORTFLOW_TMS_API_TOKEN || '';
+  const authHeader = req.headers.authorization || '';
+  const providedToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+
+  if (!expectedToken) {
+    return res.status(503).json({ error: 'Port Houston internal token is not configured.' });
+  }
+
+  if (!providedToken || providedToken !== expectedToken) {
+    return res.status(401).json({ error: 'Unauthorized Port Houston callback.' });
+  }
+
+  next();
+};
+
+const findLoadForPortHoustonMapping = ({ containerNumber = '', billOfLading = '' }) =>
+  new Promise((resolve, reject) => {
+    const normalizedContainer = String(containerNumber || '').trim().toUpperCase();
+    const normalizedBol = String(billOfLading || '').trim().toUpperCase();
+
+    if (!normalizedContainer && !normalizedBol) {
+      resolve(null);
+      return;
+    }
+
+    db.get(
+      `SELECT *
+       FROM loads
+       WHERE (? <> '' AND UPPER(TRIM(containerNumber)) = ?)
+          OR (? <> '' AND UPPER(TRIM(referenceNumber)) = ?)
+          OR (? <> '' AND UPPER(TRIM(poNumber)) = ?)
+       ORDER BY COALESCE(loadDate, '') DESC
+       LIMIT 1`,
+      [
+        normalizedContainer,
+        normalizedContainer,
+        normalizedBol,
+        normalizedBol,
+        normalizedBol,
+        normalizedBol,
+      ],
+      (err, row) => (err ? reject(err) : resolve(row || null))
+    );
+  });
+
+app.post('/api/port-houston/events', requirePortHoustonInternalToken, async (req, res) => {
+  const mapping = req.body?.mapping || {};
+  const sourceEvent = req.body?.sourceEvent || {};
+
+  try {
+    const load = await findLoadForPortHoustonMapping(mapping);
+    if (!load) {
+      return res.status(404).json({
+        ok: false,
+        error: 'No matching load found for Port Houston event.',
+        mapping,
+      });
+    }
+
+    const nextStatus = String(mapping.shipmentStatus || '').trim();
+    const nextAvailability = nextStatus || load.availabilityStatus || '';
+
+    await new Promise((resolve, reject) => {
+      db.run(
+        `UPDATE loads
+         SET status = COALESCE(NULLIF(?, ''), status),
+             availabilityStatus = COALESCE(NULLIF(?, ''), availabilityStatus),
+             chassisNumber = COALESCE(NULLIF(?, ''), chassisNumber)
+         WHERE id = ?`,
+        [
+          nextStatus,
+          nextAvailability,
+          sourceEvent.chsId || sourceEvent.chassisNumber || '',
+          load.id,
+        ],
+        (err) => (err ? reject(err) : resolve())
+      );
+    });
+
+    res.json({
+      ok: true,
+      loadId: load.id,
+      containerNumber: load.containerNumber,
+      status: nextStatus || load.status,
+      availabilityStatus: nextAvailability,
+    });
+  } catch (error) {
+    console.error('Port Houston event callback failed:', error.message);
+    res.status(500).json({ ok: false, error: 'Failed to process Port Houston event.' });
+  }
+});
+
+app.post('/api/port-houston/eir-upload', requirePortHoustonInternalToken, upload.single('file'), async (req, res) => {
+  const category = String(req.body.category || 'Other').trim() || 'Other';
+  const mapping = {
+    containerNumber: req.body.containerNumber || '',
+    billOfLading: req.body.billOfLading || '',
+  };
+
+  if (!req.file) {
+    return res.status(400).json({ ok: false, error: 'No EIR file uploaded.' });
+  }
+
+  try {
+    const load = await findLoadForPortHoustonMapping(mapping);
+    if (!load) {
+      return res.status(404).json({
+        ok: false,
+        error: 'No matching load found for EIR upload.',
+        mapping,
+      });
+    }
+
+    const id = uuidv4();
+    const uploadedAt = new Date().toISOString();
+    const savedPath = req.file.path;
+    const savedName = req.file.originalname || `${category.replace(/\s+/g, '-').toLowerCase()}-${id}.pdf`;
+    const size = `${(fs.statSync(savedPath).size / 1024).toFixed(1)} KB`;
+
+    await new Promise((resolve, reject) => {
+      db.run(
+        `INSERT INTO documents (id, loadId, name, size, type, category, filePath, uploadedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          load.id,
+          savedName,
+          size,
+          req.file.mimetype || 'application/pdf',
+          category,
+          savedPath,
+          uploadedAt,
+        ],
+        (err) => (err ? reject(err) : resolve())
+      );
+    });
+
+    res.json({
+      ok: true,
+      document: {
+        id,
+        loadId: load.id,
+        name: savedName,
+        size,
+        type: req.file.mimetype || 'application/pdf',
+        category,
+        url: `/uploads/${path.basename(savedPath)}`,
+        uploadedAt,
+      },
+    });
+  } catch (error) {
+    console.error('Port Houston EIR upload failed:', error.message);
+    res.status(500).json({ ok: false, error: 'Failed to save Port Houston EIR.' });
+  }
+});
+
 const authenticate = (req, res, next) => {
   const authHeader = req.headers.authorization;
 
