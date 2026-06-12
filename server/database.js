@@ -392,6 +392,7 @@ dropLocation TEXT,
 droppedBy TEXT,
   dropDateTime TEXT,
   containerNumber TEXT,
+  streetTurn TEXT,
   bookingNumber TEXT,
   shipLine TEXT,
   chassisNumber TEXT,
@@ -509,6 +510,11 @@ db.run(`ALTER TABLE loads ADD COLUMN pickupNumber TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN deliveryType TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding deliveryType column:', err.message);
+  }
+});
+db.run(`ALTER TABLE loads ADD COLUMN streetTurn TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding streetTurn column:', err.message);
   }
 });
 

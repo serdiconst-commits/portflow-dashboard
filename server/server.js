@@ -168,6 +168,32 @@ const normalizeDriverAssignment = (companyId, value, callback) => {
   );
 };
 
+const isTruthy = (value) =>
+  value === true ||
+  value === 1 ||
+  String(value || '').trim().toLowerCase() === 'true' ||
+  String(value || '').trim() === '1' ||
+  String(value || '').trim().toLowerCase() === 'yes';
+
+const findDuplicateContainerLoad = (companyId, containerNumber, excludeLoadId, callback) => {
+  const normalizedContainer = String(containerNumber || '').trim().toUpperCase();
+  if (!normalizedContainer) {
+    callback(null, null);
+    return;
+  }
+
+  db.get(
+    `SELECT id, containerNumber
+     FROM loads
+     WHERE companyId = ?
+       AND UPPER(TRIM(containerNumber)) = ?
+       AND (? = '' OR id != ?)
+     LIMIT 1`,
+    [companyId, normalizedContainer, excludeLoadId || '', excludeLoadId || ''],
+    callback
+  );
+};
+
 const getNextDriverId = (companyId, callback) => {
   db.all(
     `SELECT id
@@ -2181,6 +2207,18 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
   console.log('UPDATE BODY id =', body.id);
   console.log('DATABASE FILE CHECK');
 
+  findDuplicateContainerLoad(companyId, l.containerNumber, loadId, (duplicateErr, duplicateLoad) => {
+    if (duplicateErr) {
+      console.error('Error checking duplicate container:', duplicateErr.message);
+      return res.status(500).json({ error: 'Failed to validate container number' });
+    }
+
+    if (duplicateLoad && !isTruthy(l.streetTurn)) {
+      return res.status(409).json({
+        error: `Container ${String(l.containerNumber || '').trim().toUpperCase()} is already assigned to load ${duplicateLoad.id}. Mark as Street Turn only for a valid export reuse.`,
+      });
+    }
+
   db.get(
     `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
     [loadId, companyId],
@@ -2231,6 +2269,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           droppedBy = ?,
           dropDateTime = ?,
           containerNumber = ?,
+          streetTurn = ?,
           bookingNumber = ?,
           shipLine = ?,
           chassisNumber = ?,
@@ -2270,6 +2309,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           normalizedDroppedBy,
           l.dropDateTime || '',
           l.containerNumber || '',
+          isTruthy(l.streetTurn) ? '1' : '',
           l.bookingNumber || '',
           l.shipLine || '',
           l.chassisNumber || '',
@@ -2335,6 +2375,7 @@ console.log('LOAD AFTER UPDATE =', updatedLoad);
       });
     }
   );
+  });
 });
 app.get('/api/loads', authenticate, (req, res) => {
   const companyId = req.company.companyId;
@@ -2663,6 +2704,18 @@ app.post('/api/loads', authenticate, (req, res) => {
                 return res.status(500).json({ error: droppedByErr.message });
               }
 
+          findDuplicateContainerLoad(companyId, l.containerNumber, '', (duplicateErr, duplicateLoad) => {
+            if (duplicateErr) {
+              console.error('Error checking duplicate container:', duplicateErr.message);
+              return res.status(500).json({ error: 'Failed to validate container number' });
+            }
+
+            if (duplicateLoad && !isTruthy(l.streetTurn)) {
+              return res.status(409).json({
+                error: `Container ${String(l.containerNumber || '').trim().toUpperCase()} is already assigned to load ${duplicateLoad.id}. Use Street Turn only for a valid export reuse.`,
+              });
+            }
+
           db.run(
             `INSERT INTO loads (
               id,
@@ -2686,6 +2739,7 @@ dropLocation,
 droppedBy,
 dropDateTime,
               containerNumber,
+              streetTurn,
               bookingNumber,
               shipLine,
               chassisNumber,
@@ -2704,7 +2758,7 @@ dropDateTime,
               companyId,
               lastFreeDay,
               carrierId
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               generatedLoadId,
               l.loadDate || new Date().toISOString().slice(0, 10),
@@ -2727,6 +2781,7 @@ dropDateTime,
               normalizedDroppedBy,
               l.dropDateTime || '',
               l.containerNumber || '',
+              isTruthy(l.streetTurn) ? '1' : '',
               l.bookingNumber || '',
               l.shipLine || '',
               l.chassisNumber || '',
@@ -2781,6 +2836,7 @@ dropDateTime,
               );
             }
           );
+          });
             });
           });
         }
@@ -3407,6 +3463,24 @@ app.put('/api/loads/:id/container-number', authenticate, (req, res) => {
       return res.status(404).json({ error: 'Load not found or not allowed' });
     }
 
+    if (existingLoad.containerNumber && containerNumber) {
+      return res.status(409).json({
+        error: 'This load already has a container number. Dispatch must edit it if a correction is needed.',
+      });
+    }
+
+    findDuplicateContainerLoad(companyId, containerNumber, loadId, (duplicateErr, duplicateLoad) => {
+      if (duplicateErr) {
+        console.error('Error checking duplicate container:', duplicateErr.message);
+        return res.status(500).json({ error: 'Failed to validate container number' });
+      }
+
+      if (duplicateLoad) {
+        return res.status(409).json({
+          error: `Container ${containerNumber} is already assigned to load ${duplicateLoad.id}.`,
+        });
+      }
+
     db.run(
       `UPDATE loads
        SET containerNumber = COALESCE(NULLIF(?, ''), containerNumber),
@@ -3455,6 +3529,7 @@ app.put('/api/loads/:id/container-number', authenticate, (req, res) => {
         });
       }
     );
+    });
   });
 });
 

@@ -633,6 +633,7 @@ const getMissingDriverDocuments = (load) => {
     truck: '',
     pickup: '',
     delivery: '',
+    streetTurn: false,
     deliveryType: '',
     referenceNumber: '',
     poNumber: '',
@@ -905,6 +906,7 @@ const [auditLogs, setAuditLogs] = useState([]);
 const [selectedLoadAuditLogs, setSelectedLoadAuditLogs] = useState([]);
 const [driverContainerByLoad, setDriverContainerByLoad] = useState({});
 const [driverChassisByLoad, setDriverChassisByLoad] = useState({});
+const driverEquipmentDraftsRef = useRef({});
 const [portHoustonChecksByLoad, setPortHoustonChecksByLoad] = useState({});
 const [portHoustonCheckingLoadId, setPortHoustonCheckingLoadId] = useState('');
 const [portHoustonSettingsForm, setPortHoustonSettingsForm] = useState(
@@ -3428,9 +3430,33 @@ if (name === 'driver' && prev.status === 'Dropped') {
     });
   };
 
+  const findDuplicateContainerLoad = (containerNumber, currentLoadId = '') => {
+    const normalizedContainer = String(containerNumber || '').trim().toUpperCase();
+    if (!normalizedContainer) return null;
+
+    return loadsData.find((load) => {
+      if (currentLoadId && load.id === currentLoadId) return false;
+      return String(load.containerNumber || '').trim().toUpperCase() === normalizedContainer;
+    });
+  };
+
+  const canReuseContainerAsStreetTurn = (load = {}, isExportLoad = false) =>
+    Boolean(load.streetTurn) && isExportLoad;
+
 const handleAddLoad = async (e) => {
   e.preventDefault();
   const isExportLoad = selectedPresetName === 'Export Load';
+  const duplicateContainerLoad = findDuplicateContainerLoad(newLoad.containerNumber);
+  if (
+    duplicateContainerLoad &&
+    !canReuseContainerAsStreetTurn(newLoad, isExportLoad)
+  ) {
+    alert(
+      `Container ${String(newLoad.containerNumber || '').trim().toUpperCase()} is already on load ${duplicateContainerLoad.id}. Use Export Load + Street Turn only when this is a real reuse.`
+    );
+    return;
+  }
+
   if (
     !String(newLoad.customer || '').trim() ||
     !String(newLoad.referenceNumber || '').trim() ||
@@ -3553,6 +3579,16 @@ const handleUpdateLoad = async (e) => {
     }),
     paperwork: getPaperworkStatusFromDocuments(editingLoad.documents || []),
   };
+  const duplicateContainerLoad = findDuplicateContainerLoad(
+    updatedLoad.containerNumber,
+    updatedLoad.id
+  );
+  if (duplicateContainerLoad && !updatedLoad.streetTurn) {
+    alert(
+      `Container ${String(updatedLoad.containerNumber || '').trim().toUpperCase()} is already on load ${duplicateContainerLoad.id}. Mark this load as Street Turn only when this is a real export reuse.`
+    );
+    return;
+  }
   try {
 
     /* EDITLOAD FUNTION */
@@ -5594,9 +5630,29 @@ const handleDriverStatusUpdate = async (loadId, newStatus) => {
   }
 };
 
+const setDriverEquipmentDraft = (loadId, field, value) => {
+  driverEquipmentDraftsRef.current[loadId] = {
+    ...(driverEquipmentDraftsRef.current[loadId] || {}),
+    [field]: value,
+  };
+};
+
+const getDriverEquipmentDraft = (loadId, field) =>
+  driverEquipmentDraftsRef.current[loadId]?.[field] ?? '';
+
 const handleDriverContainerUpdate = async (loadId) => {
-  const containerNumber = String(driverContainerByLoad[loadId] || '').trim().toUpperCase();
-  const chassisNumber = String(driverChassisByLoad[loadId] || '').trim().toUpperCase();
+  const loadToUpdate = loadsData.find((load) => load.id === loadId);
+  const containerNumber = String(
+    getDriverEquipmentDraft(loadId, 'containerNumber') || driverContainerByLoad[loadId] || ''
+  ).trim().toUpperCase();
+  const chassisNumber = String(
+    getDriverEquipmentDraft(loadId, 'chassisNumber') || driverChassisByLoad[loadId] || ''
+  ).trim().toUpperCase();
+
+  if (loadToUpdate?.containerNumber && containerNumber) {
+    alert('This load already has a container number. Dispatch must edit it if a correction is needed.');
+    return;
+  }
 
   if (!containerNumber && !chassisNumber) {
     alert('Please enter the container number or chassis number first.');
@@ -5630,6 +5686,7 @@ const handleDriverContainerUpdate = async (loadId) => {
           : load
       )
     );
+    driverEquipmentDraftsRef.current[loadId] = {};
     setDriverContainerByLoad((prev) => ({ ...prev, [loadId]: '' }));
     setDriverChassisByLoad((prev) => ({ ...prev, [loadId]: '' }));
     await fetchLoads();
@@ -6589,27 +6646,18 @@ const DriverLoadCard = ({ load }) => {
         <input
           id={`container-${load.id}`}
           type="text"
-          placeholder={load.containerNumber ? 'Update container number' : 'Enter container number'}
-          value={driverContainerByLoad[load.id] ?? ''}
-          onChange={(e) =>
-            setDriverContainerByLoad((prev) => ({
-              ...prev,
-              [load.id]: e.target.value,
-            }))
-          }
+          placeholder={load.containerNumber ? 'Container number saved' : 'Enter container number'}
+          defaultValue=""
+          disabled={Boolean(load.containerNumber)}
+          onChange={(e) => setDriverEquipmentDraft(load.id, 'containerNumber', e.target.value)}
         />
         <label htmlFor={`chassis-${load.id}`}>Chassis Number</label>
         <input
           id={`chassis-${load.id}`}
           type="text"
           placeholder={load.chassisNumber ? 'Update chassis number' : 'Enter chassis number'}
-          value={driverChassisByLoad[load.id] ?? ''}
-          onChange={(e) =>
-            setDriverChassisByLoad((prev) => ({
-              ...prev,
-              [load.id]: e.target.value,
-            }))
-          }
+          defaultValue=""
+          onChange={(e) => setDriverEquipmentDraft(load.id, 'chassisNumber', e.target.value)}
         />
         <button type="button" onClick={() => handleDriverContainerUpdate(load.id)}>
           Save Equipment
@@ -7101,27 +7149,18 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     <input
       id={`container-${load.id}`}
       type="text"
-      placeholder={load.containerNumber ? 'Update container number' : 'Enter container number'}
-      value={driverContainerByLoad[load.id] ?? ''}
-      onChange={(e) =>
-        setDriverContainerByLoad((prev) => ({
-          ...prev,
-          [load.id]: e.target.value,
-        }))
-      }
+      placeholder={load.containerNumber ? 'Container number saved' : 'Enter container number'}
+      defaultValue=""
+      disabled={Boolean(load.containerNumber)}
+      onChange={(e) => setDriverEquipmentDraft(load.id, 'containerNumber', e.target.value)}
     />
     <label htmlFor={`chassis-${load.id}`}>Chassis Number</label>
     <input
       id={`chassis-${load.id}`}
       type="text"
       placeholder={load.chassisNumber ? 'Update chassis number' : 'Enter chassis number'}
-      value={driverChassisByLoad[load.id] ?? ''}
-      onChange={(e) =>
-        setDriverChassisByLoad((prev) => ({
-          ...prev,
-          [load.id]: e.target.value,
-        }))
-      }
+      defaultValue=""
+      onChange={(e) => setDriverEquipmentDraft(load.id, 'chassisNumber', e.target.value)}
     />
     <button type="button" onClick={() => handleDriverContainerUpdate(load.id)}>
       Save Equipment
@@ -7793,6 +7832,22 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     value={newLoad.containerNumber}
     onChange={handleInputChange}
   />
+  {selectedPresetName === 'Export Load' && (
+    <label className="checkbox-row">
+      <input
+        type="checkbox"
+        name="streetTurn"
+        checked={Boolean(newLoad.streetTurn)}
+        onChange={(e) =>
+          setNewLoad((prev) => ({
+            ...prev,
+            streetTurn: e.target.checked,
+          }))
+        }
+      />
+      <span>Street Turn / reuse container</span>
+    </label>
+  )}
 
   <input
     type="text"
@@ -8767,6 +8822,20 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   onChange={handleEditInputChange}
 />
 <input type="text" name="containerNumber" placeholder="Container Number" value={editingLoad.containerNumber} onChange={handleEditInputChange} />
+<label className="checkbox-row">
+  <input
+    type="checkbox"
+    name="streetTurn"
+    checked={Boolean(editingLoad.streetTurn)}
+    onChange={(e) =>
+      setEditingLoad((prev) => ({
+        ...prev,
+        streetTurn: e.target.checked,
+      }))
+    }
+  />
+  <span>Street Turn / reuse container</span>
+</label>
 <input type="text" name="containerSize" placeholder="Container Size" value={editingLoad.containerSize} onChange={handleEditInputChange} />
 <select
   name="shipLine"
