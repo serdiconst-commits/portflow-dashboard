@@ -55,7 +55,7 @@ const maskValue = (value = '') => {
   return `${text.slice(0, 3)}...${text.slice(-3)}`;
 };
 
-const getConfig = (credentials = {}) => {
+const getCredentialParts = (credentials = {}) => {
   const rawEnvClientId = process.env.PORT_HOUSTON_CLIENT_ID || process.env.PORT_HOUSTON_USERNAME || '';
   const rawEnvClientSecret =
     process.env.PORT_HOUSTON_CLIENT_SECRET ||
@@ -67,25 +67,80 @@ const getConfig = (credentials = {}) => {
     normalizeCredentialValue(rawEnvClientSecret);
   const credentialClientId = normalizeCredentialValue(credentials.clientId || credentials.username || '');
   const credentialClientSecret = normalizeCredentialValue(credentials.clientSecret || credentials.password || '');
+
+  return {
+    envClientId,
+    envClientSecret,
+    credentialClientId,
+    credentialClientSecret,
+  };
+};
+
+const buildConfig = ({ clientId, clientSecret, source }) => ({
+  enabled:
+    normalizeEnabled(process.env.PORT_HOUSTON_ENABLED) ||
+    Boolean(clientId && clientSecret),
+  apiBase: trimSlash(process.env.PORT_HOUSTON_API_BASE || DEFAULT_API_BASE),
+  authUrl: process.env.PORT_HOUSTON_AUTH_URL || DEFAULT_AUTH_URL,
+  apiKey: process.env.PORT_HOUSTON_API_KEY || '',
+  clientId,
+  clientSecret,
+  diagnostics: {
+    clientId: maskValue(clientId),
+    clientIdSource: source,
+    clientSecretSource: source,
+    clientSecretLength: String(clientSecret || '').length,
+  },
+});
+
+const getConfig = (credentials = {}) => {
+  const {
+    envClientId,
+    envClientSecret,
+    credentialClientId,
+    credentialClientSecret,
+  } = getCredentialParts(credentials);
   const clientId = credentialClientId || envClientId;
   const clientSecret = credentialClientSecret || envClientSecret;
 
-  return {
-    enabled:
-      normalizeEnabled(process.env.PORT_HOUSTON_ENABLED) ||
-      Boolean(credentialClientId && credentialClientSecret),
-    apiBase: trimSlash(process.env.PORT_HOUSTON_API_BASE || DEFAULT_API_BASE),
-    authUrl: process.env.PORT_HOUSTON_AUTH_URL || DEFAULT_AUTH_URL,
-    apiKey: process.env.PORT_HOUSTON_API_KEY || '',
+  return buildConfig({
     clientId,
     clientSecret,
-    diagnostics: {
-      clientId: maskValue(clientId),
-      clientIdSource: credentialClientId ? 'terminal credentials' : envClientId ? 'Render environment' : 'missing',
-      clientSecretSource: credentialClientSecret ? 'terminal credentials' : envClientSecret ? 'Render environment' : 'missing',
-      clientSecretLength: String(clientSecret || '').length,
-    },
-  };
+    source: credentialClientId ? 'terminal credentials' : envClientId ? 'Render environment' : 'missing',
+  });
+};
+
+const getConfigCandidates = (credentials = {}) => {
+  const {
+    envClientId,
+    envClientSecret,
+    credentialClientId,
+    credentialClientSecret,
+  } = getCredentialParts(credentials);
+
+  const candidates = [];
+  if (credentialClientId && credentialClientSecret) {
+    candidates.push(buildConfig({
+      clientId: credentialClientId,
+      clientSecret: credentialClientSecret,
+      source: 'terminal credentials',
+    }));
+  }
+
+  const envIsDifferent =
+    envClientId &&
+    envClientSecret &&
+    (envClientId !== credentialClientId || envClientSecret !== credentialClientSecret);
+
+  if (envIsDifferent || (!credentialClientId && envClientId && envClientSecret)) {
+    candidates.push(buildConfig({
+      clientId: envClientId,
+      clientSecret: envClientSecret,
+      source: 'Render environment',
+    }));
+  }
+
+  return candidates.length ? candidates : [getConfig(credentials)];
 };
 
 const assertConfigured = (config) => {
@@ -174,10 +229,41 @@ const requestToken = async (config) => {
 };
 
 const portHoustonFetch = async (path, query = {}, credentials = {}) => {
-  const config = getConfig(credentials);
-  assertConfigured(config);
+  const configs = getConfigCandidates(credentials);
+  let token = '';
+  let config = null;
+  const authErrors = [];
 
-  const token = await requestToken(config);
+  for (const candidate of configs) {
+    try {
+      assertConfigured(candidate);
+      token = await requestToken(candidate);
+      config = candidate;
+      break;
+    } catch (error) {
+      authErrors.push(error);
+      if (error.status !== 401) {
+        throw error;
+      }
+    }
+  }
+
+  if (!config || !token) {
+    const lastError = authErrors.at(-1) || new Error('Failed to authenticate with Port Houston API.');
+    if (authErrors.length > 1) {
+      lastError.diagnostics = {
+        ...(lastError.diagnostics || {}),
+        credentialSourcesTried: authErrors.map((error) => error.diagnostics?.clientIdSource || 'unknown'),
+        authErrors: authErrors.map((error) => ({
+          source: error.diagnostics?.clientIdSource || 'unknown',
+          status: error.status || '',
+          message: error.message,
+          authMethodsTried: error.diagnostics?.authMethodsTried || '',
+        })),
+      };
+    }
+    throw lastError;
+  }
   const url = new URL(`${config.apiBase}${path}`);
   Object.entries(query).forEach(([key, value]) => {
     if (value !== undefined && value !== null && String(value).trim() !== '') {

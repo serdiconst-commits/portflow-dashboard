@@ -3641,9 +3641,61 @@ const getPortHoustonSummary = (result) => {
     lastGateMove,
     outEir: result?.eir?.out || null,
     inEir: result?.eir?.in || null,
+    eirNote: result?.eir?.note || '',
+    hasPortDocuments: Boolean(result?.eir?.hasPortDocuments),
+    portTransactionNumbers: result?.eir?.transactionNumbers || [],
     checkedBy: result?.checkedBy || '',
     checkedAt: result?.checkedAt || '',
   };
+};
+
+const formatPortHoustonValue = (value) => {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(formatPortHoustonValue).filter(Boolean).join(', ');
+  }
+  if (typeof value === 'object') {
+    const preferredKeys = [
+      'id',
+      'code',
+      'name',
+      'description',
+      'message',
+      'reason',
+      'hold',
+      'holdId',
+      'type',
+      'severity',
+    ];
+    const parts = preferredKeys
+      .map((key) => value?.[key])
+      .filter((item) => item !== undefined && item !== null && String(item).trim() !== '')
+      .map(String);
+    if (parts.length) return parts.join(' - ');
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return 'Port returned details';
+    }
+  }
+  return String(value);
+};
+
+const formatPortHoustonList = (value, fallback = 'None returned') => {
+  const text = formatPortHoustonValue(value);
+  return text || fallback;
+};
+
+const formatPortHoustonGateMove = (move) => {
+  if (!move) return 'Not returned';
+  const event = move.eventTypeId || move.subType || move.stageId || move.eventStartTime || move.created || '';
+  if (String(event).toUpperCase() === 'UNIT_CREATE') {
+    return 'Container record created, no gate move yet';
+  }
+  return formatPortHoustonValue(event) || 'Not returned';
 };
 
 const handleCheckPortHouston = async (load) => {
@@ -9253,18 +9305,23 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                 <div className="detail-box"><span>Last Free Day</span><strong>{summary.lastFreeDay || 'Not returned'}</strong></div>
                                 <div className="detail-box">
                                   <span>Last Gate Move</span>
-                                  <strong>{summary.lastGateMove?.eventTypeId || summary.lastGateMove?.eventStartTime || 'Not returned'}</strong>
+                                  <strong>{formatPortHoustonGateMove(summary.lastGateMove)}</strong>
                                 </div>
                                 <div className="detail-box">
                                   <span>Holds / Road Impediments</span>
-                                  <strong>
-                                    {Array.isArray(summary.roadImpediments)
-                                      ? summary.roadImpediments.join(', ') || 'None returned'
-                                      : String(summary.roadImpediments || 'None returned')}
-                                  </strong>
+                                  <strong>{formatPortHoustonList(summary.roadImpediments)}</strong>
                                 </div>
                                 <div className="detail-box"><span>OUT EIR</span><strong>{summary.outEir?.url ? <a href={summary.outEir.url} target="_blank" rel="noreferrer">Open</a> : 'Not available'}</strong></div>
                                 <div className="detail-box"><span>IN EIR</span><strong>{summary.inEir?.url ? <a href={summary.inEir.url} target="_blank" rel="noreferrer">Open</a> : 'Not available'}</strong></div>
+                                <div className="detail-box port-check-note">
+                                  <span>EIR Status</span>
+                                  <strong>
+                                    {summary.eirNote ||
+                                      (summary.hasPortDocuments
+                                        ? 'Port says documents exist, but no EIR download link was returned.'
+                                        : 'No EIR document returned yet.')}
+                                  </strong>
+                                </div>
                                 <div className="detail-box"><span>Checked By</span><strong>{summary.checkedBy || 'Not returned'}</strong></div>
                                 <div className="detail-box"><span>Checked At</span><strong>{formatDateTime(summary.checkedAt)}</strong></div>
                               </div>

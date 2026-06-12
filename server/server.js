@@ -296,15 +296,62 @@ const flattenPortHoustonValues = (value, pathKey = '') => {
 
 const findPortHoustonEirUrl = (source, direction) => {
   const directionWords = direction === 'OUT EIR'
-    ? ['out', 'outgate', 'gateout', 'depart', 'pickup']
-    : ['in', 'ingate', 'gatein', 'return'];
+    ? ['out', 'outgate', 'gateout', 'depart', 'pickup', 'ro', 'rm', 'dm']
+    : ['in', 'ingate', 'gatein', 'return', 'ri'];
+  const documentWords = ['eir', 'document', 'documents', 'receipt', 'ticket', 'pdf', 'image'];
+  const urlEntries = flattenPortHoustonValues(source)
+    .filter(({ value }) => typeof value === 'string' && /^https?:\/\//i.test(value));
 
-  return flattenPortHoustonValues(source)
-    .filter(({ value }) => typeof value === 'string' && /^https?:\/\//i.test(value))
-    .find(({ key, value }) => {
+  const exactMatch = urlEntries.find(({ key, value }) => {
+    const haystack = `${key} ${value}`.toLowerCase();
+    return haystack.includes('eir') && directionWords.some((word) => haystack.includes(word));
+  })?.value;
+
+  if (exactMatch) return exactMatch;
+
+  const documentMatch = urlEntries.find(({ key, value }) => {
+    const haystack = `${key} ${value}`.toLowerCase();
+    return documentWords.some((word) => haystack.includes(word)) &&
+      directionWords.some((word) => haystack.includes(word));
+  })?.value;
+
+  if (documentMatch) return documentMatch;
+
+  const documentUrls = urlEntries.filter(({ key, value }) => {
       const haystack = `${key} ${value}`.toLowerCase();
-      return haystack.includes('eir') && directionWords.some((word) => haystack.includes(word));
-    })?.value || '';
+      return documentWords.some((word) => haystack.includes(word));
+    });
+
+  return documentUrls.length === 1 ? documentUrls[0].value : '';
+};
+
+const getPortHoustonDocumentSignals = (source) => {
+  const flattened = flattenPortHoustonValues(source);
+  const hasDocuments = flattened.some(({ key, value }) =>
+    String(key || '').toLowerCase().includes('hasdocuments') &&
+    (value === true || String(value || '').toLowerCase() === 'true')
+  );
+  const transactionNumbers = [...new Set(flattened
+    .filter(({ key, value }) =>
+      /(nbr|gkey|transaction|transnbr|trangkey)$/i.test(String(key || '')) &&
+      value !== undefined &&
+      value !== null &&
+      String(value).trim() !== ''
+    )
+    .map(({ value }) => String(value).trim()))];
+  const documentUrls = [...new Set(flattened
+    .filter(({ key, value }) => {
+      if (typeof value !== 'string' || !/^https?:\/\//i.test(value)) return false;
+      const haystack = `${key} ${value}`.toLowerCase();
+      return ['eir', 'document', 'receipt', 'ticket', 'pdf', 'image'].some((word) => haystack.includes(word));
+    })
+    .map(({ value }) => value))];
+
+  return {
+    hasDocuments,
+    transactionNumbers,
+    documentUrls,
+  };
 };
 
 const getExternalDocumentName = (category, loadId, url = '') => {
@@ -1626,6 +1673,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
     const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials) : null;
     const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials) : null;
     const gate = containerNumber ? await getGateHistory(containerNumber, credentials, facility) : null;
+    const portDocumentSignals = getPortHoustonDocumentSignals({ availability, bolAvailability, gate });
     const outEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate }, 'OUT EIR');
     const inEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate }, 'IN EIR');
     const eir = {
@@ -1641,8 +1689,13 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
             source: 'Port Houston',
           }
         : null,
+      hasPortDocuments: portDocumentSignals.hasDocuments,
+      transactionNumbers: portDocumentSignals.transactionNumbers,
+      documentUrlsFound: portDocumentSignals.documentUrls.length,
       note: outEirUrl || inEirUrl
         ? 'EIR document links were returned by Port Houston and synced to paperwork.'
+        : portDocumentSignals.hasDocuments
+          ? 'Port Houston says this transaction has documents, but no downloadable EIR URL was returned in the checked response. A gate transaction document endpoint may still need to be confirmed by Port Houston.'
         : 'No EIR document link was returned by Port Houston for this check.',
     };
     const response = {

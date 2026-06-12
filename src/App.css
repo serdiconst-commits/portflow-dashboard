@@ -3479,6 +3479,14 @@ button:disabled {
   gap: 12px;
 }
 
+.port-check-note {
+  grid-column: 1 / -1;
+}
+
+.port-check-note strong {
+  line-height: 1.35;
+}
+
 .port-check-error {
   padding: 12px;
   border: 1px solid #fecaca;
