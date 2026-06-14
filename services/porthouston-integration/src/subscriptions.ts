@@ -5,6 +5,7 @@ const baseSubscription = (
   eventName: string,
   fields: string[],
   predicate: string[] = [],
+  changeFields?: PortHoustonSubscriptionPayload["filters"][number]["changeFields"],
 ): PortHoustonSubscriptionPayload => ({
   type: "subscribe",
   channel: "/nsp",
@@ -14,6 +15,7 @@ const baseSubscription = (
     {
       eventName,
       operation: "update",
+      ...(changeFields ? { changeFields } : {}),
       filter: {
         predicate,
         fields,
@@ -47,6 +49,32 @@ export const buildEmptyContainerGateOutSubscription = (
       "status=COMPLETE",
       "stageId=outgate",
       ...(truckingCompanyId ? [`trkcolId=${truckingCompanyId}`] : []),
+    ],
+  );
+
+export const buildEirTrackerSubscription = (
+  truckingCompanyId = "",
+): PortHoustonSubscriptionPayload =>
+  baseSubscription(
+    "TMS_EIR_TRACKER_PROD",
+    "TruckTransaction",
+    [
+      "gkey",
+      "nbr",
+      "subType",
+      "status",
+      "stageId",
+      "ctrId",
+      "truckLicenseNbr",
+      "handled",
+      "hasDocuments",
+      "gateId",
+      "blNbr",
+    ],
+    [
+      "subType in (RI, RO, RM, DM, DI, DE, RE, RC, RB)",
+      "status=COMPLETE",
+      ...(truckingCompanyId ? [`trkcoId=${truckingCompanyId}`] : []),
     ],
   );
 
@@ -86,9 +114,15 @@ export const buildContainerBySslOnHoldSubscription = (
       "category=IMPRT",
       ...(steamshipLine ? [`eqOwnerId=${steamshipLine}`] : []),
     ],
+    {
+      include: ["stoppedRoad"],
+    },
   );
 
 export const defaultSubscriptions = () => [
+  buildEirTrackerSubscription(
+    process.env.PORT_HOUSTON_TRUCKING_COMPANY_ID || "",
+  ),
   buildEmptyContainerGateOutSubscription(
     process.env.PORT_HOUSTON_TRUCKING_COMPANY_ID || "",
   ),

@@ -31,6 +31,8 @@ const withOptionalFacility = (params: Record<string, string>) => {
   return facility ? { facility, ...nextParams } : nextParams;
 };
 
+const evpPath = (path: string) => `evp/${path.replace(/^\/+/, "")}`;
+
 const apiBaseUrl = normalizeBaseUrl(
   getEnv("PORT_HOUSTON_API_BASE_URL", DEFAULT_API_BASE_URL),
 );
@@ -207,31 +209,56 @@ const requestPortHoustonBuffer = async (
 };
 
 export const getVesselSchedule = (fromDate: string, toDate: string) =>
-  requestPortHouston("GET", "GetVesselSchedule", {
-    params: { eta: fromDate, etd: toDate },
+  requestPortHouston("GET", evpPath("vessel/vesselvisits"), {
+    params: {
+      operator: "POHA",
+      predicate: `eta >= ${fromDate}T00:00:00.000Z and etd <= ${toDate}T00:00:00.000Z`,
+      fields: "vesId,vesName,reeferCutoff,cargoCutoff,hazCutoff",
+      size: "100",
+    },
   });
 
 export const getAvailableContainers = (unitId: string) =>
-  requestPortHouston("GET", "GetAvailableContainers", {
-    params: { unitId },
+  requestPortHouston("GET", evpPath("inventory/units/"), {
+    params: {
+      operator: "POHA",
+      predicate: `unitId = ${unitId}`,
+      fields:
+        "extras.dwellDays,scope.facility_id,unitId,eqtypeId,isoGroup,line,category,freightKind,stopFlags,impediments,lastFreeDay,ufvPosition,timestamps.timeIn,timestamps.timeOut",
+    },
   });
 
 export const getAssociatedEquipment = (
   facility: string,
   departOrderNbr: string,
 ) =>
-  requestPortHouston("GET", "GetAssociatedEquipment", {
-    params: withOptionalFacility({ facility, departOrderNbr }),
+  requestPortHouston("GET", evpPath("inventory/units"), {
+    params: {
+      operator: "POHA",
+      ...withOptionalFacility({ facility }),
+      predicate: `departOrderNbr = ${departOrderNbr}`,
+      fields:
+        "eqClass,unitId,nominalLength,isoGroup,nominalHeight,eqtypeId,lastKnownPosition.posName,freightKind,category",
+    },
   });
 
 export const getAvailableContainersByBol = (blNbr: string) =>
-  requestPortHouston("GET", "GetAvailableContainersByBOL", {
-    params: { blNbr },
+  requestPortHouston("GET", evpPath("inventory/units"), {
+    params: {
+      operator: "POHA",
+      predicate: `category = IMPRT and stoppedRoad = true and blNbr = ${blNbr}`,
+      fields:
+        "extras.dwellDays,scope.facility_id,unitId,eqtypeId,isoGroup,line,category,freightKind,stopFlags,impediments,lastFreeDay,ufvPosition,timestamps.timeIn,timestamps.timeOut",
+    },
   });
 
 export const getEquipmentOwnership = (unitId: string) =>
-  requestPortHouston("GET", "GetEquipmentOwnership", {
-    params: { unitId },
+  requestPortHouston("GET", evpPath("inventory/units"), {
+    params: {
+      operator: "POHA",
+      predicate: `unitId = ${unitId}`,
+      fields: "unitId,eqOperatorId,eqOwnerId",
+    },
   });
 
 export const createAppointment = (payload: AppointmentPayload) =>
@@ -244,34 +271,42 @@ export const cancelAppointment = (payload: AppointmentPayload) =>
   requestPortHouston("POST", "CancelAppointment", { data: payload });
 
 export const getBookingInquiry = (bookingNumber: string) =>
-  requestPortHouston("GET", "GetBookingInquiry", {
-    params: { bookingNumber },
+  requestPortHouston("GET", evpPath("orders/bookings"), {
+    params: {
+      operator: "POHA",
+      predicate: `subType = BOOK and nbr = ${bookingNumber}`,
+    },
   });
 
 export const getEquipmentHistory = (unitId: string, facility = "") =>
-  requestPortHouston("GET", "GetEquipmentHistory", {
-    params: withOptionalFacility({ facility, unitId }),
+  requestPortHouston("GET", evpPath("service/events"), {
+    params: {
+      operator: "POHA",
+      ...withOptionalFacility({ facility }),
+      predicate: `appliedToNaturalKey = ${unitId}`,
+      fields: "eventTypeId,created,changed,note",
+    },
   });
 
 export const getGateTransactions = (nbr: string) =>
-  requestPortHouston("GET", "GetGateTransactions", {
-    params: { nbr },
+  requestPortHouston("GET", evpPath("road/gatetransactions"), {
+    params: { operator: "POHA", nbr },
   });
 
 export const getRoadGateTransaction = (nbr: string) =>
-  requestPortHouston("GET", "evp/road/gatetransactions", {
-    params: { nbr },
+  requestPortHouston("GET", evpPath("road/gatetransactions"), {
+    params: { operator: "POHA", nbr },
   });
 
 export const createSubscription = (payload: PortHoustonSubscriptionPayload) =>
-  requestPortHouston("POST", "notify/subscribers", { data: payload });
+  requestPortHouston("POST", evpPath("notify/subscribers"), { data: payload });
 
 const getEirDocumentEndpoint = (transactionId: string) => {
   const pattern = getEnv("PORT_HOUSTON_EIR_DOCUMENT_URL_PATTERN");
   if (pattern) {
     return pattern.replaceAll("{id}", encodeURIComponent(transactionId));
   }
-  return `evp/road/gatetransactions/${encodeURIComponent(transactionId)}/documents`;
+  return evpPath(`road/gatetransactions/${encodeURIComponent(transactionId)}/documents`);
 };
 
 const getEirCategory = (subType = ""): "IN EIR" | "OUT EIR" => {

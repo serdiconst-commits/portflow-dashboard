@@ -59,6 +59,26 @@ const GATE_TRANSACTION_FIELDS = [
   'scope.facility_id',
 ].join(',');
 
+const EQUIPMENT_OWNERSHIP_FIELDS = [
+  'unitId',
+  'eqOperatorId',
+  'eqOwnerId',
+  'line',
+  'lineId',
+].join(',');
+
+const ASSOCIATED_EQUIPMENT_FIELDS = [
+  'eqClass',
+  'unitId',
+  'nominalLength',
+  'isoGroup',
+  'nominalHeight',
+  'eqtypeId',
+  'lastKnownPosition.posName',
+  'freightKind',
+  'category',
+].join(',');
+
 const DEFAULT_API_BASE = 'https://api.america.naviscloudops.com/v3/evp';
 const DEFAULT_AUTH_URL =
   'https://auth-v1.america.naviscloudops.com/auth/realms/phaprod/protocol/openid-connect/token';
@@ -562,7 +582,7 @@ export const getContainerAvailability = async (containerNumber, credentials = {}
   const response = await portHoustonFetch('/inventory/units/', {
     operator: 'POHA',
     facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
-    predicate: `unitId=${containerNumber}`,
+    predicate: `unitId = ${containerNumber}`,
     fields: DEFAULT_FIELDS,
   }, credentials);
 
@@ -573,12 +593,51 @@ export const getBolAvailability = async (bolNumber, credentials = {}, facility =
   const response = await portHoustonFetch('/inventory/units', {
     operator: 'POHA',
     facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
-    predicate: `category=IMPRT and blNbr=${bolNumber}`,
+    predicate: `category = IMPRT and blNbr = ${bolNumber}`,
     fields: DEFAULT_FIELDS,
   }, credentials);
 
   return {
     containers: unwrapRecords(response).map((record) => normalizeAvailability(record)),
+    raw: response,
+  };
+};
+
+export const getEquipmentOwnership = async (containerNumber, credentials = {}, facility = '') => {
+  const response = await portHoustonFetch('/inventory/units', {
+    operator: 'POHA',
+    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
+    predicate: `unitId = ${containerNumber}`,
+    fields: EQUIPMENT_OWNERSHIP_FIELDS,
+  }, credentials);
+
+  const record = unwrapRecords(response)[0] || {};
+  return {
+    containerNumber: getFirstValue(record, ['unitId']),
+    equipmentOperator: getFirstValue(record, ['eqOperatorId', 'lineId', 'line']),
+    equipmentOwner: getFirstValue(record, ['eqOwnerId', 'lineId', 'line']),
+    raw: response,
+  };
+};
+
+export const getAssociatedEquipment = async (bookingNumber, credentials = {}, facility = '') => {
+  const response = await portHoustonFetch('/inventory/units', {
+    operator: 'POHA',
+    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
+    predicate: `departOrderNbr = ${bookingNumber}`,
+    fields: ASSOCIATED_EQUIPMENT_FIELDS,
+  }, credentials);
+
+  return {
+    containers: unwrapRecords(response).map((record) => ({
+      containerNumber: getFirstValue(record, ['unitId']),
+      containerSize: getFirstValue(record, ['eqtypeId', 'isoGroup']),
+      equipmentClass: getFirstValue(record, ['eqClass']),
+      freightKind: getFirstValue(record, ['freightKind']),
+      category: getFirstValue(record, ['category']),
+      position: getFirstValue(record, ['lastKnownPosition.posName']),
+      raw: record,
+    })),
     raw: response,
   };
 };
