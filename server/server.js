@@ -1946,6 +1946,8 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
             ? `Port Houston found EIR document flag on transaction ${portDocumentSignals.transactionNumbers.join(', ')}, but the document download endpoint did not return a file yet.`
             : gateTransactions?.error
               ? `Gate transaction lookup failed: ${gateTransactions.error}`
+              : gateTransactions?.transactions?.length === 0
+                ? 'No Port Houston gate transaction number was returned for this container. EIR download requires the gate transaction nbr; webhook/subscription events should provide it going forward.'
               : 'No EIR document was returned by Port Houston for this check.',
     };
     const response = {

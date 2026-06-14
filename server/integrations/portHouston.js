@@ -585,23 +585,69 @@ export const getGateHistory = async (containerNumber, credentials = {}, facility
 };
 
 export const getGateTransactionsByContainer = async (containerNumber, credentials = {}, facility = '') => {
-  const response = await portHoustonFetch('/road/gatetransactions', {
+  const facilityCode = getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase();
+  const baseQuery = {
     operator: 'POHA',
-    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
-    predicate: `ctrId=${containerNumber}`,
+    facility: facilityCode,
     fields: GATE_TRANSACTION_FIELDS,
-  }, credentials);
+  };
+  const attempts = [
+    {
+      name: 'predicate ctrId',
+      query: { ...baseQuery, predicate: `ctrId=${containerNumber}` },
+    },
+    {
+      name: 'predicate ctrId spaced',
+      query: { ...baseQuery, predicate: `ctrId = ${containerNumber}` },
+    },
+    {
+      name: 'predicate unitId',
+      query: { ...baseQuery, predicate: `unitId=${containerNumber}` },
+    },
+    {
+      name: 'direct ctrId',
+      query: { ...baseQuery, ctrId: containerNumber },
+    },
+    {
+      name: 'direct unitId',
+      query: { ...baseQuery, unitId: containerNumber },
+    },
+  ];
 
-  const transactions = sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+  const errors = [];
+  for (const attempt of attempts) {
+    try {
+      const response = await portHoustonFetch('/road/gatetransactions', attempt.query, credentials);
+      const transactions = sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+      if (transactions.length) {
+        return {
+          transactions,
+          outEirTransaction: transactions.find((item) =>
+            ['RO', 'RM', 'DM', 'DI', 'DE'].includes(item.subType) && item.hasDocuments === true
+          ) || null,
+          inEirTransaction: transactions.find((item) =>
+            ['RI', 'RE', 'RC', 'RB'].includes(item.subType) && item.hasDocuments === true
+          ) || null,
+          lookupMethod: attempt.name,
+          raw: response,
+        };
+      }
+    } catch (error) {
+      errors.push({
+        method: attempt.name,
+        message: error.message,
+        status: error.status || '',
+      });
+    }
+  }
+
   return {
-    transactions,
-    outEirTransaction: transactions.find((item) =>
-      ['RO', 'RM', 'DM', 'DI', 'DE'].includes(item.subType) && item.hasDocuments === true
-    ) || null,
-    inEirTransaction: transactions.find((item) =>
-      ['RI', 'RE', 'RC', 'RB'].includes(item.subType) && item.hasDocuments === true
-    ) || null,
-    raw: response,
+    transactions: [],
+    outEirTransaction: null,
+    inEirTransaction: null,
+    lookupMethod: '',
+    errors,
+    raw: null,
   };
 };
 
