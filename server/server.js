@@ -102,10 +102,11 @@ import { db, initDatabase } from './database.js';
 import createInvoiceRoutes from './routes/invoices.js';
 import {
   downloadGateTransactionDocument,
+  extractGateTransactionNumbersFromHistory,
   getBolAvailability,
   getContainerAvailability,
   getGateHistory,
-  getGateTransactionsByContainer,
+  getGateTransactionsByNumbers,
   getPortHoustonFacilityCode,
 } from './integrations/portHouston.js';
 
@@ -1854,11 +1855,20 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
     const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials, facility) : null;
     const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials, facility) : null;
     const gate = containerNumber ? await getGateHistory(containerNumber, credentials, facility) : null;
+    const gateTransactionNumbers = extractGateTransactionNumbersFromHistory(gate);
     let gateTransactions = null;
     try {
-      gateTransactions = containerNumber
-        ? await getGateTransactionsByContainer(containerNumber, credentials, facility)
-        : null;
+      gateTransactions = gateTransactionNumbers.length
+        ? await getGateTransactionsByNumbers(gateTransactionNumbers, credentials, facility)
+        : {
+            transactions: [],
+            outEirTransaction: null,
+            inEirTransaction: null,
+            lookupMethod: '',
+            requestedTransactionNumbers: [],
+            errors: [],
+            reason: 'Equipment history did not include a gate transaction nbr.',
+          };
     } catch (gateTransactionErr) {
       gateTransactions = {
         transactions: [],
@@ -1938,6 +1948,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       downloadedDocuments,
       downloadErrors: eirDownloadErrors,
       gateTransactionError: gateTransactions?.error || '',
+      equipmentHistoryTransactionNumbers: gateTransactionNumbers,
       note: downloadedDocuments.length
         ? 'Port Houston EIR document was downloaded and synced to paperwork.'
         : outEirUrl || inEirUrl
@@ -1946,8 +1957,10 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
             ? `Port Houston found EIR document flag on transaction ${portDocumentSignals.transactionNumbers.join(', ')}, but the document download endpoint did not return a file yet.`
             : gateTransactions?.error
               ? `Gate transaction lookup failed: ${gateTransactions.error}`
+              : gateTransactions?.reason
+                ? `${gateTransactions.reason} Per Port Houston docs, Road Service GetGateTransactions requires nbr.`
               : gateTransactions?.transactions?.length === 0
-                ? 'No Port Houston gate transaction number was returned for this container. EIR download requires the gate transaction nbr; webhook/subscription events should provide it going forward.'
+                ? 'No Port Houston gate transaction was returned for the equipment-history nbr values. EIR download requires the gate transaction nbr.'
               : 'No EIR document was returned by Port Houston for this check.',
     };
     const response = {

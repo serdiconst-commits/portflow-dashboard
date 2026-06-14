@@ -29,6 +29,11 @@ const EQUIPMENT_HISTORY_FIELDS = [
   'created',
   'changed',
   'note',
+  'appliedToNaturalKey',
+  'appliedToPrimaryKey',
+  'relatedEntityId',
+  'relatedBatchNbr',
+  'primaryEventGkey',
 ].join(',');
 
 const GATE_TRANSACTION_FIELDS = [
@@ -538,6 +543,21 @@ const sortGateTransactions = (transactions = []) =>
     return bTime - aTime;
   });
 
+const extractTransactionNumbersFromText = (value = '') => {
+  const text = String(value || '');
+  const matches = [...text.matchAll(/(?:nbr|transaction|transnbr|gate transaction|eir)\D{0,24}(\d{5,})/gi)];
+  return matches.map((match) => match[1]).filter(Boolean);
+};
+
+export const extractGateTransactionNumbersFromHistory = (gateHistory = {}) => {
+  const events = Array.isArray(gateHistory?.events) ? gateHistory.events : [];
+  return [...new Set(events.flatMap((event) => [
+    ...extractTransactionNumbersFromText(event.note),
+    ...extractTransactionNumbersFromText(event.eventTypeId),
+    ...extractTransactionNumbersFromText(event.relatedEntityId),
+  ]))];
+};
+
 export const getContainerAvailability = async (containerNumber, credentials = {}, facility = '') => {
   const response = await portHoustonFetch('/inventory/units/', {
     operator: 'POHA',
@@ -584,70 +604,47 @@ export const getGateHistory = async (containerNumber, credentials = {}, facility
   };
 };
 
-export const getGateTransactionsByContainer = async (containerNumber, credentials = {}, facility = '') => {
-  const facilityCode = getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase();
-  const baseQuery = {
+export const getGateTransactionByNumber = async (transactionNumber, credentials = {}, facility = '') => {
+  const response = await portHoustonFetch('/road/gatetransactions', {
     operator: 'POHA',
-    facility: facilityCode,
+    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
+    nbr: String(transactionNumber || '').trim(),
     fields: GATE_TRANSACTION_FIELDS,
-  };
-  const attempts = [
-    {
-      name: 'predicate ctrId',
-      query: { ...baseQuery, predicate: `ctrId=${containerNumber}` },
-    },
-    {
-      name: 'predicate ctrId spaced',
-      query: { ...baseQuery, predicate: `ctrId = ${containerNumber}` },
-    },
-    {
-      name: 'predicate unitId',
-      query: { ...baseQuery, predicate: `unitId=${containerNumber}` },
-    },
-    {
-      name: 'direct ctrId',
-      query: { ...baseQuery, ctrId: containerNumber },
-    },
-    {
-      name: 'direct unitId',
-      query: { ...baseQuery, unitId: containerNumber },
-    },
-  ];
+  }, credentials);
 
+  return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+};
+
+export const getGateTransactionsByNumbers = async (transactionNumbers = [], credentials = {}, facility = '') => {
+  const uniqueNumbers = [...new Set(transactionNumbers.map((item) => String(item || '').trim()).filter(Boolean))];
+  const transactions = [];
   const errors = [];
-  for (const attempt of attempts) {
+  for (const transactionNumber of uniqueNumbers) {
     try {
-      const response = await portHoustonFetch('/road/gatetransactions', attempt.query, credentials);
-      const transactions = sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
-      if (transactions.length) {
-        return {
-          transactions,
-          outEirTransaction: transactions.find((item) =>
-            ['RO', 'RM', 'DM', 'DI', 'DE'].includes(item.subType) && item.hasDocuments === true
-          ) || null,
-          inEirTransaction: transactions.find((item) =>
-            ['RI', 'RE', 'RC', 'RB'].includes(item.subType) && item.hasDocuments === true
-          ) || null,
-          lookupMethod: attempt.name,
-          raw: response,
-        };
-      }
+      transactions.push(...await getGateTransactionByNumber(transactionNumber, credentials, facility));
     } catch (error) {
       errors.push({
-        method: attempt.name,
+        nbr: transactionNumber,
         message: error.message,
         status: error.status || '',
       });
     }
   }
 
+  const sortedTransactions = sortGateTransactions(transactions);
+
   return {
-    transactions: [],
-    outEirTransaction: null,
-    inEirTransaction: null,
-    lookupMethod: '',
+    transactions: sortedTransactions,
+    outEirTransaction: sortedTransactions.find((item) =>
+      ['RO', 'RM', 'DM', 'DI', 'DE'].includes(item.subType) && item.hasDocuments === true
+    ) || null,
+    inEirTransaction: sortedTransactions.find((item) =>
+      ['RI', 'RE', 'RC', 'RB'].includes(item.subType) && item.hasDocuments === true
+    ) || null,
+    lookupMethod: uniqueNumbers.length ? 'nbr' : '',
+    requestedTransactionNumbers: uniqueNumbers,
     errors,
-    raw: null,
+    raw: sortedTransactions.map((item) => item.raw),
   };
 };
 
