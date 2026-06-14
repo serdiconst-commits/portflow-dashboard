@@ -1923,6 +1923,10 @@ const [backendSettlements, setBackendSettlements] = useState([]);
 const [activeBackendSettlement, setActiveBackendSettlement] = useState(null);
 const [settlementBackendLoading, setSettlementBackendLoading] = useState(false);
 const [settlementBackendStatus, setSettlementBackendStatus] = useState('');
+const [backendDeductionDraft, setBackendDeductionDraft] = useState({
+  description: '',
+  amount: '',
+});
 const [invoiceLoadId, setInvoiceLoadId] = useState('');
 const [savedInvoices, setSavedInvoices] = useState([]);
 const [invoiceStatusMessage, setInvoiceStatusMessage] = useState('');
@@ -4196,6 +4200,91 @@ const handleRemoveSettlementCustomDeduction = (deductionId) => {
     ),
   }));
   setSettlementPayStatus('Custom deduction removed.');
+};
+
+const handleBackendDeductionDraftChange = (field, value) => {
+  setBackendDeductionDraft((prev) => ({
+    ...prev,
+    [field]: value,
+  }));
+  setSettlementBackendStatus('');
+};
+
+const handleAddBackendDeduction = async () => {
+  const description = backendDeductionDraft.description.trim();
+  const amount = parseMoney(backendDeductionDraft.amount);
+
+  if (!description || !backendDeductionDraft.amount.trim()) {
+    setSettlementBackendStatus('Add a description and amount first.');
+    return;
+  }
+
+  if (!amount) {
+    setSettlementBackendStatus('Enter an amount different than $0.00. Use negative for deductions and positive for reimbursements.');
+    return;
+  }
+
+  const backendSettlement = await ensureBackendSettlement();
+  if (!backendSettlement?.id) return;
+
+  setSettlementBackendLoading(true);
+  try {
+    const res = await fetch(`${API_BASE}/api/driver-settlements/${backendSettlement.id}/deductions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        description,
+        amount,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to add deduction');
+    }
+
+    setActiveBackendSettlement(data);
+    setBackendDeductionDraft({ description: '', amount: '' });
+    setSettlementBackendStatus(
+      `${amount < 0 ? 'Deduction' : 'Reimbursement'} saved to the database settlement.`
+    );
+  } catch (error) {
+    console.error('Failed to add database deduction:', error);
+    setSettlementBackendStatus(`Failed to save deduction: ${error.message}`);
+  } finally {
+    setSettlementBackendLoading(false);
+  }
+};
+
+const handleRemoveBackendDeduction = async (deductionId) => {
+  if (!activeBackendSettlement?.id || !deductionId) return;
+
+  setSettlementBackendLoading(true);
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/driver-settlements/${activeBackendSettlement.id}/deductions/${deductionId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }
+    );
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to remove deduction');
+    }
+
+    setActiveBackendSettlement(data);
+    setSettlementBackendStatus('Database deduction removed.');
+  } catch (error) {
+    console.error('Failed to remove database deduction:', error);
+    setSettlementBackendStatus(`Failed to remove deduction: ${error.message}`);
+  } finally {
+    setSettlementBackendLoading(false);
+  }
 };
 
 const handleSettlementLoadSelect = (loadId) => {
@@ -10469,6 +10558,89 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             </table>
           </div>
         </section>
+
+        {activeBackendSettlement?.id && (
+          <section className="panel settlement-deductions-panel">
+            <div className="panel-header">
+              <div>
+                <h3>Database Deductions / Reimbursements</h3>
+                <p className="panel-subtitle">Use negative amounts for deductions and positive amounts for money added back to the driver.</p>
+              </div>
+              <span>{formatMoney(activeBackendSettlement.statement?.totals?.adjustmentsTotal || 0)}</span>
+            </div>
+
+            <div className="settlement-custom-deduction-form">
+              <label className="settlement-entry-field">
+                <span>Description</span>
+                <input
+                  type="search"
+                  list="settlement-deduction-reasons"
+                  placeholder="Parking, repair, reimbursement"
+                  value={backendDeductionDraft.description}
+                  onChange={(e) => handleBackendDeductionDraftChange('description', e.target.value)}
+                />
+              </label>
+              <label className="settlement-entry-field">
+                <span>Amount</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="-37.50 or 25.00"
+                  value={backendDeductionDraft.amount}
+                  onChange={(e) => handleBackendDeductionDraftChange('amount', e.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={handleAddBackendDeduction}
+                disabled={settlementBackendLoading}
+              >
+                Add to Database Settlement
+              </button>
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th>Added By</th>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(activeBackendSettlement.statement?.deductions || []).length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className="settlement-empty-cell">No database deductions or reimbursements yet.</td>
+                    </tr>
+                  ) : (
+                    activeBackendSettlement.statement.deductions.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.description}</td>
+                        <td>{item.addedBy || '-'}</td>
+                        <td>{formatDateTime(item.createdAt)}</td>
+                        <td>{formatMoney(item.amount)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="secondary-btn"
+                            onClick={() => handleRemoveBackendDeduction(item.id)}
+                            disabled={settlementBackendLoading}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
         {activeBackendSettlement?.statement && (
           <section className="panel settlement-detail-panel">
