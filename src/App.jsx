@@ -3281,6 +3281,39 @@ useEffect(() => {
     return createBackendSettlement();
   };
 
+  const handleCompleteBackendSettlement = async () => {
+    if (!activeBackendSettlement?.id) return;
+
+    const confirmed = window.confirm(
+      'Mark this driver settlement complete? Payroll can still print or export it after completion.'
+    );
+    if (!confirmed) return;
+
+    setSettlementBackendLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/driver-settlements/${activeBackendSettlement.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ status: 'Complete' }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to complete settlement');
+      }
+
+      setActiveBackendSettlement(data);
+      setSettlementBackendStatus('Database settlement marked complete. You can now print or export it for the driver.');
+    } catch (error) {
+      console.error('Failed to complete backend settlement:', error);
+      setSettlementBackendStatus(`Failed to complete settlement: ${error.message}`);
+    } finally {
+      setSettlementBackendLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (activeView !== 'settlements') return;
     fetchActiveBackendSettlement();
@@ -5457,6 +5490,7 @@ const handleChangeUserRole = async (userId, newRole) => {
           <h1>Database Settlement Payroll Report</h1>
           <p>Driver: ${escapeHtml(`${statement.driver?.id || ''} - ${statement.driver?.name || ''}`.trim())}</p>
           <p>Period: ${escapeHtml(statement.settlement?.periodStart || '')} to ${escapeHtml(statement.settlement?.periodEnd || '')}</p>
+          <p>Status: ${escapeHtml(activeBackendSettlement.status || statement.settlement?.status || 'Draft')}</p>
           <p>Statement Version: ${escapeHtml(statement.settlement?.version || activeBackendSettlement.version || 1)}</p>
 
           <div class="summary">
@@ -10200,7 +10234,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           <div className="settlement-period-note">
             <p>
               {activeBackendSettlement?.id
-                ? `Database settlement ready: ${formatMoney(activeBackendSettlement.statement?.totals?.netPay || 0)} net pay, ${activeBackendSettlement.statement?.totals?.loadCount || 0} load(s), version ${activeBackendSettlement.statement?.settlement?.version || activeBackendSettlement.version || 1}.`
+                ? `Database settlement ${activeBackendSettlement.status || activeBackendSettlement.statement?.settlement?.status || 'Draft'}: ${formatMoney(activeBackendSettlement.statement?.totals?.netPay || 0)} net pay, ${activeBackendSettlement.statement?.totals?.loadCount || 0} load(s), version ${activeBackendSettlement.statement?.settlement?.version || activeBackendSettlement.version || 1}.`
                 : settlementStartDate && settlementEndDate
                   ? 'No database settlement has been created for this driver/week yet.'
                   : 'Choose a driver and week to create a database settlement.'}
@@ -10225,6 +10259,19 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   Reload
                 </button>
               )}
+              {activeBackendSettlement?.id &&
+                String(activeBackendSettlement.status || activeBackendSettlement.statement?.settlement?.status || '')
+                  .trim()
+                  .toLowerCase() !== 'complete' && (
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    onClick={handleCompleteBackendSettlement}
+                    disabled={settlementBackendLoading}
+                  >
+                    Complete Settlement
+                  </button>
+                )}
             </div>
           </div>
 
@@ -10868,7 +10915,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <div>
                 <h3>Database Settlement Statement</h3>
                 <p className="panel-subtitle">
-                  Audited backend statement for {activeBackendSettlement.statement.driver?.id} - {activeBackendSettlement.statement.driver?.name}
+                  {activeBackendSettlement.status || activeBackendSettlement.statement?.settlement?.status || 'Draft'} statement for {activeBackendSettlement.statement.driver?.id} - {activeBackendSettlement.statement.driver?.name}
                 </p>
               </div>
               <div className="details-actions">
