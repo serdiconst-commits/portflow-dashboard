@@ -424,11 +424,14 @@ const ensureExternalDocumentRecord = ({
     );
   });
 
-const getPortHoustonTransactionId = (transaction = {}) =>
-  String(transaction.nbr || transaction.gkey || '').trim();
+const getPortHoustonTransactionId = (transaction = {}) => {
+  const safeTransaction = transaction || {};
+  return String(safeTransaction.nbr || safeTransaction.gkey || '').trim();
+};
 
 const getPortHoustonEirCategory = (transaction = {}) => {
-  const subType = String(transaction.subType || '').trim().toUpperCase();
+  const safeTransaction = transaction || {};
+  const subType = String(safeTransaction.subType || '').trim().toUpperCase();
   if (['RI', 'RE', 'RC', 'RB'].includes(subType)) return 'IN EIR';
   if (['RO', 'RM', 'DM', 'DI', 'DE'].includes(subType)) return 'OUT EIR';
   return '';
