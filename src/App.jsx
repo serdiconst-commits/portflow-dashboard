@@ -909,6 +909,8 @@ const [driverChassisByLoad, setDriverChassisByLoad] = useState({});
 const driverEquipmentDraftsRef = useRef({});
 const [portHoustonChecksByLoad, setPortHoustonChecksByLoad] = useState({});
 const [portHoustonCheckingLoadId, setPortHoustonCheckingLoadId] = useState('');
+const [smartPortLookupLoading, setSmartPortLookupLoading] = useState(false);
+const [smartPortLookupStatus, setSmartPortLookupStatus] = useState('');
 const [portHoustonSettingsForm, setPortHoustonSettingsForm] = useState(
   buildPortHoustonCredentialForm(savedCompany || {})
 );
@@ -3637,6 +3639,9 @@ const getPortHoustonSummary = (result) => {
     available: availability.available,
     terminal: availability.terminal || result?.terminal || '',
     roadImpediments: availability.roadImpediments || availability.impediments || [],
+    statusReason: availability.statusReason || result?.suggested?.portStatusReason || '',
+    transitState: availability.transitState || result?.suggested?.transitState || '',
+    stoppedRoad: availability.stoppedRoad ?? result?.suggested?.stoppedRoad ?? null,
     lastFreeDay: availability.lastFreeDay || '',
     lastGateMove,
     outEir: result?.eir?.out || null,
@@ -3665,8 +3670,12 @@ const formatPortHoustonValue = (value) => {
       'description',
       'message',
       'reason',
+      'remark',
       'hold',
       'holdId',
+      'impedimentRoad',
+      'impedimentRail',
+      'impedimentVessel',
       'type',
       'severity',
     ];
@@ -3696,6 +3705,91 @@ const formatPortHoustonGateMove = (move) => {
     return 'Container record created, no gate move yet';
   }
   return formatPortHoustonValue(event) || 'Not returned';
+};
+
+const normalizePortShipLineForForm = (value = '') => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const rawKey = raw.split(':')[0].trim().toLowerCase();
+  const exact = shipLineOptions.find((line) => line.toLowerCase() === raw.toLowerCase());
+  if (exact) return exact;
+  const prefix = shipLineOptions.find((line) => line.split(':')[0].trim().toLowerCase() === rawKey);
+  return prefix || raw;
+};
+
+const fillEmptyPortField = (currentValue, portValue) => {
+  const normalizedPortValue = String(portValue || '').trim();
+  return String(currentValue || '').trim() || !normalizedPortValue ? currentValue : normalizedPortValue;
+};
+
+const handleSmartPortLookup = async () => {
+  const containerNumber = String(newLoad.containerNumber || '').trim().toUpperCase();
+  const bolNumber = String(newLoad.referenceNumber || newLoad.poNumber || newLoad.bookingNumber || '').trim();
+
+  if (!containerNumber && !bolNumber) {
+    setSmartPortLookupStatus('Enter a container number, reference/BOL, PO, or booking number first.');
+    return;
+  }
+
+  setSmartPortLookupLoading(true);
+  setSmartPortLookupStatus('Checking Port Houston...');
+
+  try {
+    const params = new URLSearchParams();
+    if (containerNumber) params.set('containerNumber', containerNumber);
+    if (bolNumber) params.set('bolNumber', bolNumber);
+    const terminal = `${newLoad.pickup || ''} ${newLoad.returnLocation || ''}`.trim();
+    if (terminal) params.set('terminal', terminal);
+
+    const res = await fetch(`${API_BASE}/api/port-houston/load-lookup?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to check Port Houston');
+    }
+
+    const suggested = data.suggested || {};
+    setNewLoad((prev) => ({
+      ...prev,
+      containerNumber: fillEmptyPortField(prev.containerNumber, suggested.containerNumber),
+      containerSize: fillEmptyPortField(prev.containerSize, suggested.containerSize),
+      shipLine: fillEmptyPortField(prev.shipLine, normalizePortShipLineForForm(suggested.shipLine)),
+      bookingNumber: fillEmptyPortField(prev.bookingNumber, suggested.bookingNumber),
+      referenceNumber: fillEmptyPortField(prev.referenceNumber, suggested.billOfLading),
+      sealNumber: fillEmptyPortField(prev.sealNumber, suggested.sealNumber),
+      lastFreeDay: fillEmptyPortField(prev.lastFreeDay, getLocalDatePortion(suggested.lastFreeDay)),
+      availabilityStatus: fillEmptyPortField(prev.availabilityStatus, suggested.availabilityStatus),
+      notes:
+        suggested.vesselName && !String(prev.notes || '').includes(`Port vessel: ${suggested.vesselName}`)
+          ? `${prev.notes || ''}${prev.notes ? '\n' : ''}Port vessel: ${suggested.vesselName}`
+          : prev.notes,
+    }));
+
+    const filled = [
+      suggested.containerNumber && 'container',
+      suggested.containerSize && 'size',
+      suggested.shipLine && 'ship line',
+      suggested.lastFreeDay && 'LFD',
+      suggested.availabilityStatus && 'availability',
+      suggested.bookingNumber && 'booking',
+      suggested.sealNumber && 'seal',
+    ].filter(Boolean);
+
+    setSmartPortLookupStatus(
+      filled.length
+        ? `Port Houston returned: ${filled.join(', ')}.${suggested.portStatusReason ? ` ${suggested.portStatusReason}` : ''}`
+        : 'Port Houston responded, but no extra load fields were returned for this container yet.'
+    );
+  } catch (error) {
+    console.error('Smart Port lookup failed:', error);
+    setSmartPortLookupStatus(`Unable to check Port Houston: ${error.message}`);
+  } finally {
+    setSmartPortLookupLoading(false);
+  }
 };
 
 const handleCheckPortHouston = async (load) => {
@@ -7884,6 +7978,28 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     value={newLoad.containerNumber}
     onChange={handleInputChange}
   />
+  <div className="smart-port-lookup">
+    <button
+      type="button"
+      className="primary-btn smart-port-lookup-btn"
+      onClick={handleSmartPortLookup}
+      disabled={
+        smartPortLookupLoading ||
+        (!newLoad.containerNumber && !newLoad.referenceNumber && !newLoad.poNumber && !newLoad.bookingNumber)
+      }
+    >
+      {smartPortLookupLoading ? 'Checking Port...' : 'Smart Port Lookup'}
+    </button>
+    {smartPortLookupStatus && (
+      <p
+        className={`smart-port-status ${
+          smartPortLookupStatus.toLowerCase().startsWith('unable') ? 'error' : ''
+        }`}
+      >
+        {smartPortLookupStatus}
+      </p>
+    )}
+  </div>
   {selectedPresetName === 'Export Load' && (
     <label className="checkbox-row">
       <input
@@ -9303,9 +9419,15 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                 </div>
                                 <div className="detail-box"><span>Terminal</span><strong>{summary.terminal || 'Not returned'}</strong></div>
                                 <div className="detail-box"><span>Last Free Day</span><strong>{summary.lastFreeDay || 'Not returned'}</strong></div>
+                                <div className="detail-box"><span>Transit State</span><strong>{summary.transitState || 'Not returned'}</strong></div>
+                                <div className="detail-box"><span>Road Hold</span><strong>{summary.stoppedRoad === true ? 'Yes' : summary.stoppedRoad === false ? 'No' : 'Not returned'}</strong></div>
                                 <div className="detail-box">
                                   <span>Last Gate Move</span>
                                   <strong>{formatPortHoustonGateMove(summary.lastGateMove)}</strong>
+                                </div>
+                                <div className="detail-box port-check-note">
+                                  <span>Port Status Reason</span>
+                                  <strong>{summary.statusReason || 'Not returned'}</strong>
                                 </div>
                                 <div className="detail-box">
                                   <span>Holds / Road Impediments</span>

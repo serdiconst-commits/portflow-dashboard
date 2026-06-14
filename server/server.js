@@ -1538,18 +1538,19 @@ app.get('/api/loads/:id/audit-logs', authenticate, (req, res) => {
 app.get('/api/port-houston/container/:containerNumber/availability', authenticate, async (req, res) => {
   const companyId = req.company.companyId;
   const containerNumber = String(req.params.containerNumber || '').trim().toUpperCase();
+  const facility = getPortHoustonFacilityCode(req.query.facility || req.query.terminal || '');
 
   if (!containerNumber) {
     return res.status(400).json({ error: 'Container number is required.' });
   }
 
   try {
-    const credentials = await getCompanyPortHoustonCredentials(companyId);
-    const result = await getContainerAvailability(containerNumber, credentials);
+    const credentials = await getCompanyPortHoustonCredentials(companyId, facility);
+    const result = await getContainerAvailability(containerNumber, credentials, facility);
     const log = await insertPortCheckLog({
       companyId,
       containerNumber,
-      terminal: result.terminal || '',
+      terminal: result.terminal || facility || '',
       requestType: 'CONTAINER_AVAILABILITY',
       status: 'SUCCESS',
       response: result,
@@ -1574,14 +1575,15 @@ app.get('/api/port-houston/container/:containerNumber/availability', authenticat
 app.get('/api/port-houston/bol/:bolNumber/availability', authenticate, async (req, res) => {
   const companyId = req.company.companyId;
   const bolNumber = String(req.params.bolNumber || '').trim();
+  const facility = getPortHoustonFacilityCode(req.query.facility || req.query.terminal || '');
 
   if (!bolNumber) {
     return res.status(400).json({ error: 'Bill of lading number is required.' });
   }
 
   try {
-    const credentials = await getCompanyPortHoustonCredentials(companyId);
-    const result = await getBolAvailability(bolNumber, credentials);
+    const credentials = await getCompanyPortHoustonCredentials(companyId, facility);
+    const result = await getBolAvailability(bolNumber, credentials, facility);
     const log = await insertPortCheckLog({
       companyId,
       requestType: 'BOL_AVAILABILITY',
@@ -1641,6 +1643,85 @@ app.get('/api/port-houston/gate/:containerNumber', authenticate, async (req, res
   }
 });
 
+app.get('/api/port-houston/load-lookup', authenticate, async (req, res) => {
+  const companyId = req.company.companyId;
+  const containerNumber = String(req.query.containerNumber || '').trim().toUpperCase();
+  const bolNumber = String(req.query.bolNumber || '').trim();
+  const terminal = String(req.query.terminal || '').trim();
+
+  if (!containerNumber && !bolNumber) {
+    return res.status(400).json({ error: 'Container number or BOL/reference number is required.' });
+  }
+
+  try {
+    const credentials = await getCompanyPortHoustonCredentials(companyId, terminal);
+    const facility = getPortHoustonFacilityCode(terminal);
+    const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials, facility) : null;
+    const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials, facility) : null;
+    const primaryContainer =
+      (availability?.found ? availability : null) ||
+      bolAvailability?.containers?.find((item) => item?.containerNumber) ||
+      bolAvailability?.containers?.[0] ||
+      {};
+    const statusSource = availability || primaryContainer;
+    const lookupContainerNumber = containerNumber || primaryContainer.containerNumber || '';
+    const gate = lookupContainerNumber ? await getGateHistory(lookupContainerNumber, credentials, facility) : null;
+    const suggested = {
+      containerNumber: lookupContainerNumber,
+      containerSize: primaryContainer.containerSize || '',
+      shipLine: primaryContainer.shipLine || '',
+      bookingNumber: primaryContainer.bookingNumber || '',
+      billOfLading: primaryContainer.billOfLading || bolNumber || '',
+      sealNumber: primaryContainer.sealNumber || '',
+      lastFreeDay: primaryContainer.lastFreeDay || '',
+      availabilityStatus: typeof statusSource.available === 'boolean'
+        ? statusSource.available
+          ? 'Available'
+          : 'Not Available'
+        : '',
+      portStatusReason: statusSource.statusReason || '',
+      transitState: statusSource.transitState || '',
+      stoppedRoad: statusSource.stoppedRoad ?? null,
+      terminal: statusSource.terminal || primaryContainer.terminal || facility || '',
+      vesselName: primaryContainer.vesselName || '',
+      timeIn: primaryContainer.timeIn || '',
+      timeOut: primaryContainer.timeOut || '',
+    };
+    const response = {
+      containerNumber: lookupContainerNumber,
+      bolNumber,
+      facility: facility || 'ALL',
+      suggested,
+      availability,
+      bolAvailability,
+      gate,
+    };
+    const log = await insertPortCheckLog({
+      companyId,
+      containerNumber: lookupContainerNumber,
+      terminal: suggested.terminal || terminal || '',
+      requestType: 'SMART_LOAD_LOOKUP',
+      status: 'SUCCESS',
+      response,
+      checkedByUserId: req.user?.id || '',
+    });
+
+    res.json({ ...response, checkedBy: req.user?.name || req.user?.email || '', checkedAt: log.checkedAt });
+  } catch (error) {
+    const status = error.status || 502;
+    await insertPortCheckLog({
+      companyId,
+      containerNumber,
+      terminal,
+      requestType: 'SMART_LOAD_LOOKUP',
+      status: 'ERROR',
+      response: { error: error.message, code: error.code, details: error.response },
+      checkedByUserId: req.user?.id || '',
+    }).catch((logErr) => console.error('Port Houston log error:', logErr.message));
+    res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR', diagnostics: error.diagnostics });
+  }
+});
+
 app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
   const companyId = req.company.companyId;
   const loadId = req.params.id;
@@ -1670,8 +1751,8 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       `${load.pickup || ''} ${load.returnLocation || ''}`
     );
     const facility = getLoadPortHoustonFacility(load);
-    const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials) : null;
-    const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials) : null;
+    const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials, facility) : null;
+    const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials, facility) : null;
     const gate = containerNumber ? await getGateHistory(containerNumber, credentials, facility) : null;
     const portDocumentSignals = getPortHoustonDocumentSignals({ availability, bolAvailability, gate });
     const outEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate }, 'OUT EIR');

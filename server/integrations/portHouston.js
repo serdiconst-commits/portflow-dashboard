@@ -5,12 +5,20 @@ const DEFAULT_FIELDS = [
   'eqtypeId',
   'isoGroup',
   'line',
+  'lineId',
   'category',
   'freightKind',
+  'blNbr',
+  'sealNbr1',
+  'transitState',
+  'stoppedRoad',
   'routing.pod1Id',
   'stopFlags',
   'impediments',
   'lastFreeDay',
+  'lineLastFreeDay',
+  'timeIn',
+  'timeOut',
   'ufvPosition',
   'timestamps.timeIn',
   'timestamps.timeOut',
@@ -311,23 +319,114 @@ const getFirstValue = (record, keys) => {
   return '';
 };
 
+const normalizeBoolean = (value) => {
+  if (value === true || value === false) return value;
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['true', '1', 'yes', 'y'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'n'].includes(normalized)) return false;
+  return null;
+};
+
+const formatImpediment = (value) => {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(formatImpediment).filter(Boolean).join(', ');
+  }
+  if (typeof value === 'object') {
+    const preferredKeys = [
+      'impedimentRoad',
+      'impedimentRail',
+      'impedimentVessel',
+      'remark',
+      'description',
+      'message',
+      'reason',
+      'hold',
+      'holdId',
+      'type',
+      'code',
+      'name',
+    ];
+    const parts = preferredKeys
+      .map((key) => value?.[key])
+      .filter((item) => item !== undefined && item !== null && String(item).trim() !== '')
+      .map(formatImpediment)
+      .filter(Boolean);
+    if (parts.length) return parts.join(' - ');
+
+    return Object.entries(value)
+      .map(([key, child]) => {
+        const formatted = formatImpediment(child);
+        return formatted ? `${key}: ${formatted}` : '';
+      })
+      .filter(Boolean)
+      .join(', ');
+  }
+  return String(value);
+};
+
+const normalizeImpediments = (value) => {
+  if (value === null || value === undefined || value === '') return [];
+  if (Array.isArray(value)) return value.map(formatImpediment).filter(Boolean);
+  if (typeof value === 'object') {
+    return Object.entries(value)
+      .map(([key, child]) => {
+        const formatted = formatImpediment(child);
+        return formatted ? `${key}: ${formatted}` : '';
+      })
+      .filter(Boolean);
+  }
+  return [String(value)].filter(Boolean);
+};
+
 const normalizeAvailability = (response) => {
   const records = unwrapRecords(response);
   const unit = records[0] || {};
-  const impediments = getFirstValue(unit, ['impediments', 'roadImpediments', 'stopFlags']) || [];
+  const found = records.length > 0 && Object.keys(unit).length > 0;
+  const transitState = String(getFirstValue(unit, ['transitState']) || '').trim().toUpperCase();
+  const stoppedRoad = normalizeBoolean(getFirstValue(unit, ['stoppedRoad']));
+  const impediments = normalizeImpediments(getFirstValue(unit, ['impediments', 'roadImpediments', 'stopFlags']));
+  const available = found && transitState === 'S40_YARD' && stoppedRoad !== true;
+  const statusReason = !found
+    ? 'Container not found in Port Houston response.'
+    : available
+      ? 'Container is in yard and has no active road hold.'
+      : stoppedRoad
+        ? 'Container has an active road hold.'
+        : transitState
+          ? `Container transit state is ${transitState}, not S40_YARD.`
+          : 'Container transit state was not returned by Port Houston.';
 
   return {
-    available: records.length > 0 && (!Array.isArray(impediments) || impediments.length === 0),
+    found,
+    available,
+    statusReason,
+    transitState,
+    stoppedRoad,
     terminal: getFirstValue(unit, ['scope.facility_id', 'facility', 'facilityId', 'terminal', 'routing.pod1Id']),
     roadImpediments: impediments,
-    lastFreeDay: getFirstValue(unit, ['lastFreeDay', 'lfd']),
+    lastFreeDay: getFirstValue(unit, ['lastFreeDay', 'lineLastFreeDay', 'lfd']),
+    containerNumber: getFirstValue(unit, ['unitId', 'ctrId', 'containerNumber']),
+    containerSize: getFirstValue(unit, ['eqtypeId', 'ctrTypeId', 'equipmentType', 'isoGroup']),
+    shipLine: getFirstValue(unit, ['lineId', 'line', 'shippingLine', 'operator', 'scope.operator_id']),
+    bookingNumber: getFirstValue(unit, ['eqoNbr', 'bookingNumber', 'bookingNbr', 'blNbr']),
+    billOfLading: getFirstValue(unit, ['blNbr']),
+    sealNumber: getFirstValue(unit, ['sealNbr1', 'sealNumber', 'seal1']),
+    vesselName: getFirstValue(unit, ['vesselName', 'vessel', 'visit.vesselName', 'carrierVisit.vesselName']),
+    timeIn: getFirstValue(unit, ['timeIn', 'timestamps.timeIn']),
+    timeOut: getFirstValue(unit, ['timeOut', 'timestamps.timeOut']),
     raw: response,
   };
 };
 
-export const getContainerAvailability = async (containerNumber, credentials = {}) => {
+export const getContainerAvailability = async (containerNumber, credentials = {}, facility = '') => {
   const response = await portHoustonFetch('/inventory/units/', {
     operator: 'POHA',
+    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
     predicate: `unitId=${containerNumber}`,
     fields: DEFAULT_FIELDS,
   }, credentials);
@@ -335,9 +434,10 @@ export const getContainerAvailability = async (containerNumber, credentials = {}
   return normalizeAvailability(response);
 };
 
-export const getBolAvailability = async (bolNumber, credentials = {}) => {
+export const getBolAvailability = async (bolNumber, credentials = {}, facility = '') => {
   const response = await portHoustonFetch('/inventory/units', {
     operator: 'POHA',
+    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
     predicate: `category=IMPRT and blNbr=${bolNumber}`,
     fields: DEFAULT_FIELDS,
   }, credentials);

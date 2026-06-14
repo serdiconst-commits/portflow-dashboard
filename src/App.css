@@ -3499,6 +3499,32 @@ button:disabled {
   margin: 6px 0 0;
 }
 
+.smart-port-lookup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 14px;
+}
+
+.smart-port-lookup-btn {
+  min-height: 42px;
+  padding: 10px 16px;
+}
+
+.smart-port-status {
+  flex: 1 1 240px;
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.smart-port-status.error {
+  color: #991b1b;
+}
+
 @media (max-width: 1000px) {
   .port-check-grid {
     grid-template-columns: 1fr;
