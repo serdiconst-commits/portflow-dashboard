@@ -172,6 +172,15 @@ const normalizeDriverAssignment = (companyId, value, callback) => {
   );
 };
 
+const shouldAutoDispatchLoad = (driver, status) => {
+  const hasDriver = Boolean(String(driver || '').trim());
+  const currentStatus = String(status || '').trim().toLowerCase();
+  return hasDriver && (!currentStatus || ['pending', 'available', 'not available'].includes(currentStatus));
+};
+
+const getStatusAfterDriverAssignment = (driver, status, fallback = 'Pending') =>
+  shouldAutoDispatchLoad(driver, status) ? 'Dispatched' : status || fallback;
+
 const isTruthy = (value) =>
   value === true ||
   value === 1 ||
@@ -2731,6 +2740,8 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
             return res.status(500).json({ error: droppedByErr.message });
           }
 
+      const nextStatus = getStatusAfterDriverAssignment(normalizedDriver, l.status, existingLoad.status || 'Pending');
+
       db.run(
         `UPDATE loads SET
           loadDate = ?,
@@ -2802,7 +2813,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           l.containerSize || '',
           l.rate || 0,
           l.driverRate || 0,
-          l.status || 'Pending',
+          nextStatus,
           l.availabilityStatus ?? '',
           l.paperwork || '',
           l.detention || 0,
@@ -3201,6 +3212,8 @@ app.post('/api/loads', authenticate, (req, res) => {
               });
             }
 
+          const nextStatus = getStatusAfterDriverAssignment(normalizedDriver, l.status);
+
           db.run(
             `INSERT INTO loads (
               id,
@@ -3274,7 +3287,7 @@ dropDateTime,
               l.containerSize || '',
               l.rate || 0,
               l.driverRate || 0,
-              l.status || 'Pending',
+              nextStatus,
               l.availabilityStatus || '',
               l.paperwork || '',
               l.detention || 0,

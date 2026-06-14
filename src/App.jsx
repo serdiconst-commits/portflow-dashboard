@@ -307,6 +307,15 @@ const normalizeDriverForStorage = (driverValue) => {
   return idMatch ? idMatch[0].toUpperCase() : '';
 };
 
+const shouldAutoDispatchLoad = (driverValue, status) => {
+  const driverId = normalizeDriverForStorage(driverValue);
+  const currentStatus = String(status || '').trim().toLowerCase();
+  return Boolean(driverId) && (!currentStatus || ['pending', 'available', 'not available'].includes(currentStatus));
+};
+
+const getStatusAfterDriverAssignment = (driverValue, status) =>
+  shouldAutoDispatchLoad(driverValue, status) ? 'Dispatched' : status;
+
 const driverMatchesCurrentUser = (driverValue, currentUser) => {
   const assignedDriverId = normalizeDriverForStorage(driverValue);
   const currentDriverId = normalizeDriverForStorage(currentUser?.driverId);
@@ -3394,6 +3403,12 @@ const filteredLoads = loadsData.filter((load) => {
         ...prev,
         [name]: value,
         truck: name === 'driver' ? (value ? getDriverTruck(value) : '') : prev.truck,
+        status:
+          name === 'driver'
+            ? getStatusAfterDriverAssignment(value, prev.status)
+            : name === 'status'
+              ? value
+              : prev.status,
       };
 
       updated.settlement = calculateLoadSettlement({
@@ -3411,10 +3426,16 @@ const filteredLoads = loadsData.filter((load) => {
     const { name, value } = e.target;
 
     setEditingLoad((prev) => {
-      const updated = {
+  const updated = {
   ...prev,
   [name]: value,
   truck: name === 'driver' ? (value ? getDriverTruck(value) : '') : prev.truck,
+  status:
+    name === 'driver'
+      ? getStatusAfterDriverAssignment(value, prev.status)
+      : name === 'status'
+        ? value
+        : prev.status,
 };
 
 if (name === 'driver' && prev.status === 'Dropped') {
@@ -3507,10 +3528,11 @@ const handleAddLoad = async (e) => {
       paperwork: getPaperworkStatusFromDocuments([]),
     };
 
-    const payload = {
+const payload = {
   ...loadToAdd,
   driver: normalizeDriverForStorage(newLoad.driver),
   truck: newLoad.driver ? getDriverTruck(newLoad.driver) : '',
+  status: getStatusAfterDriverAssignment(newLoad.driver, loadToAdd.status),
 };
 
 const res = await fetch(`${API_BASE}/api/loads`, {
@@ -3600,6 +3622,7 @@ const payload = {
   driver: normalizeDriverForStorage(updatedLoad.driver),
   truck: updatedLoad.driver ? getDriverTruck(updatedLoad.driver) : '',
   droppedBy: normalizeDriverForStorage(updatedLoad.droppedBy),
+  status: getStatusAfterDriverAssignment(updatedLoad.driver, updatedLoad.status),
 };
 
 const res = await fetch(`${API_BASE}/api/loads/${editingLoad.id}`, {
@@ -4080,6 +4103,7 @@ const updatedLoad = {
   ...selectedLoad,
   driver: newDriver,
   truck: newDriver ? getDriverTruck(newDriver) : '',
+  status: getStatusAfterDriverAssignment(newDriver, selectedLoad.status),
   pickup:
     selectedLoad.status === 'Dropped'
       ? getDroppedLoadPickup(selectedLoad)
