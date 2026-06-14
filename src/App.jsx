@@ -1924,6 +1924,7 @@ const [activeBackendSettlement, setActiveBackendSettlement] = useState(null);
 const [settlementBackendLoading, setSettlementBackendLoading] = useState(false);
 const [settlementBackendStatus, setSettlementBackendStatus] = useState('');
 const [backendDeductionDraft, setBackendDeductionDraft] = useState({
+  kind: 'deduction',
   description: '',
   amount: '',
 });
@@ -4211,8 +4212,9 @@ const handleBackendDeductionDraftChange = (field, value) => {
 };
 
 const handleAddBackendDeduction = async () => {
+  const kind = backendDeductionDraft.kind === 'reimbursement' ? 'reimbursement' : 'deduction';
   const description = backendDeductionDraft.description.trim();
-  const amount = parseMoney(backendDeductionDraft.amount);
+  const amount = Math.abs(parseMoney(backendDeductionDraft.amount));
 
   if (!description || !backendDeductionDraft.amount.trim()) {
     setSettlementBackendStatus('Add a description and amount first.');
@@ -4220,10 +4222,11 @@ const handleAddBackendDeduction = async () => {
   }
 
   if (!amount) {
-    setSettlementBackendStatus('Enter an amount different than $0.00. Use negative for deductions and positive for reimbursements.');
+    setSettlementBackendStatus('Enter an amount greater than $0.00.');
     return;
   }
 
+  const signedAmount = kind === 'deduction' ? -amount : amount;
   const backendSettlement = await ensureBackendSettlement();
   if (!backendSettlement?.id) return;
 
@@ -4237,7 +4240,7 @@ const handleAddBackendDeduction = async () => {
       },
       body: JSON.stringify({
         description,
-        amount,
+        amount: signedAmount,
       }),
     });
     const data = await res.json();
@@ -4246,9 +4249,9 @@ const handleAddBackendDeduction = async () => {
     }
 
     setActiveBackendSettlement(data);
-    setBackendDeductionDraft({ description: '', amount: '' });
+    setBackendDeductionDraft({ kind: 'deduction', description: '', amount: '' });
     setSettlementBackendStatus(
-      `${amount < 0 ? 'Deduction' : 'Reimbursement'} saved to the database settlement.`
+      `${kind === 'deduction' ? 'Deduction' : 'Reimbursement'} saved to the database settlement.`
     );
   } catch (error) {
     console.error('Failed to add database deduction:', error);
@@ -10571,6 +10574,17 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
             <div className="settlement-custom-deduction-form">
               <label className="settlement-entry-field">
+                <span>Type</span>
+                <select
+                  className="filter-select"
+                  value={backendDeductionDraft.kind}
+                  onChange={(e) => handleBackendDeductionDraftChange('kind', e.target.value)}
+                >
+                  <option value="deduction">Deduction - subtract from pay</option>
+                  <option value="reimbursement">Reimbursement - add to pay</option>
+                </select>
+              </label>
+              <label className="settlement-entry-field">
                 <span>Description</span>
                 <input
                   type="search"
@@ -10585,7 +10599,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <input
                   type="text"
                   inputMode="decimal"
-                  placeholder="-37.50 or 25.00"
+                  placeholder="37.50"
                   value={backendDeductionDraft.amount}
                   onChange={(e) => handleBackendDeductionDraftChange('amount', e.target.value)}
                 />
@@ -10596,7 +10610,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onClick={handleAddBackendDeduction}
                 disabled={settlementBackendLoading}
               >
-                Add to Database Settlement
+                Add {backendDeductionDraft.kind === 'reimbursement' ? 'Reimbursement' : 'Deduction'}
               </button>
             </div>
 
@@ -10604,6 +10618,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <table>
                 <thead>
                   <tr>
+                    <th>Type</th>
                     <th>Description</th>
                     <th>Added By</th>
                     <th>Date</th>
@@ -10614,11 +10629,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <tbody>
                   {(activeBackendSettlement.statement?.deductions || []).length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="settlement-empty-cell">No database deductions or reimbursements yet.</td>
+                      <td colSpan="6" className="settlement-empty-cell">No database deductions or reimbursements yet.</td>
                     </tr>
                   ) : (
                     activeBackendSettlement.statement.deductions.map((item) => (
                       <tr key={item.id}>
+                        <td>{parseMoney(item.amount) < 0 ? 'Deduction' : 'Reimbursement'}</td>
                         <td>{item.description}</td>
                         <td>{item.addedBy || '-'}</td>
                         <td>{formatDateTime(item.createdAt)}</td>
