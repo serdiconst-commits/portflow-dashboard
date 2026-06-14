@@ -99,6 +99,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { db, initDatabase } from './database.js';
+import createDriverSettlementRoutes from './routes/driverSettlements.js';
 import createInvoiceRoutes from './routes/invoices.js';
 import {
   downloadGateTransactionDocument,
@@ -1098,6 +1099,7 @@ const requireRoles = (allowedRoles) => (req, res, next) => {
 };
 
 app.use('/api/invoices', authenticate, createInvoiceRoutes(db));
+app.use('/api/driver-settlements', authenticate, createDriverSettlementRoutes(db));
 
 const fuelAccessRoles = new Set(['dispatcher', 'payroll', 'manager', ...adminRoles]);
 const getFuelReceiptUrl = (fuel = {}) =>

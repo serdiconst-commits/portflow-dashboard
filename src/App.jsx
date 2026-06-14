@@ -1919,6 +1919,10 @@ const [selectedAccountingLoadId, setSelectedAccountingLoadId] = useState('');
 const [selectedSettlementLoadId, setSelectedSettlementLoadId] = useState('');
 const [settlementPayDrafts, setSettlementPayDrafts] = useState({});
 const [settlementPayStatus, setSettlementPayStatus] = useState('');
+const [backendSettlements, setBackendSettlements] = useState([]);
+const [activeBackendSettlement, setActiveBackendSettlement] = useState(null);
+const [settlementBackendLoading, setSettlementBackendLoading] = useState(false);
+const [settlementBackendStatus, setSettlementBackendStatus] = useState('');
 const [invoiceLoadId, setInvoiceLoadId] = useState('');
 const [savedInvoices, setSavedInvoices] = useState([]);
 const [invoiceStatusMessage, setInvoiceStatusMessage] = useState('');
@@ -3164,7 +3168,118 @@ useEffect(() => {
     setSettlementStartDate('');
     setSettlementEndDate('');
     setSelectedSettlementLoadId('');
+    setActiveBackendSettlement(null);
   };
+
+  const fetchBackendSettlementById = async (settlementId) => {
+    const res = await fetch(`${API_BASE}/api/driver-settlements/${settlementId}`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to load settlement');
+    }
+    return data;
+  };
+
+  const fetchActiveBackendSettlement = async () => {
+    if (!authToken || !activeSettlementDriverId || !settlementStartDate || !settlementEndDate) {
+      setBackendSettlements([]);
+      setActiveBackendSettlement(null);
+      return null;
+    }
+
+    setSettlementBackendLoading(true);
+    try {
+      const params = new URLSearchParams({
+        driverId: activeSettlementDriverId,
+        periodStart: settlementStartDate,
+        periodEnd: settlementEndDate,
+      });
+      const res = await fetch(`${API_BASE}/api/driver-settlements?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to load settlements');
+      }
+
+      setBackendSettlements(Array.isArray(data) ? data : []);
+      const current = (Array.isArray(data) ? data : []).find(
+        (item) =>
+          item.driverId === activeSettlementDriverId &&
+          item.periodStart === settlementStartDate &&
+          item.periodEnd === settlementEndDate
+      );
+
+      if (!current) {
+        setActiveBackendSettlement(null);
+        return null;
+      }
+
+      const fullSettlement = await fetchBackendSettlementById(current.id);
+      setActiveBackendSettlement(fullSettlement);
+      return fullSettlement;
+    } catch (error) {
+      console.error('Failed to load backend settlement:', error);
+      setSettlementBackendStatus(`Could not load database settlement: ${error.message}`);
+      return null;
+    } finally {
+      setSettlementBackendLoading(false);
+    }
+  };
+
+  const createBackendSettlement = async () => {
+    if (!activeSettlementDriverId || !settlementStartDate || !settlementEndDate) {
+      setSettlementBackendStatus('Choose a driver and week before creating a database settlement.');
+      return null;
+    }
+
+    setSettlementBackendLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/driver-settlements`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          driverId: activeSettlementDriverId,
+          periodStart: settlementStartDate,
+          periodEnd: settlementEndDate,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to create settlement');
+      }
+
+      setActiveBackendSettlement(data);
+      setSettlementBackendStatus(`Database settlement created for ${settlementPeriodLabel}.`);
+      await fetchActiveBackendSettlement();
+      return data;
+    } catch (error) {
+      console.error('Failed to create backend settlement:', error);
+      setSettlementBackendStatus(`Failed to create database settlement: ${error.message}`);
+      return null;
+    } finally {
+      setSettlementBackendLoading(false);
+    }
+  };
+
+  const ensureBackendSettlement = async () => {
+    if (activeBackendSettlement?.id) return activeBackendSettlement;
+    return createBackendSettlement();
+  };
+
+  useEffect(() => {
+    if (activeView !== 'settlements') return;
+    fetchActiveBackendSettlement();
+  }, [activeView, activeSettlementDriverId, settlementStartDate, settlementEndDate, authToken]);
 
   const getSettlementAppointmentDateValue = (load) => {
     const appointmentTime = String(load.appointmentTime || '').trim();
@@ -3908,9 +4023,37 @@ const handleSaveDeductionReason = () => {
 const getSettlementDeductionDetail = (load) =>
   settlementDeductionDetails[load.id] || '';
 
-const handleAddManualSettlementLoad = (loadId) => {
+const handleAddManualSettlementLoad = async (loadId) => {
   const load = loadsData.find((item) => item.id === loadId);
   if (!load) return;
+
+  const backendSettlement = await ensureBackendSettlement();
+  if (!backendSettlement?.id) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/driver-settlements/${backendSettlement.id}/loads`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        loadId,
+        payAmount: getSettlementPayValue(load, 'driverRate'),
+        movesCount: load.movesCount || 1,
+        description: `Extra load added from ${formatAppointmentTime(load.appointmentTime) || 'outside period'}`,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to add load to settlement');
+    }
+    setActiveBackendSettlement(data);
+  } catch (error) {
+    console.error('Failed to add backend settlement load:', error);
+    setSettlementBackendStatus(`Failed to save extra load: ${error.message}`);
+    return;
+  }
 
   setSettlementManualLoadIds((prev) => {
     const existing = prev[settlementManualLoadKey] || [];
@@ -3923,16 +4066,45 @@ const handleAddManualSettlementLoad = (loadId) => {
   setSelectedSettlementLoadId(loadId);
   setSettlementManualLoadSearch('');
   setSettlementPayStatus(`Added ${load.containerNumber || load.id} to this settlement.`);
+  setSettlementBackendStatus(`Saved ${load.containerNumber || load.id} to the database settlement.`);
 };
 
-const handleRemoveManualSettlementLoad = (loadId) => {
+const handleRemoveManualSettlementLoad = async (loadId) => {
   const load = loadsData.find((item) => item.id === loadId);
+  const backendLine = activeBackendSettlement?.statement?.loads?.find(
+    (item) => item.loadId === loadId && item.source === 'manual'
+  );
+
+  if (activeBackendSettlement?.id && backendLine?.settlementLoadId) {
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/driver-settlements/${activeBackendSettlement.id}/loads/${backendLine.settlementLoadId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to remove load from settlement');
+      }
+      setActiveBackendSettlement(data);
+    } catch (error) {
+      console.error('Failed to remove backend settlement load:', error);
+      setSettlementBackendStatus(`Failed to remove extra load: ${error.message}`);
+      return;
+    }
+  }
+
   setSettlementManualLoadIds((prev) => ({
     ...prev,
     [settlementManualLoadKey]: (prev[settlementManualLoadKey] || []).filter((id) => id !== loadId),
   }));
   setSelectedSettlementLoadId((current) => (current === loadId ? '' : current));
   setSettlementPayStatus(`Removed ${load?.containerNumber || loadId} from this settlement.`);
+  setSettlementBackendStatus(`Removed ${load?.containerNumber || loadId} from the database settlement.`);
 };
 
 const handleCustomDeductionDraftChange = (field, value) => {
@@ -3943,7 +4115,7 @@ const handleCustomDeductionDraftChange = (field, value) => {
   setSettlementPayStatus('');
 };
 
-const handleAddSettlementCustomDeduction = () => {
+const handleAddSettlementCustomDeduction = async () => {
   const name = settlementCustomDeductionDraft.name.trim();
   const description = settlementCustomDeductionDraft.description.trim();
   const type = settlementCustomDeductionDraft.type || 'fixed';
@@ -3960,6 +4132,37 @@ const handleAddSettlementCustomDeduction = () => {
     return;
   }
 
+  const deductionAmount =
+    type === 'percent'
+      ? settlementTripPayTotalNumber * (numericAmount / 100)
+      : numericAmount;
+
+  const backendSettlement = await ensureBackendSettlement();
+  if (!backendSettlement?.id) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/driver-settlements/${backendSettlement.id}/deductions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        description: [name, description].filter(Boolean).join(' - '),
+        amount: -Math.abs(deductionAmount),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to add deduction');
+    }
+    setActiveBackendSettlement(data);
+  } catch (error) {
+    console.error('Failed to add backend deduction:', error);
+    setSettlementBackendStatus(`Failed to save deduction: ${error.message}`);
+    return;
+  }
+
   setSettlementCustomDeductions((prev) => ({
     ...prev,
     [settlementCustomDeductionKey]: [
@@ -3970,7 +4173,7 @@ const handleAddSettlementCustomDeduction = () => {
         description,
         type,
         percent: type === 'percent' ? amount : '',
-        amount: type === 'percent' ? formatMoney(settlementTripPayTotalNumber * (numericAmount / 100)) : amount,
+        amount: type === 'percent' ? formatMoney(deductionAmount) : amount,
       },
     ],
   }));
@@ -3982,6 +4185,7 @@ const handleAddSettlementCustomDeduction = () => {
 
   setSettlementCustomDeductionDraft({ name: '', description: '', type: 'fixed', amount: '' });
   setSettlementPayStatus(`Custom deduction added: ${name}`);
+  setSettlementBackendStatus(`Saved deduction to the database settlement: ${name}`);
 };
 
 const handleRemoveSettlementCustomDeduction = (deductionId) => {
@@ -9697,6 +9901,37 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             </div>
           )}
 
+          <div className="settlement-period-note">
+            <p>
+              {activeBackendSettlement?.id
+                ? `Database settlement ready: ${formatMoney(activeBackendSettlement.statement?.totals?.netPay || 0)} net pay, ${activeBackendSettlement.statement?.totals?.loadCount || 0} load(s), version ${activeBackendSettlement.statement?.settlement?.version || activeBackendSettlement.version || 1}.`
+                : settlementStartDate && settlementEndDate
+                  ? 'No database settlement has been created for this driver/week yet.'
+                  : 'Choose a driver and week to create a database settlement.'}
+            </p>
+            {settlementBackendStatus && <p>{settlementBackendStatus}</p>}
+            <div className="settlement-period-actions">
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={activeBackendSettlement?.id ? fetchActiveBackendSettlement : createBackendSettlement}
+                disabled={settlementBackendLoading || !activeSettlementDriverId || !settlementStartDate || !settlementEndDate}
+              >
+                {activeBackendSettlement?.id ? 'Refresh Database Settlement' : 'Create Database Settlement'}
+              </button>
+              {activeBackendSettlement?.id && (
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={fetchActiveBackendSettlement}
+                  disabled={settlementBackendLoading}
+                >
+                  Reload
+                </button>
+              )}
+            </div>
+          </div>
+
           <div className="settlement-entry-grid">
             <label className="settlement-entry-field settlement-entry-driver">
               <span>Driver</span>
@@ -10234,6 +10469,85 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             </table>
           </div>
         </section>
+
+        {activeBackendSettlement?.statement && (
+          <section className="panel settlement-detail-panel">
+            <div className="panel-header">
+              <div>
+                <h3>Database Settlement Statement</h3>
+                <p className="panel-subtitle">
+                  Audited backend statement for {activeBackendSettlement.statement.driver?.id} - {activeBackendSettlement.statement.driver?.name}
+                </p>
+              </div>
+              <div className="details-actions">
+                <span>Gross {formatMoney(activeBackendSettlement.statement.totals?.grossPay || 0)}</span>
+                <span>Net {formatMoney(activeBackendSettlement.statement.totals?.netPay || 0)}</span>
+              </div>
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Appointment</th>
+                    <th>Load</th>
+                    <th>Customer</th>
+                    <th>Container</th>
+                    <th>Source</th>
+                    <th>Pay</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(activeBackendSettlement.statement.loads || []).length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="settlement-empty-cell">No database settlement loads yet.</td>
+                    </tr>
+                  ) : (
+                    activeBackendSettlement.statement.loads.map((line) => (
+                      <tr key={line.settlementLoadId}>
+                        <td>{formatAppointmentTime(line.appointmentTime) || '-'}</td>
+                        <td>{line.loadId || line.description || '-'}</td>
+                        <td>{line.customer || '-'}</td>
+                        <td>{line.containerNumber || '-'}</td>
+                        <td>{line.source || 'auto'}</td>
+                        <td>{formatMoney(line.payAmount)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Adjustment</th>
+                    <th>Added By</th>
+                    <th>Date</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(activeBackendSettlement.statement.deductions || []).length === 0 ? (
+                    <tr>
+                      <td colSpan="4" className="settlement-empty-cell">No database deductions or reimbursements yet.</td>
+                    </tr>
+                  ) : (
+                    activeBackendSettlement.statement.deductions.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.description}</td>
+                        <td>{item.addedBy || '-'}</td>
+                        <td>{formatDateTime(item.createdAt)}</td>
+                        <td>{formatMoney(item.amount)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
         <section className="panel settlement-detail-panel">
           <div className="panel-header">

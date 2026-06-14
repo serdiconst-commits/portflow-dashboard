@@ -548,6 +548,104 @@ db.run(`ALTER TABLE loads ADD COLUMN carrierId TEXT`, (err) => {
   }
 });
 
+[
+  ['payType', 'TEXT'],
+  ['payPerMileRate', 'REAL DEFAULT 0'],
+  ['payPerLoadRate', 'REAL DEFAULT 0'],
+  ['payPercentageRate', 'REAL DEFAULT 0'],
+  ['payHourlyRate', 'REAL DEFAULT 0'],
+  ['dispatchPercentage', 'REAL DEFAULT 0'],
+  ['driverSplitPercentage', 'REAL DEFAULT 100'],
+  ['weeklyInsurance', 'REAL DEFAULT 0'],
+  ['weeklyOccupationalAccident', 'REAL DEFAULT 0'],
+].forEach(([column, definition]) => {
+  db.run(`ALTER TABLE drivers ADD COLUMN ${column} ${definition}`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error(`Error adding ${column} column to drivers:`, err.message);
+    }
+  });
+});
+
+[
+  ['miles', 'REAL DEFAULT 0'],
+  ['tonnage', 'REAL DEFAULT 0'],
+  ['movesCount', 'INTEGER DEFAULT 1'],
+  ['hoursWorked', 'REAL DEFAULT 0'],
+].forEach(([column, definition]) => {
+  db.run(`ALTER TABLE loads ADD COLUMN ${column} ${definition}`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error(`Error adding ${column} column to loads:`, err.message);
+    }
+  });
+});
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS settlements (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    driverId TEXT NOT NULL,
+    periodStart TEXT NOT NULL,
+    periodEnd TEXT NOT NULL,
+    status TEXT DEFAULT 'Draft',
+    grossPay REAL DEFAULT 0,
+    deductionsTotal REAL DEFAULT 0,
+    netPay REAL DEFAULT 0,
+    statementJson TEXT,
+    version INTEGER DEFAULT 1,
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL,
+    createdBy TEXT
+  )
+`);
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_settlements_company_driver_period
+  ON settlements(companyId, driverId, periodStart, periodEnd)
+`);
+db.run(`
+  CREATE TABLE IF NOT EXISTS settlement_loads (
+    id TEXT PRIMARY KEY,
+    settlementId TEXT NOT NULL,
+    loadId TEXT,
+    payAmount REAL DEFAULT 0,
+    movesCount INTEGER DEFAULT 1,
+    description TEXT,
+    source TEXT DEFAULT 'auto',
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (settlementId) REFERENCES settlements(id) ON DELETE CASCADE
+  )
+`);
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_settlement_loads_settlement
+  ON settlement_loads(settlementId)
+`);
+db.run(`
+  CREATE TABLE IF NOT EXISTS deductions (
+    id TEXT PRIMARY KEY,
+    settlement_id TEXT NOT NULL,
+    description TEXT NOT NULL,
+    amount REAL NOT NULL,
+    added_by TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (settlement_id) REFERENCES settlements(id) ON DELETE CASCADE
+  )
+`);
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_deductions_settlement
+  ON deductions(settlement_id)
+`);
+db.run(`
+  CREATE TABLE IF NOT EXISTS settlement_audit_logs (
+    id TEXT PRIMARY KEY,
+    settlementId TEXT NOT NULL,
+    action TEXT NOT NULL,
+    oldValue TEXT,
+    newValue TEXT,
+    changedBy TEXT,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (settlementId) REFERENCES settlements(id) ON DELETE CASCADE
+  )
+`);
+
     // DOCUMENTS TABLE
     db.run(`
       CREATE TABLE IF NOT EXISTS documents (
