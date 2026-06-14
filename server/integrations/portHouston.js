@@ -31,6 +31,29 @@ const EQUIPMENT_HISTORY_FIELDS = [
   'note',
 ].join(',');
 
+const GATE_TRANSACTION_FIELDS = [
+  'gkey',
+  'nbr',
+  'subType',
+  'status',
+  'stageId',
+  'handled',
+  'created',
+  'changed',
+  'truckLicenseNbr',
+  'trkcoId',
+  'ctrId',
+  'unitId',
+  'lineId',
+  'ctrTypeId',
+  'chsId',
+  'eqoNbr',
+  'blNbr',
+  'sealNbr1',
+  'hasDocuments',
+  'scope.facility_id',
+].join(',');
+
 const DEFAULT_API_BASE = 'https://api.america.naviscloudops.com/v3/evp';
 const DEFAULT_AUTH_URL =
   'https://auth-v1.america.naviscloudops.com/auth/realms/phaprod/protocol/openid-connect/token';
@@ -301,6 +324,68 @@ const portHoustonFetch = async (path, query = {}, credentials = {}) => {
   return data;
 };
 
+const portHoustonFetchBuffer = async (path, query = {}, credentials = {}) => {
+  const configs = getConfigCandidates(credentials);
+  let token = '';
+  let config = null;
+  const authErrors = [];
+
+  for (const candidate of configs) {
+    try {
+      assertConfigured(candidate);
+      token = await requestToken(candidate);
+      config = candidate;
+      break;
+    } catch (error) {
+      authErrors.push(error);
+      if (error.status !== 401) {
+        throw error;
+      }
+    }
+  }
+
+  if (!config || !token) {
+    throw authErrors.at(-1) || new Error('Failed to authenticate with Port Houston API.');
+  }
+
+  const url = /^https?:\/\//i.test(String(path))
+    ? new URL(path)
+    : new URL(`${config.apiBase}${path}`);
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      url.searchParams.set(key, value);
+    }
+  });
+
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/pdf,image/*,application/octet-stream,*/*',
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const contentType = res.headers.get('content-type') || 'application/pdf';
+  const buffer = Buffer.from(await res.arrayBuffer());
+
+  if (!res.ok) {
+    const bodyText = buffer.toString('utf8').slice(0, 500);
+    const error = new Error(bodyText || 'Port Houston document download failed.');
+    error.status = res.status || 502;
+    error.response = bodyText;
+    throw error;
+  }
+
+  if (contentType.includes('application/json')) {
+    const bodyText = buffer.toString('utf8');
+    const error = new Error(`Port Houston document endpoint returned JSON instead of a document: ${bodyText.slice(0, 300)}`);
+    error.status = 502;
+    error.response = bodyText;
+    throw error;
+  }
+
+  return { buffer, contentType };
+};
+
 const unwrapRecords = (response) => {
   if (Array.isArray(response)) return response;
   if (Array.isArray(response?.data)) return response.data;
@@ -423,6 +508,36 @@ const normalizeAvailability = (response) => {
   };
 };
 
+const normalizeGateTransaction = (record = {}) => ({
+  gkey: getFirstValue(record, ['gkey']),
+  nbr: getFirstValue(record, ['nbr']),
+  subType: String(getFirstValue(record, ['subType']) || '').trim().toUpperCase(),
+  status: getFirstValue(record, ['status']),
+  stageId: getFirstValue(record, ['stageId']),
+  handled: getFirstValue(record, ['handled']),
+  created: getFirstValue(record, ['created']),
+  changed: getFirstValue(record, ['changed']),
+  truckLicenseNbr: getFirstValue(record, ['truckLicenseNbr']),
+  truckingCompany: getFirstValue(record, ['trkcoId']),
+  containerNumber: getFirstValue(record, ['ctrId', 'unitId']),
+  shipLine: getFirstValue(record, ['lineId']),
+  containerSize: getFirstValue(record, ['ctrTypeId']),
+  chassisNumber: getFirstValue(record, ['chsId']),
+  bookingNumber: getFirstValue(record, ['eqoNbr']),
+  billOfLading: getFirstValue(record, ['blNbr']),
+  sealNumber: getFirstValue(record, ['sealNbr1']),
+  hasDocuments: normalizeBoolean(getFirstValue(record, ['hasDocuments'])),
+  terminal: getFirstValue(record, ['scope.facility_id', 'facility', 'facilityId', 'terminalId']),
+  raw: record,
+});
+
+const sortGateTransactions = (transactions = []) =>
+  [...transactions].sort((a, b) => {
+    const bTime = Date.parse(b.handled || b.changed || b.created || '') || 0;
+    const aTime = Date.parse(a.handled || a.changed || a.created || '') || 0;
+    return bTime - aTime;
+  });
+
 export const getContainerAvailability = async (containerNumber, credentials = {}, facility = '') => {
   const response = await portHoustonFetch('/inventory/units/', {
     operator: 'POHA',
@@ -467,6 +582,41 @@ export const getGateHistory = async (containerNumber, credentials = {}, facility
     lastGateMove: events[0] || null,
     raw: response,
   };
+};
+
+export const getGateTransactionsByContainer = async (containerNumber, credentials = {}, facility = '') => {
+  const response = await portHoustonFetch('/road/gatetransactions', {
+    operator: 'POHA',
+    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
+    predicate: `ctrId=${containerNumber}`,
+    fields: GATE_TRANSACTION_FIELDS,
+  }, credentials);
+
+  const transactions = sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+  return {
+    transactions,
+    outEirTransaction: transactions.find((item) =>
+      ['RO', 'RM', 'DM', 'DI', 'DE'].includes(item.subType) && item.hasDocuments === true
+    ) || null,
+    inEirTransaction: transactions.find((item) =>
+      ['RI', 'RE', 'RC', 'RB'].includes(item.subType) && item.hasDocuments === true
+    ) || null,
+    raw: response,
+  };
+};
+
+export const downloadGateTransactionDocument = async (transactionId, credentials = {}) => {
+  const cleanId = String(transactionId || '').trim();
+  if (!cleanId) {
+    throw new Error('Gate transaction number is required to download EIR.');
+  }
+
+  const pattern = process.env.PORT_HOUSTON_EIR_DOCUMENT_URL_PATTERN || '';
+  const endpoint = pattern
+    ? pattern.replaceAll('{id}', encodeURIComponent(cleanId))
+    : `/road/gatetransactions/${encodeURIComponent(cleanId)}/documents`;
+
+  return portHoustonFetchBuffer(endpoint, {}, credentials);
 };
 
 export const isPortHoustonConfigured = () => {

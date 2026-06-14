@@ -101,9 +101,11 @@ import { fileURLToPath } from 'url';
 import { db, initDatabase } from './database.js';
 import createInvoiceRoutes from './routes/invoices.js';
 import {
+  downloadGateTransactionDocument,
   getBolAvailability,
   getContainerAvailability,
   getGateHistory,
+  getGateTransactionsByContainer,
   getPortHoustonFacilityCode,
 } from './integrations/portHouston.js';
 
@@ -422,6 +424,95 @@ const ensureExternalDocumentRecord = ({
     );
   });
 
+const getPortHoustonTransactionId = (transaction = {}) =>
+  String(transaction.nbr || transaction.gkey || '').trim();
+
+const getPortHoustonEirCategory = (transaction = {}) => {
+  const subType = String(transaction.subType || '').trim().toUpperCase();
+  if (['RI', 'RE', 'RC', 'RB'].includes(subType)) return 'IN EIR';
+  if (['RO', 'RM', 'DM', 'DI', 'DE'].includes(subType)) return 'OUT EIR';
+  return '';
+};
+
+const ensureDownloadedPortHoustonDocument = ({
+  loadId,
+  companyId,
+  category,
+  transaction,
+  document,
+}) =>
+  new Promise((resolve, reject) => {
+    const transactionId = getPortHoustonTransactionId(transaction);
+    if (!transactionId || !document?.buffer?.length) {
+      resolve(null);
+      return;
+    }
+
+    db.get(
+      `SELECT d.*
+       FROM documents d
+       JOIN loads l ON l.id = d.loadId
+       WHERE d.loadId = ?
+         AND l.companyId = ?
+         AND UPPER(TRIM(d.category)) = ?
+         AND d.name LIKE ?`,
+      [loadId, companyId, category, `%${transactionId}%`],
+      (findErr, existingDoc) => {
+        if (findErr) {
+          reject(findErr);
+          return;
+        }
+
+        if (existingDoc) {
+          resolve(existingDoc);
+          return;
+        }
+
+        const id = uuidv4();
+        const uploadedAt = new Date().toISOString();
+        const extension = String(document.contentType || '').toLowerCase().includes('image') ? 'jpg' : 'pdf';
+        const safeLoadId = String(loadId).replace(/[^a-z0-9_-]/gi, '-');
+        const fileName = `${safeLoadId}-${category.replace(/\s+/g, '-').toLowerCase()}-${transactionId}.${extension}`;
+        const filePath = path.join(uploadsDir, fileName);
+
+        fs.writeFileSync(filePath, document.buffer);
+
+        db.run(
+          `INSERT INTO documents (id, loadId, name, size, type, category, filePath, uploadedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            id,
+            loadId,
+            fileName,
+            `${(document.buffer.length / 1024).toFixed(1)} KB`,
+            document.contentType || 'application/pdf',
+            category,
+            filePath,
+            uploadedAt,
+          ],
+          (insertErr) => {
+            if (insertErr) {
+              reject(insertErr);
+              return;
+            }
+
+            resolve({
+              id,
+              loadId,
+              name: fileName,
+              size: `${(document.buffer.length / 1024).toFixed(1)} KB`,
+              type: document.contentType || 'application/pdf',
+              category,
+              filePath,
+              uploadedAt,
+              url: `/uploads/${path.basename(filePath)}`,
+            });
+          }
+        );
+      }
+    );
+  });
+
 const updateLoadFromPortHoustonCheck = ({
   load,
   companyId,
@@ -450,21 +541,27 @@ const updateLoadFromPortHoustonCheck = ({
         }
 
         try {
-          const syncedDocuments = [];
-          const outDoc = await ensureExternalDocumentRecord({
-            loadId: load.id,
-            companyId,
-            category: 'OUT EIR',
-            url: eir?.out?.url || '',
-          });
+          const syncedDocuments = [...(eir?.downloadedDocuments || [])];
+          const outUrl = eir?.out?.url || '';
+          const outDoc = /^https?:\/\//i.test(outUrl)
+            ? await ensureExternalDocumentRecord({
+                loadId: load.id,
+                companyId,
+                category: 'OUT EIR',
+                url: outUrl,
+              })
+            : null;
           if (outDoc) syncedDocuments.push(outDoc);
 
-          const inDoc = await ensureExternalDocumentRecord({
-            loadId: load.id,
-            companyId,
-            category: 'IN EIR',
-            url: eir?.in?.url || '',
-          });
+          const inUrl = eir?.in?.url || '';
+          const inDoc = /^https?:\/\//i.test(inUrl)
+            ? await ensureExternalDocumentRecord({
+                loadId: load.id,
+                companyId,
+                category: 'IN EIR',
+                url: inUrl,
+              })
+            : null;
           if (inDoc) syncedDocuments.push(inDoc);
 
           db.get(
@@ -1754,30 +1851,99 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
     const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials, facility) : null;
     const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials, facility) : null;
     const gate = containerNumber ? await getGateHistory(containerNumber, credentials, facility) : null;
-    const portDocumentSignals = getPortHoustonDocumentSignals({ availability, bolAvailability, gate });
-    const outEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate }, 'OUT EIR');
-    const inEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate }, 'IN EIR');
+    let gateTransactions = null;
+    try {
+      gateTransactions = containerNumber
+        ? await getGateTransactionsByContainer(containerNumber, credentials, facility)
+        : null;
+    } catch (gateTransactionErr) {
+      gateTransactions = {
+        transactions: [],
+        outEirTransaction: null,
+        inEirTransaction: null,
+        error: gateTransactionErr.message,
+      };
+    }
+
+    const portDocumentSignals = getPortHoustonDocumentSignals({ availability, bolAvailability, gate, gateTransactions });
+    const outEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate, gateTransactions }, 'OUT EIR');
+    const inEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate, gateTransactions }, 'IN EIR');
+    const downloadedDocuments = [];
+    const eirDownloadErrors = [];
+
+    for (const transaction of [
+      gateTransactions?.outEirTransaction,
+      gateTransactions?.inEirTransaction,
+    ].filter(Boolean)) {
+      const category = getPortHoustonEirCategory(transaction);
+      const transactionId = getPortHoustonTransactionId(transaction);
+      if (!category || !transactionId) continue;
+
+      try {
+        const document = await downloadGateTransactionDocument(transactionId, credentials);
+        const savedDoc = await ensureDownloadedPortHoustonDocument({
+          loadId,
+          companyId,
+          category,
+          transaction,
+          document,
+        });
+        if (savedDoc) downloadedDocuments.push(savedDoc);
+      } catch (downloadErr) {
+        eirDownloadErrors.push({
+          category,
+          transactionId,
+          message: downloadErr.message,
+        });
+      }
+    }
+
+    const downloadedOutDoc = downloadedDocuments.find((doc) => doc.category === 'OUT EIR');
+    const downloadedInDoc = downloadedDocuments.find((doc) => doc.category === 'IN EIR');
+    const outTransactionId = getPortHoustonTransactionId(gateTransactions?.outEirTransaction);
+    const inTransactionId = getPortHoustonTransactionId(gateTransactions?.inEirTransaction);
     const eir = {
-      out: outEirUrl
+      out: downloadedOutDoc
+        ? {
+            url: `/api/documents/${downloadedOutDoc.id}/file`,
+            source: 'Port Houston',
+            transactionNumber: outTransactionId,
+          }
+        : outEirUrl
         ? {
             url: outEirUrl,
             source: 'Port Houston',
+            transactionNumber: outTransactionId,
           }
         : null,
-      in: inEirUrl
+      in: downloadedInDoc
+        ? {
+            url: `/api/documents/${downloadedInDoc.id}/file`,
+            source: 'Port Houston',
+            transactionNumber: inTransactionId,
+          }
+        : inEirUrl
         ? {
             url: inEirUrl,
             source: 'Port Houston',
+            transactionNumber: inTransactionId,
           }
         : null,
       hasPortDocuments: portDocumentSignals.hasDocuments,
       transactionNumbers: portDocumentSignals.transactionNumbers,
       documentUrlsFound: portDocumentSignals.documentUrls.length,
-      note: outEirUrl || inEirUrl
-        ? 'EIR document links were returned by Port Houston and synced to paperwork.'
-        : portDocumentSignals.hasDocuments
-          ? 'Port Houston says this transaction has documents, but no downloadable EIR URL was returned in the checked response. A gate transaction document endpoint may still need to be confirmed by Port Houston.'
-        : 'No EIR document link was returned by Port Houston for this check.',
+      downloadedDocuments,
+      downloadErrors: eirDownloadErrors,
+      gateTransactionError: gateTransactions?.error || '',
+      note: downloadedDocuments.length
+        ? 'Port Houston EIR document was downloaded and synced to paperwork.'
+        : outEirUrl || inEirUrl
+          ? 'EIR document links were returned by Port Houston and synced to paperwork.'
+          : portDocumentSignals.hasDocuments
+            ? `Port Houston found EIR document flag on transaction ${portDocumentSignals.transactionNumbers.join(', ')}, but the document download endpoint did not return a file yet.`
+            : gateTransactions?.error
+              ? `Gate transaction lookup failed: ${gateTransactions.error}`
+              : 'No EIR document was returned by Port Houston for this check.',
     };
     const response = {
       loadId,
@@ -1787,6 +1953,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       availability,
       bolAvailability,
       gate,
+      gateTransactions,
       eir,
     };
 
