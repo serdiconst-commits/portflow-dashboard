@@ -5299,6 +5299,210 @@ const handleChangeUserRole = async (userId, newRole) => {
     printWindow.focus();
     printWindow.print();
   };
+
+  const handleExportBackendSettlementCsv = () => {
+    const statement = activeBackendSettlement?.statement;
+    if (!statement) return;
+
+    const summaryRows = [
+      ['Gross Pay', statement.totals?.grossPay],
+      ['Adjustments Total', statement.totals?.adjustmentsTotal],
+      ['Net Pay', statement.totals?.netPay],
+      ['Load Count', statement.totals?.loadCount],
+    ].map(([label, amount]) => ({
+      Type: 'Summary',
+      Driver: `${statement.driver?.id || ''} - ${statement.driver?.name || ''}`.trim(),
+      Period: `${statement.settlement?.periodStart || ''} to ${statement.settlement?.periodEnd || ''}`,
+      Date: '',
+      Load: '',
+      Customer: '',
+      Container: '',
+      Reference: label,
+      Source: '',
+      Description: '',
+      Amount: formatMoney(amount || 0),
+    }));
+
+    const loadRows = (statement.loads || []).map((line) => ({
+      Type: 'Load Pay',
+      Driver: `${statement.driver?.id || ''} - ${statement.driver?.name || ''}`.trim(),
+      Period: `${statement.settlement?.periodStart || ''} to ${statement.settlement?.periodEnd || ''}`,
+      Date: formatAppointmentTime(line.appointmentTime) || '',
+      Load: line.loadId || '',
+      Customer: line.customer || '',
+      Container: line.containerNumber || '',
+      Reference: line.referenceNumber || '',
+      Source: line.source || 'auto',
+      Description: line.description || '',
+      Amount: formatMoney(line.payAmount || 0),
+    }));
+
+    const deductionRows = (statement.deductions || []).map((item) => ({
+      Type: parseMoney(item.amount) < 0 ? 'Deduction' : 'Reimbursement',
+      Driver: `${statement.driver?.id || ''} - ${statement.driver?.name || ''}`.trim(),
+      Period: `${statement.settlement?.periodStart || ''} to ${statement.settlement?.periodEnd || ''}`,
+      Date: formatDateTime(item.createdAt),
+      Load: '',
+      Customer: '',
+      Container: '',
+      Reference: '',
+      Source: item.addedBy || '',
+      Description: item.description || '',
+      Amount: formatMoney(item.amount || 0),
+    }));
+
+    const exportRows = [...summaryRows, ...loadRows, ...deductionRows];
+    const headers = Object.keys(exportRows[0] || {
+      Type: '',
+      Driver: '',
+      Period: '',
+      Date: '',
+      Load: '',
+      Customer: '',
+      Container: '',
+      Reference: '',
+      Source: '',
+      Description: '',
+      Amount: '',
+    });
+
+    const csv = [
+      headers.join(','),
+      ...exportRows.map((row) =>
+        headers
+          .map((header) => `"${String(row[header] ?? '').replace(/"/g, '""')}"`)
+          .join(',')
+      ),
+    ].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const driverSlug = (statement.driver?.name || 'driver')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+    link.href = url;
+    link.download = `database-settlement-${driverSlug}-${statement.settlement?.periodStart || 'start'}-${statement.settlement?.periodEnd || 'end'}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handlePrintBackendSettlementReport = () => {
+    const statement = activeBackendSettlement?.statement;
+    if (!statement) return;
+
+    const escapeHtml = (value) =>
+      String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
+    const loadsHtml = (statement.loads || [])
+      .map(
+        (line) => `
+          <tr>
+            <td>${escapeHtml(formatAppointmentTime(line.appointmentTime) || '-')}</td>
+            <td>${escapeHtml(line.loadId || line.description || '-')}</td>
+            <td>${escapeHtml(line.customer || '-')}</td>
+            <td>${escapeHtml(line.containerNumber || '-')}</td>
+            <td>${escapeHtml(line.referenceNumber || '-')}</td>
+            <td>${escapeHtml(line.source || 'auto')}</td>
+            <td>${escapeHtml(formatMoney(line.payAmount || 0))}</td>
+          </tr>
+        `
+      )
+      .join('');
+
+    const adjustmentsHtml = (statement.deductions || [])
+      .map(
+        (item) => `
+          <tr>
+            <td>${parseMoney(item.amount) < 0 ? 'Deduction' : 'Reimbursement'}</td>
+            <td>${escapeHtml(item.description || '-')}</td>
+            <td>${escapeHtml(item.addedBy || '-')}</td>
+            <td>${escapeHtml(formatDateTime(item.createdAt))}</td>
+            <td>${escapeHtml(formatMoney(item.amount || 0))}</td>
+          </tr>
+        `
+      )
+      .join('');
+
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Database Settlement Payroll Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
+            h1 { margin: 0 0 8px; }
+            p { margin: 0 0 10px; color: #4b5563; }
+            .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 18px 0; }
+            .box { border: 1px solid #d1d5db; padding: 10px; border-radius: 8px; }
+            .box span { display: block; color: #6b7280; font-size: 12px; margin-bottom: 4px; }
+            h2 { margin: 22px 0 8px; font-size: 18px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+            th, td { border: 1px solid #d1d5db; padding: 10px; text-align: left; font-size: 13px; }
+            th { background: #f3f4f6; }
+            .net { font-size: 18px; }
+          </style>
+        </head>
+        <body>
+          <h1>Database Settlement Payroll Report</h1>
+          <p>Driver: ${escapeHtml(`${statement.driver?.id || ''} - ${statement.driver?.name || ''}`.trim())}</p>
+          <p>Period: ${escapeHtml(statement.settlement?.periodStart || '')} to ${escapeHtml(statement.settlement?.periodEnd || '')}</p>
+          <p>Statement Version: ${escapeHtml(statement.settlement?.version || activeBackendSettlement.version || 1)}</p>
+
+          <div class="summary">
+            <div class="box"><span>Loads</span><strong>${escapeHtml(statement.totals?.loadCount || 0)}</strong></div>
+            <div class="box"><span>Gross Pay</span><strong>${escapeHtml(formatMoney(statement.totals?.grossPay || 0))}</strong></div>
+            <div class="box"><span>Adjustments</span><strong>${escapeHtml(formatMoney(statement.totals?.adjustmentsTotal || 0))}</strong></div>
+            <div class="box"><span>Net Pay</span><strong class="net">${escapeHtml(formatMoney(statement.totals?.netPay || 0))}</strong></div>
+          </div>
+
+          <h2>Loads</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Appointment</th>
+                <th>Load</th>
+                <th>Customer</th>
+                <th>Container</th>
+                <th>Reference</th>
+                <th>Source</th>
+                <th>Pay</th>
+              </tr>
+            </thead>
+            <tbody>${loadsHtml || '<tr><td colspan="7">No loads in this statement</td></tr>'}</tbody>
+          </table>
+
+          <h2>Deductions / Reimbursements</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Description</th>
+                <th>Added By</th>
+                <th>Date</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>${adjustmentsHtml || '<tr><td colspan="5">No deductions or reimbursements</td></tr>'}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
   
 const createInvoiceForLoad = async (load, amountOverride = null) => {
   if (!load) return null;
@@ -10670,6 +10874,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <div className="details-actions">
                 <span>Gross {formatMoney(activeBackendSettlement.statement.totals?.grossPay || 0)}</span>
                 <span>Net {formatMoney(activeBackendSettlement.statement.totals?.netPay || 0)}</span>
+                <button type="button" className="secondary-btn" onClick={handleExportBackendSettlementCsv}>
+                  Export CSV
+                </button>
+                <button type="button" className="primary-btn" onClick={handlePrintBackendSettlementReport}>
+                  Print Report
+                </button>
               </div>
             </div>
 
