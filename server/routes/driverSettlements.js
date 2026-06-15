@@ -9,6 +9,7 @@ import {
   recalculateSettlement,
   removeDeduction,
   removeSettlementLoad,
+  updateDeduction,
   updateSettlement,
 } from '../services/driverSettlements.js';
 
@@ -131,6 +132,23 @@ export default function createDriverSettlementRoutes(db) {
       const settlement = await addDeduction(db, req.company.companyId, req.params.id, req.body || {}, getActor(req));
       if (!settlement) return res.status(404).json({ error: 'Settlement not found.' });
       res.status(201).json(settlement);
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  router.put('/:id/deductions/:deductionId', async (req, res) => {
+    try {
+      const settlement = await updateDeduction(
+        db,
+        req.company.companyId,
+        req.params.id,
+        req.params.deductionId,
+        req.body || {},
+        getActor(req)
+      );
+      if (!settlement) return res.status(404).json({ error: 'Deduction not found.' });
+      res.json(settlement);
     } catch (error) {
       sendError(res, error);
     }

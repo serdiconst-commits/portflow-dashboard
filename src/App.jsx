@@ -1928,6 +1928,7 @@ const [backendDeductionDraft, setBackendDeductionDraft] = useState({
   description: '',
   amount: '',
 });
+const [editingBackendDeductionId, setEditingBackendDeductionId] = useState('');
 const [invoiceLoadId, setInvoiceLoadId] = useState('');
 const [savedInvoices, setSavedInvoices] = useState([]);
 const [invoiceStatusMessage, setInvoiceStatusMessage] = useState('');
@@ -4244,6 +4245,47 @@ const handleBackendDeductionDraftChange = (field, value) => {
   setSettlementBackendStatus('');
 };
 
+const resetBackendDeductionDraft = () => {
+  setEditingBackendDeductionId('');
+  setBackendDeductionDraft({ kind: 'deduction', calculationType: 'flat', description: '', amount: '' });
+};
+
+const handleRemoveSavedBackendDeductionReason = () => {
+  const targetReason = backendDeductionDraft.description.trim();
+  if (!targetReason) {
+    setSettlementBackendStatus('Select or type a saved description to remove.');
+    return;
+  }
+
+  setSavedDeductionReasons((prev) =>
+    prev.filter((reason) => reason.trim().toLowerCase() !== targetReason.toLowerCase())
+  );
+  setBackendDeductionDraft((prev) => ({
+    ...prev,
+    description: prev.description.trim().toLowerCase() === targetReason.toLowerCase() ? '' : prev.description,
+  }));
+  setSettlementBackendStatus(`Removed saved description: ${targetReason}`);
+};
+
+const handleEditBackendDeduction = (item) => {
+  if (!item?.id) return;
+
+  const amount = Math.abs(parseMoney(item.amount));
+  setEditingBackendDeductionId(item.id);
+  setBackendDeductionDraft({
+    kind: parseMoney(item.amount) < 0 ? 'deduction' : 'reimbursement',
+    calculationType: 'flat',
+    description: item.description || '',
+    amount: amount ? amount.toFixed(2) : '',
+  });
+  setSettlementBackendStatus('Editing database deduction. Save adjustment when ready.');
+};
+
+const handleCancelBackendDeductionEdit = () => {
+  resetBackendDeductionDraft();
+  setSettlementBackendStatus('Deduction edit canceled.');
+};
+
 const handleAddBackendDeduction = async () => {
   const kind = backendDeductionDraft.kind === 'reimbursement' ? 'reimbursement' : 'deduction';
   const calculationType = backendDeductionDraft.calculationType === 'percent' ? 'percent' : 'flat';
@@ -4275,10 +4317,11 @@ const handleAddBackendDeduction = async () => {
   const backendSettlement = await ensureBackendSettlement();
   if (!backendSettlement?.id) return;
 
+  const isEditing = Boolean(editingBackendDeductionId);
   setSettlementBackendLoading(true);
   try {
-    const res = await fetch(`${API_BASE}/api/driver-settlements/${backendSettlement.id}/deductions`, {
-      method: 'POST',
+    const res = await fetch(`${API_BASE}/api/driver-settlements/${backendSettlement.id}/deductions${isEditing ? `/${editingBackendDeductionId}` : ''}`, {
+      method: isEditing ? 'PUT' : 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
@@ -4294,12 +4337,12 @@ const handleAddBackendDeduction = async () => {
     }
 
     setActiveBackendSettlement(data);
-    setBackendDeductionDraft({ kind: 'deduction', calculationType: 'flat', description: '', amount: '' });
+    resetBackendDeductionDraft();
     setSettlementBackendStatus(
-      `${kind === 'deduction' ? 'Deduction' : 'Add pay / reimbursement'} saved to the database settlement.`
+      `${kind === 'deduction' ? 'Deduction' : 'Add pay / reimbursement'} ${isEditing ? 'updated' : 'saved'} to the database settlement.`
     );
   } catch (error) {
-    console.error('Failed to add database deduction:', error);
+    console.error('Failed to save database deduction:', error);
     setSettlementBackendStatus(`Failed to save deduction: ${error.message}`);
   } finally {
     setSettlementBackendLoading(false);
@@ -10615,16 +10658,27 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <option value="reimbursement">Add Pay / Reimbursement - add to pay</option>
                 </select>
               </label>
-              <label className="settlement-entry-field">
+              <div className="settlement-entry-field">
                 <span>Description</span>
-                <input
-                  type="search"
-                  list="settlement-deduction-reasons"
-                  placeholder="Driver detention pay, parking, repair, reimbursement"
-                  value={backendDeductionDraft.description}
-                  onChange={(e) => handleBackendDeductionDraftChange('description', e.target.value)}
-                />
-              </label>
+                <div className="settlement-deduction-save-row">
+                  <input
+                    type="search"
+                    list="settlement-deduction-reasons"
+                    placeholder="Driver detention pay, parking, repair, reimbursement"
+                    value={backendDeductionDraft.description}
+                    onChange={(e) => handleBackendDeductionDraftChange('description', e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={handleRemoveSavedBackendDeductionReason}
+                    disabled={settlementBackendLoading}
+                    title="Remove this saved description"
+                  >
+                    X
+                  </button>
+                </div>
+              </div>
               <label className="settlement-entry-field">
                 <span>Calculation</span>
                 <select
@@ -10652,8 +10706,20 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onClick={handleAddBackendDeduction}
                 disabled={settlementBackendLoading}
               >
-                Add {backendDeductionDraft.kind === 'reimbursement' ? 'Pay / Reimbursement' : 'Deduction'}
+                {editingBackendDeductionId
+                  ? 'Save Adjustment'
+                  : `Add ${backendDeductionDraft.kind === 'reimbursement' ? 'Pay / Reimbursement' : 'Deduction'}`}
               </button>
+              {editingBackendDeductionId && (
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={handleCancelBackendDeductionEdit}
+                  disabled={settlementBackendLoading}
+                >
+                  Cancel
+                </button>
+              )}
               {backendDeductionDraft.calculationType === 'percent' && backendDeductionDraft.amount && (
                 <p className="settlement-manual-note">
                   Calculates to {formatMoney(
@@ -10690,6 +10756,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <td>{formatDateTime(item.createdAt)}</td>
                         <td>{formatMoney(item.amount)}</td>
                         <td>
+                          <button
+                            type="button"
+                            className="secondary-btn"
+                            onClick={() => handleEditBackendDeduction(item)}
+                            disabled={settlementBackendLoading}
+                          >
+                            Edit
+                          </button>
                           <button
                             type="button"
                             className="secondary-btn"

@@ -429,6 +429,39 @@ export async function addDeduction(db, companyId, settlementId, input = {}, chan
   return recalculateSettlement(db, companyId, settlementId, changedBy);
 }
 
+export async function updateDeduction(db, companyId, settlementId, deductionId, input = {}, changedBy = '') {
+  const existing = await dbGet(
+    db,
+    `SELECT d.*
+     FROM deductions d
+     JOIN settlements s ON s.id = d.settlement_id
+     WHERE d.id = ? AND d.settlement_id = ? AND s.companyId = ?`,
+    [deductionId, settlementId, companyId]
+  );
+  if (!existing) return null;
+
+  const description = String(input.description || '').trim();
+  if (!description) {
+    throw new Error('Deduction description is required.');
+  }
+
+  const amount = roundMoney(parseMoney(input.amount));
+  const updated = {
+    ...existing,
+    description,
+    amount,
+  };
+
+  await dbRun(db, `UPDATE deductions SET description = ?, amount = ? WHERE id = ? AND settlement_id = ?`, [
+    description,
+    amount,
+    deductionId,
+    settlementId,
+  ]);
+  await writeSettlementAudit(db, settlementId, 'UPDATE_DEDUCTION', existing, updated, changedBy);
+  return recalculateSettlement(db, companyId, settlementId, changedBy);
+}
+
 export async function removeDeduction(db, companyId, settlementId, deductionId, changedBy = '') {
   const existing = await dbGet(
     db,
