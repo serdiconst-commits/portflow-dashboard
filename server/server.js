@@ -80,12 +80,30 @@ const getSanitizedPortHoustonCredentials = (company = {}) => {
     ])
   );
 };
+const defaultPodSettings = {
+  showCompanyInfo: false,
+  showCustomerInfo: true,
+  showPickup: true,
+  showDelivery: true,
+  showReturn: true,
+  showDriverTruck: true,
+  showSignatures: true,
+};
+const parsePodSettings = (company = {}) => {
+  try {
+    const parsed = company.podSettingsJson ? JSON.parse(company.podSettingsJson) : {};
+    return { ...defaultPodSettings, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+  } catch {
+    return defaultPodSettings;
+  }
+};
 const getCompanyPayload = (company = {}) => ({
   id: company.id,
   name: company.name,
   email: company.email,
   invoiceName: company.invoiceName || company.name || '',
   invoiceAddress: company.invoiceAddress || '',
+  podSettings: parsePodSettings(company),
   logoUrl: getCompanyLogoUrl(company),
   portHoustonUsername: company.portHoustonUsername || '',
   portHoustonConfigured: Object.values(getSanitizedPortHoustonCredentials(company)).some((item) => item.configured),
@@ -93,7 +111,7 @@ const getCompanyPayload = (company = {}) => ({
 });
 
 const companyProfileSelect =
-  'id, name, email, logoPath, invoiceName, invoiceAddress, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson';
+  'id, name, email, logoPath, invoiceName, invoiceAddress, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -1282,12 +1300,69 @@ app.get('/api/fuel/summary', authenticate, requireRoles(fuelAccessRoles), (req, 
       const transactions = rows.map(mapFuelTransaction);
       const totalFuelSpend = transactions.reduce((sum, item) => sum + item.amountPaid, 0);
       const totalGallons = transactions.reduce((sum, item) => sum + item.gallons, 0);
+      const weeklyTotalsMap = transactions.reduce((map, item) => {
+        const transactionDate = new Date(item.dateTime);
+        if (Number.isNaN(transactionDate.getTime())) return map;
+
+        const weekStartDate = new Date(transactionDate);
+        const day = weekStartDate.getDay();
+        weekStartDate.setHours(0, 0, 0, 0);
+        weekStartDate.setDate(weekStartDate.getDate() - day);
+
+        const weekEndDate = new Date(weekStartDate);
+        weekEndDate.setDate(weekStartDate.getDate() + 6);
+
+        const weekStart = weekStartDate.toISOString().slice(0, 10);
+        const weekEnd = weekEndDate.toISOString().slice(0, 10);
+        const existing = map.get(weekStart) || {
+          weekStart,
+          weekEnd,
+          totalFuelSpend: 0,
+          totalGallons: 0,
+          count: 0,
+          dailyTotals: Array.from({ length: 7 }, (_, index) => {
+            const date = new Date(weekStartDate);
+            date.setDate(weekStartDate.getDate() + index);
+            return {
+              date: date.toISOString().slice(0, 10),
+              dayName: date.toLocaleDateString('en-US', { weekday: 'long' }),
+              totalFuelSpend: 0,
+              totalGallons: 0,
+              count: 0,
+            };
+          }),
+        };
+
+        existing.totalFuelSpend += item.amountPaid;
+        existing.totalGallons += item.gallons;
+        existing.count += 1;
+        const dailyTotal = existing.dailyTotals[day];
+        if (dailyTotal) {
+          dailyTotal.totalFuelSpend += item.amountPaid;
+          dailyTotal.totalGallons += item.gallons;
+          dailyTotal.count += 1;
+        }
+        map.set(weekStart, existing);
+        return map;
+      }, new Map());
+
+      const weeklyTotals = Array.from(weeklyTotalsMap.values())
+        .map((week) => ({
+          ...week,
+          averagePricePerGallon: week.totalGallons > 0 ? week.totalFuelSpend / week.totalGallons : 0,
+          dailyTotals: (week.dailyTotals || []).map((day) => ({
+            ...day,
+            averagePricePerGallon: day.totalGallons > 0 ? day.totalFuelSpend / day.totalGallons : 0,
+          })),
+        }))
+        .sort((a, b) => String(b.weekStart).localeCompare(String(a.weekStart)));
 
       return res.json({
         totalFuelSpend,
         totalGallons,
         averagePricePerGallon: totalGallons > 0 ? totalFuelSpend / totalGallons : 0,
         count: transactions.length,
+        weeklyTotals,
         transactions,
       });
     }
@@ -1458,6 +1533,58 @@ app.put('/api/company/invoice-branding', authenticate, requireRoles(adminRoles),
               invoiceName: { oldValue: '', newValue: invoiceName },
               invoiceAddress: { oldValue: '', newValue: invoiceAddress },
             },
+          });
+
+          res.json(getCompanyPayload(company));
+        }
+      );
+    }
+  );
+});
+
+app.put('/api/company/pod-settings', authenticate, requireRoles(adminRoles), (req, res) => {
+  const companyId = req.company.companyId;
+  const nextSettings = {
+    ...defaultPodSettings,
+    showCompanyInfo: isTruthy(req.body.showCompanyInfo),
+    showCustomerInfo: req.body.showCustomerInfo === undefined ? true : isTruthy(req.body.showCustomerInfo),
+    showPickup: req.body.showPickup === undefined ? true : isTruthy(req.body.showPickup),
+    showDelivery: req.body.showDelivery === undefined ? true : isTruthy(req.body.showDelivery),
+    showReturn: req.body.showReturn === undefined ? true : isTruthy(req.body.showReturn),
+    showDriverTruck: req.body.showDriverTruck === undefined ? true : isTruthy(req.body.showDriverTruck),
+    showSignatures: req.body.showSignatures === undefined ? true : isTruthy(req.body.showSignatures),
+  };
+
+  db.run(
+    `UPDATE companies
+     SET podSettingsJson = ?
+     WHERE id = ?`,
+    [JSON.stringify(nextSettings), companyId],
+    function (err) {
+      if (err) {
+        console.error('POD settings update error:', err.message);
+        return res.status(500).json({ error: 'Failed to save POD settings.' });
+      }
+
+      db.get(
+        `SELECT ${companyProfileSelect} FROM companies WHERE id = ?`,
+        [companyId],
+        (lookupErr, company) => {
+          if (lookupErr || !company) {
+            console.error('POD settings lookup error:', lookupErr?.message);
+            return res.status(500).json({ error: 'POD settings saved, but profile refresh failed.' });
+          }
+
+          writeAuditLog(req, {
+            action: 'UPDATE_POD_SETTINGS',
+            entityType: 'COMPANY',
+            entityId: companyId,
+            entityLabel: company.name,
+            oldValue: null,
+            newValue: nextSettings,
+            changedFields: Object.fromEntries(
+              Object.entries(nextSettings).map(([key, value]) => [key, { oldValue: '', newValue: value }])
+            ),
           });
 
           res.json(getCompanyPayload(company));

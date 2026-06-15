@@ -3412,6 +3412,25 @@ button:disabled {
   border-top: 1px solid #e5e7eb;
 }
 
+.fuel-weekly-panel {
+  margin: 16px 0;
+}
+
+.fuel-week-row {
+  background: #f8fafc;
+  font-weight: 900;
+}
+
+.fuel-day-row td {
+  background: #ffffff;
+  color: #475569;
+  font-size: 13px;
+}
+
+.fuel-day-row td:first-child {
+  padding-left: 28px;
+}
+
 .fuel-filter-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3585,8 +3604,33 @@ button:disabled {
   gap: 12px;
 }
 
+.pod-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  font-weight: 800;
+}
+
+.settings-toggle-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: #0f4f8f;
+}
+
 @media (max-width: 800px) {
-  .invoice-branding-grid {
+  .invoice-branding-grid,
+  .pod-settings-grid {
     grid-template-columns: 1fr;
   }
 }

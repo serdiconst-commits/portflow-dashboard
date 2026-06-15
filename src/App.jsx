@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { Fragment, useState, useEffect, useRef, useMemo } from 'react';
 import SignatureCanvas from 'react-signature-canvas';
 import { Capacitor } from '@capacitor/core';
 import {
@@ -1086,6 +1086,20 @@ const [invoiceBrandingForm, setInvoiceBrandingForm] = useState({
   invoiceAddress: savedCompany?.invoiceAddress || '',
 });
 const [invoiceBrandingStatus, setInvoiceBrandingStatus] = useState('');
+const defaultPodSettings = {
+  showCompanyInfo: false,
+  showCustomerInfo: true,
+  showPickup: true,
+  showDelivery: true,
+  showReturn: true,
+  showDriverTruck: true,
+  showSignatures: true,
+};
+const [podSettingsForm, setPodSettingsForm] = useState({
+  ...defaultPodSettings,
+  ...(savedCompany?.podSettings || {}),
+});
+const [podSettingsStatus, setPodSettingsStatus] = useState('');
 const [auditLogs, setAuditLogs] = useState([]);
 const [selectedLoadAuditLogs, setSelectedLoadAuditLogs] = useState([]);
 const [driverContainerByLoad, setDriverContainerByLoad] = useState({});
@@ -1261,6 +1275,13 @@ useEffect(() => {
     invoiceAddress: company?.invoiceAddress || '',
   });
 }, [company?.invoiceName, company?.invoiceAddress, company?.name]);
+
+useEffect(() => {
+  setPodSettingsForm({
+    ...defaultPodSettings,
+    ...(company?.podSettings || {}),
+  });
+}, [company?.podSettings]);
 
 const handleLogin = async (e) => {
   e.preventDefault();
@@ -1510,6 +1531,7 @@ const fetchFuelSummary = async (filters = fuelFilters) => {
       totalGallons: Number(data.totalGallons || 0),
       averagePricePerGallon: Number(data.averagePricePerGallon || 0),
       count: Number(data.count || 0),
+      weeklyTotals: Array.isArray(data.weeklyTotals) ? data.weeklyTotals : [],
     });
     setFuelTransactions(Array.isArray(data.transactions) ? data.transactions : []);
   } catch (error) {
@@ -1682,6 +1704,34 @@ const handleOpenFuelReceipt = async (fuel) => {
 
 const exportFuelCsv = () => {
   const rows = [
+    ['Weekly Fuel Comparison'],
+    ['Type', 'Week Start', 'Week End', 'Day', 'Date', 'Transactions', 'Total Spend', 'Total Gallons', 'Average Price Per Gallon'],
+    ...(fuelSummary.weeklyTotals || []).flatMap((week) => [
+      [
+        'Week',
+        week.weekStart || '',
+        week.weekEnd || '',
+        '',
+        '',
+        week.count || 0,
+        Number(week.totalFuelSpend || 0).toFixed(2),
+        Number(week.totalGallons || 0).toFixed(3),
+        Number(week.averagePricePerGallon || 0).toFixed(2),
+      ],
+      ...(week.dailyTotals || []).map((day) => [
+        'Day',
+        week.weekStart || '',
+        week.weekEnd || '',
+        day.dayName || '',
+        day.date || '',
+        day.count || 0,
+        Number(day.totalFuelSpend || 0).toFixed(2),
+        Number(day.totalGallons || 0).toFixed(3),
+        Number(day.averagePricePerGallon || 0).toFixed(2),
+      ]),
+    ]),
+    [],
+    ['Fuel Transactions'],
     ['Date/Time', 'Driver', 'Driver ID', 'Truck', 'Station', 'Load Number', 'Amount Paid', 'Gallons', 'Price Per Gallon'],
     ...fuelTransactions.map((fuel) => [
       fuel.dateTime || '',
@@ -2105,6 +2155,7 @@ const [fuelSummary, setFuelSummary] = useState({
   totalGallons: 0,
   averagePricePerGallon: 0,
   count: 0,
+  weeklyTotals: [],
 });
 const [fuelFilters, setFuelFilters] = useState({
   from: getDateStringWithOffsetInAppTimeZone(-7),
@@ -2640,6 +2691,35 @@ const handleSaveInvoiceBranding = async (e) => {
   } catch (error) {
     console.error('Failed to save invoice branding:', error);
     setInvoiceBrandingStatus(`Failed to save invoice branding: ${error.message}`);
+  }
+};
+
+const handleSavePodSettings = async (e) => {
+  e.preventDefault();
+
+  try {
+    setPodSettingsStatus('');
+    const res = await fetch(`${API_BASE}/api/company/pod-settings`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(podSettingsForm),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save POD settings');
+    }
+
+    setCompany(data);
+    localStorage.setItem('company', JSON.stringify(data));
+    setPodSettingsStatus('POD settings saved.');
+  } catch (error) {
+    console.error('Failed to save POD settings:', error);
+    setPodSettingsStatus(`Failed to save POD settings: ${error.message}`);
   }
 };
 
@@ -6075,6 +6155,73 @@ const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
     loadForPod?.id && signatures[loadForPod.id]
       ? `<img src="${signatures[loadForPod.id]}" alt="Signature" />`
       : '';
+  const podSettings = {
+    ...defaultPodSettings,
+    ...(company?.podSettings || {}),
+  };
+  const podCompanyHtml = podSettings.showCompanyInfo
+    ? `
+      <div class="pod-company-box">
+        <span>Carrier</span>
+        <strong>${escapePodHtml(company?.invoiceName || company?.name || '')}</strong>
+        ${company?.invoiceAddress ? `<p>${escapePodHtml(company.invoiceAddress)}</p>` : ''}
+      </div>
+    `
+    : '';
+  const podMetaFields = [
+    podField('Load ID', loadForPod.id),
+    podField('Reference #', loadForPod.referenceNumber),
+    podField('Load Date', loadForPod.loadDate),
+    podSettings.showCustomerInfo ? podField('Customer', loadForPod.customer) : '',
+    podSettings.showDriverTruck ? podField('Driver', getDriverLabel(loadForPod.driver)) : '',
+    podSettings.showDriverTruck ? podField('Truck', loadForPod.truck) : '',
+    podField('Container', loadForPod.containerNumber),
+    podField('Size', loadForPod.containerSize),
+    podField('Chassis #', loadForPod.chassisNumber),
+    podField('Seal #', loadForPod.sealNumber),
+    podField('Booking #', loadForPod.bookingNumber),
+    podField('POD #', loadForPod.pod),
+  ]
+    .filter(Boolean)
+    .join('');
+  const podAddressFields = [
+    podSettings.showPickup ? podAddress('Pickup', loadForPod.pickup) : '',
+    podSettings.showDelivery ? podAddress('Delivery', getDeliveryDisplay(loadForPod.delivery)) : '',
+    podSettings.showReturn ? podAddress('Return', loadForPod.returnLocation) : '',
+  ]
+    .filter(Boolean)
+    .join('');
+  const podRouteHtml = podAddressFields
+    ? `
+      <h2 class="section-title">Route</h2>
+      <section class="addresses">
+        ${podAddressFields}
+      </section>
+    `
+    : '';
+  const podSignatureHtml = podSettings.showSignatures
+    ? `
+      <h2 class="section-title">Delivery Confirmation</h2>
+      <section class="signature-grid">
+        <div class="signature-card">
+          <span>Delivery Date</span>
+          <div class="signature-line"></div>
+        </div>
+        <div class="signature-card">
+          <span>Receiver Name</span>
+          <div class="signature-line"></div>
+        </div>
+        <div class="signature-card">
+          <span>Receiver Signature</span>
+          <div class="signature-line"></div>
+        </div>
+        <div class="signature-card">
+          <span>Driver Signature</span>
+          ${signatureImage || '<div class="signature-line"></div>'}
+        </div>
+      </section>
+    `
+    : '';
   const modernPodHtml = `
     <html>
       <head>
@@ -6122,6 +6269,28 @@ const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
             font-size: 12px;
             font-weight: 800;
             white-space: nowrap;
+          }
+          .pod-company-box {
+            margin: 14px 0 0;
+            padding: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            border-radius: 8px;
+          }
+          .pod-company-box span {
+            display: block;
+            color: #93c5fd;
+            font-size: 11px;
+            font-weight: 900;
+            text-transform: uppercase;
+          }
+          .pod-company-box strong {
+            display: block;
+            margin-top: 4px;
+            color: #ffffff;
+          }
+          .pod-company-box p {
+            margin: 4px 0 0;
+            color: #cbd5e1;
           }
           .meta-grid {
             display: grid;
@@ -6214,51 +6383,17 @@ const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
             <div>
               <h1>Proof of Delivery</h1>
               <p>Delivery confirmation for load ${escapePodHtml(loadForPod.id)}</p>
+              ${podCompanyHtml}
             </div>
             <div class="status-badge">POD</div>
           </section>
 
           <section class="meta-grid">
-            ${podField('Load ID', loadForPod.id)}
-            ${podField('Reference #', loadForPod.referenceNumber)}
-            ${podField('Load Date', loadForPod.loadDate)}
-            ${podField('Customer', loadForPod.customer)}
-            ${podField('Driver', getDriverLabel(loadForPod.driver))}
-            ${podField('Truck', loadForPod.truck)}
-            ${podField('Container', loadForPod.containerNumber)}
-            ${podField('Size', loadForPod.containerSize)}
-            ${podField('Chassis #', loadForPod.chassisNumber)}
-            ${podField('Seal #', loadForPod.sealNumber)}
-            ${podField('Booking #', loadForPod.bookingNumber)}
-            ${podField('POD #', loadForPod.pod)}
+            ${podMetaFields}
           </section>
 
-          <h2 class="section-title">Route</h2>
-          <section class="addresses">
-            ${podAddress('Pickup', loadForPod.pickup)}
-            ${podAddress('Delivery', getDeliveryDisplay(loadForPod.delivery))}
-            ${podAddress('Return', loadForPod.returnLocation)}
-          </section>
-
-          <h2 class="section-title">Delivery Confirmation</h2>
-          <section class="signature-grid">
-            <div class="signature-card">
-              <span>Delivery Date</span>
-              <div class="signature-line"></div>
-            </div>
-            <div class="signature-card">
-              <span>Receiver Name</span>
-              <div class="signature-line"></div>
-            </div>
-            <div class="signature-card">
-              <span>Receiver Signature</span>
-              <div class="signature-line"></div>
-            </div>
-            <div class="signature-card">
-              <span>Driver Signature</span>
-              ${signatureImage || '<div class="signature-line"></div>'}
-            </div>
-          </section>
+          ${podRouteHtml}
+          ${podSignatureHtml}
 
           <footer class="footer">
             <span>Generated POD</span>
@@ -11825,6 +11960,49 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             </p>
           )}
         </form>
+        <form className="invoice-branding-settings" onSubmit={handleSavePodSettings}>
+          <div className="settings-row-header">
+            <div>
+              <span>POD Display Settings</span>
+              <strong>Choose what appears on generated PODs</strong>
+            </div>
+            <button type="submit" className="primary-btn compact-btn">
+              Save POD Settings
+            </button>
+          </div>
+
+          <div className="pod-settings-grid">
+            {[
+              ['showCompanyInfo', 'Show company information'],
+              ['showCustomerInfo', 'Show customer name'],
+              ['showPickup', 'Show pickup location'],
+              ['showDelivery', 'Show delivery location'],
+              ['showReturn', 'Show return location'],
+              ['showDriverTruck', 'Show driver and truck'],
+              ['showSignatures', 'Show signature section'],
+            ].map(([key, label]) => (
+              <label key={key} className="settings-toggle-row">
+                <input
+                  type="checkbox"
+                  checked={Boolean(podSettingsForm[key])}
+                  onChange={(e) =>
+                    setPodSettingsForm((prev) => ({
+                      ...prev,
+                      [key]: e.target.checked,
+                    }))
+                  }
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+
+          {podSettingsStatus && (
+            <p className={podSettingsStatus.includes('saved') ? 'settings-status success' : 'settings-status error'}>
+              {podSettingsStatus}
+            </p>
+          )}
+        </form>
         <div className="port-houston-settings">
           <div className="settings-row-header">
             <div>
@@ -12166,6 +12344,58 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   placeholder="Truck number"
                 />
               </label>
+            </div>
+
+            <div className="fuel-weekly-panel">
+              <div className="panel-header compact-header">
+                <div>
+                  <h3>Weekly Fuel Comparison</h3>
+                  <p className="panel-subtitle">Compare company fuel spend by week using the filters above.</p>
+                </div>
+                <span>{(fuelSummary.weeklyTotals || []).length} weeks</span>
+              </div>
+
+              {(fuelSummary.weeklyTotals || []).length > 0 ? (
+                <div className="table-wrap accounting-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Week</th>
+                        <th>Transactions</th>
+                        <th>Total Spend</th>
+                        <th>Total Gallons</th>
+                        <th>Avg $/Gal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fuelSummary.weeklyTotals.map((week) => (
+                        <Fragment key={week.weekStart}>
+                          <tr className="fuel-week-row">
+                            <td>{week.weekStart} to {week.weekEnd}</td>
+                            <td>{week.count}</td>
+                            <td>{formatMoney(week.totalFuelSpend)}</td>
+                            <td>{Number(week.totalGallons || 0).toFixed(2)}</td>
+                            <td>{formatMoney(week.averagePricePerGallon)}</td>
+                          </tr>
+                          {(week.dailyTotals || []).map((day) => (
+                            <tr key={`${week.weekStart}-${day.date}`} className="fuel-day-row">
+                              <td>{day.dayName} {day.date}</td>
+                              <td>{day.count}</td>
+                              <td>{formatMoney(day.totalFuelSpend)}</td>
+                              <td>{Number(day.totalGallons || 0).toFixed(2)}</td>
+                              <td>{formatMoney(day.averagePricePerGallon)}</td>
+                            </tr>
+                          ))}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <p>No weekly fuel totals for these filters yet.</p>
+                </div>
+              )}
             </div>
 
             {fuelTransactions.length > 0 ? (
