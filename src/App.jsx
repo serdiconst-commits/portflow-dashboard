@@ -3727,11 +3727,13 @@ const completedAccountingLoads = (loadsData || [])
 const normalizedAccountingSearchTerm = String(accountingSearchTerm || '').trim().toLowerCase();
 const filteredAccountingLoads = normalizedAccountingSearchTerm
   ? completedAccountingLoads.filter((load) => {
+      const customer = String(load.customer || '').toLowerCase();
       const container = String(load.containerNumber || '').toLowerCase();
       const reference = String(load.referenceNumber || '').toLowerCase();
       const poNumber = String(load.poNumber || '').toLowerCase();
       const pickupNumber = String(load.pickupNumber || '').toLowerCase();
       return (
+        customer.includes(normalizedAccountingSearchTerm) ||
         container.includes(normalizedAccountingSearchTerm) ||
         reference.includes(normalizedAccountingSearchTerm) ||
         poNumber.includes(normalizedAccountingSearchTerm) ||
@@ -12209,7 +12211,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               value={accountingSearchTerm}
               onChange={(e) => setAccountingSearchTerm(e.target.value)}
               className="search-input"
-              placeholder="Search billing by container, reference #, PO #, or pick up #"
+              placeholder="Search billing by customer, container, reference #, PO #, or pick up #"
             />
             <span>{filteredAccountingLoads.length} shown</span>
           </div>
