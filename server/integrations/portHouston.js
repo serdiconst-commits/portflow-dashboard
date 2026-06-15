@@ -38,6 +38,7 @@ const EQUIPMENT_HISTORY_FIELDS = [
 
 const GATE_TRANSACTION_FIELDS = [
   'gkey',
+  'facility_id',
   'nbr',
   'subType',
   'status',
@@ -51,10 +52,17 @@ const GATE_TRANSACTION_FIELDS = [
   'unitId',
   'lineId',
   'ctrTypeId',
+  'eqoEqIsoGroup',
+  'eqoEqLength',
+  'eqoEqHeight',
   'chsId',
+  'chsIsOwners',
   'eqoNbr',
   'blNbr',
   'sealNbr1',
+  'ctrTicketPosId',
+  'scaleWeight',
+  'ctrGrossWeight',
   'hasDocuments',
   'scope.facility_id',
 ].join(',');
@@ -555,6 +563,11 @@ const normalizeGateTransaction = (record = {}) => ({
   gkey: getFirstValue(record, ['gkey']),
   nbr: getFirstValue(record, ['nbr']),
   subType: String(getFirstValue(record, ['subType']) || '').trim().toUpperCase(),
+  eirType: String(getFirstValue(record, ['subType']) || '').trim().toUpperCase() === 'RI'
+    ? 'IN EIR'
+    : String(getFirstValue(record, ['subType']) || '').trim().toUpperCase() === 'RO'
+      ? 'OUT EIR'
+      : '',
   status: getFirstValue(record, ['status']),
   stageId: getFirstValue(record, ['stageId']),
   handled: getFirstValue(record, ['handled']),
@@ -564,13 +577,21 @@ const normalizeGateTransaction = (record = {}) => ({
   truckingCompany: getFirstValue(record, ['trkcoId']),
   containerNumber: getFirstValue(record, ['ctrId', 'unitId']),
   shipLine: getFirstValue(record, ['lineId']),
-  containerSize: normalizeContainerSizeCode(getFirstValue(record, ['ctrTypeId'])),
+  containerSize: normalizeContainerSizeCode(getFirstValue(record, ['ctrTypeId', 'eqoEqIsoGroup'])),
+  containerType: getFirstValue(record, ['ctrTypeId']),
+  equipmentIsoGroup: getFirstValue(record, ['eqoEqIsoGroup']),
+  equipmentLength: getFirstValue(record, ['eqoEqLength']),
+  equipmentHeight: getFirstValue(record, ['eqoEqHeight']),
   chassisNumber: getFirstValue(record, ['chsId']),
+  chassisIsOwner: getFirstValue(record, ['chsIsOwners']),
   bookingNumber: getFirstValue(record, ['eqoNbr']),
   billOfLading: getFirstValue(record, ['blNbr']),
   sealNumber: getFirstValue(record, ['sealNbr1']),
+  ticketPosition: getFirstValue(record, ['ctrTicketPosId']),
+  scaleWeight: getFirstValue(record, ['scaleWeight']),
+  containerGrossWeight: getFirstValue(record, ['ctrGrossWeight']),
   hasDocuments: normalizeBoolean(getFirstValue(record, ['hasDocuments'])),
-  terminal: getFirstValue(record, ['scope.facility_id', 'facility', 'facilityId', 'terminalId']),
+  terminal: getFirstValue(record, ['facility_id', 'scope.facility_id', 'facility', 'facilityId', 'terminalId']),
   raw: record,
 });
 
@@ -663,8 +684,7 @@ export const getAssociatedEquipment = async (bookingNumber, credentials = {}, fa
 export const getGateHistory = async (containerNumber, credentials = {}, facility = '') => {
   // Port Houston docs map container movement history to GetEquipmentHistory:
   // GET /service/events?predicate=appliedToNaturalKey = <container>.
-  // GetGateTransactions exists for transaction number lookup; container lookup should
-  // use equipment history unless Port Houston grants a container-based gate endpoint.
+  // EIR-style gate data is pulled separately from GetGateTransactions by ctrId.
   // BCT and BPT use the same connection; omit facility to search all terminals.
   const response = await portHoustonFetch('/service/events', {
     operator: 'POHA',
@@ -682,14 +702,53 @@ export const getGateHistory = async (containerNumber, credentials = {}, facility
 };
 
 export const getGateTransactionByNumber = async (transactionNumber, credentials = {}, facility = '') => {
+  const cleanNumber = String(transactionNumber || '').trim();
   const response = await portHoustonFetch('/road/gatetransactions', {
     operator: 'POHA',
     facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
-    nbr: String(transactionNumber || '').trim(),
+    predicate: `nbr = ${cleanNumber}`,
     fields: GATE_TRANSACTION_FIELDS,
   }, credentials);
 
   return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+};
+
+export const getGateTransactionsByContainer = async (containerNumber, credentials = {}, facility = '') => {
+  const cleanContainer = String(containerNumber || '').trim().toUpperCase();
+  if (!cleanContainer) {
+    return {
+      transactions: [],
+      outEirTransaction: null,
+      inEirTransaction: null,
+      lookupMethod: '',
+      requestedContainerNumber: '',
+      errors: [],
+      raw: [],
+    };
+  }
+
+  const response = await portHoustonFetch('/road/gatetransactions', {
+    operator: 'POHA',
+    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
+    predicate: `ctrId = ${cleanContainer}`,
+    fields: GATE_TRANSACTION_FIELDS,
+  }, credentials);
+
+  const sortedTransactions = sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+
+  return {
+    transactions: sortedTransactions,
+    outEirTransaction: sortedTransactions.find((item) =>
+      ['RO', 'RM', 'DM', 'DI', 'DE'].includes(item.subType) && item.hasDocuments === true
+    ) || sortedTransactions.find((item) => ['RO', 'RM', 'DM', 'DI', 'DE'].includes(item.subType)) || null,
+    inEirTransaction: sortedTransactions.find((item) =>
+      ['RI', 'RE', 'RC', 'RB'].includes(item.subType) && item.hasDocuments === true
+    ) || sortedTransactions.find((item) => ['RI', 'RE', 'RC', 'RB'].includes(item.subType)) || null,
+    lookupMethod: 'ctrId',
+    requestedContainerNumber: cleanContainer,
+    errors: [],
+    raw: sortedTransactions.map((item) => item.raw),
+  };
 };
 
 export const getGateTransactionsByNumbers = async (transactionNumbers = [], credentials = {}, facility = '') => {

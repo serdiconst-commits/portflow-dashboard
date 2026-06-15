@@ -125,6 +125,7 @@ import {
   getBolAvailability,
   getContainerAvailability,
   getGateHistory,
+  getGateTransactionsByContainer,
   getGateTransactionsByNumbers,
   getPortHoustonFacilityCode,
 } from './integrations/portHouston.js';
@@ -1996,17 +1997,29 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
     const gateTransactionNumbers = extractGateTransactionNumbersFromHistory(gate);
     let gateTransactions = null;
     try {
-      gateTransactions = gateTransactionNumbers.length
-        ? await getGateTransactionsByNumbers(gateTransactionNumbers, credentials, facility)
-        : {
+      const containerGateTransactions = containerNumber
+        ? await getGateTransactionsByContainer(containerNumber, credentials, facility)
+        : null;
+      if (containerGateTransactions?.transactions?.length) {
+        gateTransactions = containerGateTransactions;
+      } else if (gateTransactionNumbers.length) {
+        gateTransactions = await getGateTransactionsByNumbers(gateTransactionNumbers, credentials, facility);
+        gateTransactions.lookupMethod = 'equipment-history-nbr';
+        gateTransactions.containerLookupEmpty = true;
+      } else {
+        gateTransactions = {
             transactions: [],
             outEirTransaction: null,
             inEirTransaction: null,
-            lookupMethod: '',
+            lookupMethod: containerNumber ? 'ctrId' : '',
+            requestedContainerNumber: containerNumber,
             requestedTransactionNumbers: [],
             errors: [],
-            reason: 'Equipment history did not include a gate transaction nbr.',
+            reason: containerNumber
+              ? 'No Port Houston gate transaction was returned for this container number.'
+              : 'No container number was available for gate transaction lookup.',
           };
+      }
     } catch (gateTransactionErr) {
       gateTransactions = {
         transactions: [],
@@ -2053,6 +2066,11 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
     const downloadedInDoc = downloadedDocuments.find((doc) => doc.category === 'IN EIR');
     const outTransactionId = getPortHoustonTransactionId(gateTransactions?.outEirTransaction);
     const inTransactionId = getPortHoustonTransactionId(gateTransactions?.inEirTransaction);
+    const gateTransactionCount = gateTransactions?.transactions?.length || 0;
+    const gateTransactionTypes = [
+      gateTransactions?.outEirTransaction ? `OUT EIR ${outTransactionId || ''}`.trim() : '',
+      gateTransactions?.inEirTransaction ? `IN EIR ${inTransactionId || ''}`.trim() : '',
+    ].filter(Boolean).join(' and ');
     const eir = {
       out: downloadedOutDoc
         ? {
@@ -2096,9 +2114,13 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
             : gateTransactions?.error
               ? `Gate transaction lookup failed: ${gateTransactions.error}`
               : gateTransactions?.reason
-                ? `${gateTransactions.reason} Per Port Houston docs, Road Service GetGateTransactions requires nbr.`
+                ? gateTransactions.reason
               : gateTransactions?.transactions?.length === 0
-                ? 'No Port Houston gate transaction was returned for the equipment-history nbr values. EIR download requires the gate transaction nbr.'
+                ? 'No Port Houston gate transaction was returned for this container.'
+              : gateTransactionCount
+                ? `Port Houston returned ${gateTransactionCount} gate transaction(s)${
+                    gateTransactionTypes ? ` including ${gateTransactionTypes}` : ''
+                  }, but no EIR PDF document link was returned for this check.`
               : 'No EIR document was returned by Port Houston for this check.',
     };
     const response = {
