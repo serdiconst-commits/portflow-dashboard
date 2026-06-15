@@ -13,6 +13,306 @@ button {
   font: inherit;
 }
 
+.public-page {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(238, 242, 247, 0.98)),
+    #eef2f7;
+  color: #0f172a;
+}
+
+.public-nav {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 22px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.public-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.public-brand img {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+}
+
+.public-brand strong,
+.public-brand span {
+  display: block;
+}
+
+.public-brand strong {
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.public-brand span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.public-nav-actions,
+.public-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.public-link-btn,
+.public-primary-btn,
+.public-secondary-btn {
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.public-link-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #0f4f8f;
+}
+
+.public-link-btn:hover {
+  background: #e0f2fe;
+}
+
+.public-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #0f4f8f;
+  background: #0f4f8f;
+  color: #ffffff;
+  box-shadow: 0 14px 24px rgba(15, 79, 143, 0.22);
+}
+
+.public-secondary-btn {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f4f8f;
+}
+
+.public-hero {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  min-height: calc(100vh - 98px);
+  padding: 46px 0 64px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.82fr);
+  gap: 44px;
+  align-items: center;
+}
+
+.public-kicker {
+  display: inline-block;
+  color: #0f4f8f;
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.public-hero h1 {
+  margin: 14px 0 18px;
+  max-width: 780px;
+  font-size: clamp(42px, 6vw, 72px);
+  line-height: 0.96;
+  letter-spacing: 0;
+}
+
+.public-hero p,
+.public-demo-band p,
+.public-feature-card p {
+  color: #475569;
+  line-height: 1.55;
+}
+
+.public-hero p {
+  max-width: 690px;
+  margin: 0 0 26px;
+  font-size: 18px;
+}
+
+.public-product-preview {
+  padding: 20px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.16);
+}
+
+.public-preview-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.public-preview-top span,
+.public-preview-stats span,
+.public-preview-row span,
+.public-preview-row small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.public-preview-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.public-preview-stats div {
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.public-preview-stats strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 28px;
+}
+
+.public-preview-table {
+  display: grid;
+  gap: 10px;
+}
+
+.public-preview-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.public-preview-row em {
+  color: #047857;
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.public-preview-row small {
+  grid-column: 2 / -1;
+  text-transform: none;
+}
+
+.public-feature-grid {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 24px 0 70px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.public-feature-card {
+  padding: 22px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.public-feature-card h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.public-feature-card p {
+  margin: 0;
+}
+
+.public-demo-band {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto 64px;
+  padding: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #ffffff;
+}
+
+.public-demo-band h2 {
+  margin: 8px 0;
+  font-size: 28px;
+}
+
+.public-demo-band p {
+  margin: 0;
+  color: #cbd5e1;
+}
+
+.public-demo-access {
+  min-width: min(100%, 360px);
+  display: grid;
+  gap: 10px;
+}
+
+.public-demo-access label {
+  display: grid;
+  gap: 6px;
+  color: #dbeafe;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.public-demo-access input {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  text-transform: none;
+}
+
+.public-demo-access p {
+  color: #fecaca;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.demo-mode-badge {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 6px;
+  padding: 5px 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .auth-shell {
   min-height: 100vh;
   display: grid;
@@ -3526,8 +3826,63 @@ button:disabled {
 }
 
 @media (max-width: 1000px) {
+  .public-hero {
+    grid-template-columns: 1fr;
+    min-height: auto;
+    padding-top: 26px;
+  }
+
+  .public-product-preview {
+    order: -1;
+  }
+
+  .public-feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .public-demo-band {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .port-check-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .public-nav {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .public-nav-actions,
+  .public-hero-actions {
+    width: 100%;
+  }
+
+  .public-link-btn,
+  .public-primary-btn,
+  .public-secondary-btn {
+    width: 100%;
+  }
+
+  .public-hero h1 {
+    font-size: 40px;
+  }
+
+  .public-preview-stats,
+  .public-feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .public-preview-row {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .public-preview-row em,
+  .public-preview-row small {
+    grid-column: 2;
   }
 }
 .load-card .paperwork-badges,

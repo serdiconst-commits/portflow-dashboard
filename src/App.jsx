@@ -34,6 +34,8 @@ const API_BASE = (() => {
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 const APP_PORTAL = import.meta.env.VITE_APP_PORTAL || 'web';
 const APP_TIME_ZONE = 'America/Chicago';
+const DEMO_TOKEN = 'PORTFLOW_DEMO';
+const DEMO_ACCESS_CODE = import.meta.env.VITE_DEMO_ACCESS_CODE || 'PORTFLOW-DEMO';
 
 const getDateStringInAppTimeZone = (dateValue = new Date()) => {
   const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
@@ -396,6 +398,7 @@ const isInvalidTokenError = (message = '') =>
 
 const handleAuthError = (message) => {
   if (!isInvalidTokenError(message)) return false;
+  if (localStorage.getItem('authToken') === DEMO_TOKEN) return false;
 
   localStorage.removeItem('authToken');
   localStorage.removeItem('currentUser');
@@ -687,6 +690,175 @@ city: '',
 state: '',
 zip: '',
   };
+
+const getDemoData = () => {
+  const today = getDateStringInAppTimeZone();
+  const tomorrow = getDateStringWithOffsetInAppTimeZone(1);
+  const yesterday = getDateStringWithOffsetInAppTimeZone(-1);
+
+  const demoDrivers = [
+    { id: 'DRV-001', name: 'Manuel Escobar', email: 'manuel.demo@portflow.com', phone: '346-555-0101', truck: 'TX-104', isActive: true },
+    { id: 'DRV-002', name: 'Luis Martinez', email: 'luis.demo@portflow.com', phone: '346-555-0102', truck: 'TX-118', isActive: true },
+    { id: 'DRV-003', name: 'Carlos Rivera', email: 'carlos.demo@portflow.com', phone: '346-555-0103', truck: 'TX-122', isActive: true },
+  ];
+
+  const demoLoads = [
+    {
+      ...emptyLoad,
+      id: 'DEMO-1001',
+      loadDate: today,
+      customer: 'Blue Wave Imports',
+      driver: 'DRV-001',
+      truck: 'TX-104',
+      pickup: 'Barbours Cut Terminal, La Porte, TX',
+      delivery: 'Blue Wave Warehouse, 8200 Market St, Houston, TX',
+      returnLocation: 'Barbours Cut Empty Yard',
+      deliveryType: 'local',
+      referenceNumber: 'REF-77821',
+      poNumber: 'PO-44021',
+      pickupNumber: 'PU-8120',
+      containerNumber: 'MSCU4527810',
+      bookingNumber: 'BOL884210',
+      appointmentTime: `${today}T09:30`,
+      eta: '10:45 AM',
+      chassisNumber: 'CHZ884201',
+      sealNumber: 'SEAL7712',
+      containerSize: '40HC',
+      shipLine: 'MSC',
+      rate: '$1,225.00',
+      driverRate: '$525.00',
+      status: 'Dispatched',
+      availabilityStatus: 'Available',
+      paperwork: 'Pending',
+      lastFreeDay: today,
+      documents: [{ id: 'demo-pod-1', category: 'POD', fileName: 'demo-pod.pdf', uploadedAt: new Date().toISOString() }],
+    },
+    {
+      ...emptyLoad,
+      id: 'DEMO-1002',
+      loadDate: today,
+      customer: 'Gulf Coast Retail',
+      driver: 'DRV-002',
+      truck: 'TX-118',
+      pickup: 'Bayport Terminal, Pasadena, TX',
+      delivery: 'Gulf Coast DC, 1550 Commerce Pkwy, Pasadena, TX',
+      returnLocation: 'Bayport Empty Yard',
+      deliveryType: 'local',
+      referenceNumber: 'REF-77822',
+      poNumber: 'PO-44022',
+      pickupNumber: 'PU-8121',
+      containerNumber: 'TCLU3389021',
+      bookingNumber: 'BOL884211',
+      appointmentTime: `${today}T13:00`,
+      eta: '2:15 PM',
+      chassisNumber: 'CHZ338902',
+      sealNumber: 'SEAL3389',
+      containerSize: '20ST',
+      shipLine: 'CMA: CMA-CGM',
+      rate: '$950.00',
+      driverRate: '$425.00',
+      status: 'In Transit',
+      availabilityStatus: '',
+      paperwork: 'Pending',
+      lastFreeDay: tomorrow,
+    },
+    {
+      ...emptyLoad,
+      id: 'DEMO-1003',
+      loadDate: yesterday,
+      customer: 'Lone Star Foods',
+      driver: 'DRV-003',
+      truck: 'TX-122',
+      pickup: 'Barbours Cut Terminal, La Porte, TX',
+      delivery: 'Lone Star Cold Storage, 410 Freeport Rd, Houston, TX',
+      returnLocation: 'Barbours Cut Empty Yard',
+      deliveryType: 'highway',
+      referenceNumber: 'REF-77823',
+      poNumber: 'PO-44023',
+      pickupNumber: 'PU-8122',
+      containerNumber: 'CMAU7703914',
+      bookingNumber: 'BOL884212',
+      appointmentTime: `${yesterday}T08:00`,
+      chassisNumber: 'CHZ770391',
+      sealNumber: 'SEAL7703',
+      containerSize: '40ST',
+      shipLine: 'MAE: Maersk',
+      rate: '$1,450.00',
+      driverRate: '$650.00',
+      status: 'Completed',
+      paperwork: 'Complete',
+      lastFreeDay: yesterday,
+      documents: [
+        { id: 'demo-out-eir-1', category: 'OUT EIR', fileName: 'demo-out-eir.pdf', uploadedAt: new Date().toISOString() },
+        { id: 'demo-pod-2', category: 'POD', fileName: 'demo-pod.pdf', uploadedAt: new Date().toISOString() },
+      ],
+    },
+    {
+      ...emptyLoad,
+      id: 'DEMO-1004',
+      loadDate: tomorrow,
+      customer: 'Texas Solar Supply',
+      driver: '',
+      pickup: 'Bayport Terminal, Pasadena, TX',
+      delivery: 'Texas Solar Yard, 2900 Beltway 8, Houston, TX',
+      deliveryType: 'local',
+      referenceNumber: 'REF-77824',
+      poNumber: 'PO-44024',
+      containerNumber: 'OOLU9921145',
+      bookingNumber: 'BOL884213',
+      appointmentTime: `${tomorrow}T11:30`,
+      containerSize: '40HC',
+      shipLine: 'OOC: OOCL',
+      rate: '$1,100.00',
+      driverRate: '$500.00',
+      status: 'Not Available',
+      availabilityStatus: 'Not Available',
+      lastFreeDay: tomorrow,
+      notes: 'Demo load with road hold.',
+    },
+  ];
+
+  return {
+    company: {
+      id: 'demo-company',
+      name: 'PortFlow Demo Carrier',
+      email: 'oliver@portflow-net.com',
+      invoiceName: 'PortFlow Demo Carrier',
+      invoiceAddress: 'Houston, TX',
+      logoUrl: '/portflow-icon-192.png',
+      portHoustonConfigured: true,
+      portHoustonCredentials: {},
+    },
+    user: {
+      id: 'demo-dispatcher',
+      companyId: 'demo-company',
+      name: 'Demo Dispatcher',
+      email: 'demo@portflow.com',
+      role: 'admin',
+    },
+    drivers: demoDrivers,
+    customers: [
+      { id: 'CUST-DEMO-1', name: 'Blue Wave Imports', contactName: 'Sarah Jones', email: 'ops@bluewave.example', phone: '713-555-0140', address: '8200 Market St', city: 'Houston', state: 'TX', zip: '77029' },
+      { id: 'CUST-DEMO-2', name: 'Gulf Coast Retail', contactName: 'Mike Adams', email: 'dispatch@gulf.example', phone: '713-555-0141', address: '1550 Commerce Pkwy', city: 'Pasadena', state: 'TX', zip: '77507' },
+      { id: 'CUST-DEMO-3', name: 'Lone Star Foods', contactName: 'Ana Garcia', email: 'shipping@lonestar.example', phone: '713-555-0142', address: '410 Freeport Rd', city: 'Houston', state: 'TX', zip: '77015' },
+    ],
+    locations: [
+      { id: 'LOC-DEMO-1', name: 'Barbours Cut Terminal', type: 'pickup', address: '1515 E Barbours Cut Blvd', city: 'La Porte', state: 'TX', zip: '77571' },
+      { id: 'LOC-DEMO-2', name: 'Bayport Terminal', type: 'pickup', address: '12619 Port Rd', city: 'Pasadena', state: 'TX', zip: '77586' },
+      { id: 'LOC-DEMO-3', name: 'Blue Wave Warehouse', type: 'delivery', address: '8200 Market St', city: 'Houston', state: 'TX', zip: '77029' },
+    ],
+    loads: demoLoads,
+    invoices: [],
+    users: [
+      { id: 'demo-dispatcher', name: 'Demo Dispatcher', email: 'demo@portflow.com', role: 'admin', isActive: true },
+      ...demoDrivers.map((driver) => ({ id: `user-${driver.id}`, name: driver.name, email: driver.email, role: 'driver', isActive: true, driverId: driver.id })),
+    ],
+    liveLocations: [
+      { driverId: 'DRV-001', driverName: 'Manuel Escobar', latitude: 29.7355, longitude: -95.0124, updatedAt: new Date().toISOString() },
+      { driverId: 'DRV-002', driverName: 'Luis Martinez', latitude: 29.6211, longitude: -95.0156, updatedAt: new Date().toISOString() },
+    ],
+  };
+};
   
   const addressInputRef = useRef(null);
   const autocompleteRef = useRef(null);
@@ -899,10 +1071,14 @@ const [loginEmail, setLoginEmail] = useState('');
 const [loginPassword, setLoginPassword] = useState('');
 const [loginError, setLoginError] = useState('');
 const [authMode, setAuthMode] = useState('login');
+const [showPublicLanding, setShowPublicLanding] = useState(!isDriverApp && !savedUser);
+const [demoAccessCode, setDemoAccessCode] = useState('');
+const [demoAccessError, setDemoAccessError] = useState('');
 const [registerName, setRegisterName] = useState('');
 const [authToken, setAuthToken] = useState(localStorage.getItem('authToken') || '');
 const [currentUser, setCurrentUser] = useState(savedUser || null);
 const [company, setCompany] = useState(savedCompany || null);
+const isDemoMode = authToken === DEMO_TOKEN || currentUser?.id === 'demo-dispatcher';
 const [companyLogoUploading, setCompanyLogoUploading] = useState(false);
 const [companyLogoVersion, setCompanyLogoVersion] = useState(Date.now());
 const [invoiceBrandingForm, setInvoiceBrandingForm] = useState({
@@ -973,6 +1149,7 @@ const [settlementCustomDeductionDraft, setSettlementCustomDeductionDraft] = useS
 
 useEffect(() => {
   if (!currentUser || !roleCanAccessView(currentUser.role, 'dispatch')) return;
+  if (isDemoMode) return;
 
   try {
     setDispatchColumnOrder(
@@ -983,7 +1160,7 @@ useEffect(() => {
   } catch {
     setDispatchColumnOrder(defaultDispatchLoadColumnOrder);
   }
-}, [dispatchColumnStorageKey, currentUser]);
+}, [dispatchColumnStorageKey, currentUser, isDemoMode]);
 
 useEffect(() => {
   if (!currentUser || !roleCanAccessView(currentUser.role, 'dispatch')) return;
@@ -1170,6 +1347,38 @@ const handleRegister = async (e) => {
     console.error('Registration failed:', error);
     setLoginError(error.message);
   }
+};
+
+const applyDemoData = () => {
+  const demo = getDemoData();
+  setAuthToken(DEMO_TOKEN);
+  setCurrentUser(demo.user);
+  setCompany(demo.company);
+  setLoadsData(demo.loads);
+  setDriversList(demo.drivers);
+  setCustomers(demo.customers);
+  setLocations(demo.locations);
+  setSavedInvoices(demo.invoices);
+  setAllUsers(demo.users);
+  setLiveDriverLocations(demo.liveLocations);
+  setSelectedLoad(null);
+  setActiveView('dispatch');
+  setDashboardFilter('all');
+  setShowPublicLanding(false);
+  setLoginError('');
+
+  localStorage.setItem('authToken', DEMO_TOKEN);
+  localStorage.setItem('currentUser', JSON.stringify(demo.user));
+  localStorage.setItem('company', JSON.stringify(demo.company));
+};
+
+const handleStartDemo = () => {
+  if (String(demoAccessCode || '').trim() !== DEMO_ACCESS_CODE) {
+    setDemoAccessError('Enter the demo access code provided by PortFlow.');
+    return;
+  }
+  setDemoAccessError('');
+  applyDemoData();
 };
 const handleDriverDocumentUpload = async (loadId) => {
   try {
@@ -1935,6 +2144,22 @@ const [invoiceStatusMessage, setInvoiceStatusMessage] = useState('');
 const [invoicePaymentDrafts, setInvoicePaymentDrafts] = useState({});
 const [accountingBillAmountDrafts, setAccountingBillAmountDrafts] = useState({});
 const [activeLocationPicker, setActiveLocationPicker] = useState('');
+
+useEffect(() => {
+  if (!isDemoMode) return;
+
+  const demo = getDemoData();
+  setCurrentUser((prev) => prev || demo.user);
+  setCompany((prev) => prev || demo.company);
+  setLoadsData(demo.loads);
+  setDriversList(demo.drivers);
+  setCustomers(demo.customers);
+  setLocations(demo.locations);
+  setSavedInvoices(demo.invoices);
+  setAllUsers(demo.users);
+  setLiveDriverLocations(demo.liveLocations);
+}, [isDemoMode]);
+
 const [showNewPickupForm, setShowNewPickupForm] = useState(false);
 const [showNewPickup, setShowNewPickup] = useState(false);
 const [newPickupLocation, setNewPickupLocation] = useState({
@@ -2866,14 +3091,15 @@ useEffect(() => {
 }, [activeView, currentUser]);
 
 useEffect(() => {
+  if (isDemoMode) return;
   if (activeView === 'drivers') {
     fetchDrivers();
   }
-}, [activeView, authToken]);
+}, [activeView, authToken, isDemoMode]);
 
 
 useEffect(() => {
-  if (!authToken) return;
+  if (!authToken || isDemoMode) return;
 
   fetchLoads();
   fetchCustomers();
@@ -2891,12 +3117,12 @@ useEffect(() => {
   } else if (roleCanAccessView(currentUser?.role, 'accounting')) {
     fetchFuelSummary();
   }
-}, [authToken]);
+}, [authToken, isDemoMode]);
 
 useEffect(() => {
-  if (!authToken || currentUser?.role === 'driver' || activeView !== 'accounting') return;
+  if (!authToken || isDemoMode || currentUser?.role === 'driver' || activeView !== 'accounting') return;
   fetchFuelSummary();
-}, [authToken, activeView, fuelFilters.from, fuelFilters.to, fuelFilters.driverId, fuelFilters.truckId]);
+}, [authToken, isDemoMode, activeView, fuelFilters.from, fuelFilters.to, fuelFilters.driverId, fuelFilters.truckId]);
 
 useEffect(() => {
   if (currentUser?.role !== 'driver') return;
@@ -2907,7 +3133,7 @@ useEffect(() => {
 }, [currentUser?.driverId, currentUser?.role, driversList]);
 
 useEffect(() => {
-  if (!authToken || activeView === 'driver') return;
+  if (!authToken || isDemoMode || activeView === 'driver') return;
 
   const interval = setInterval(() => {
     fetchLoads();
@@ -2915,17 +3141,17 @@ useEffect(() => {
   }, 5000);
 
   return () => clearInterval(interval);
-}, [authToken, activeView]);
+}, [authToken, isDemoMode, activeView]);
 
 useEffect(() => {
-  if (!authToken || isEditing) return;
+  if (!authToken || isDemoMode || isEditing) return;
 
   const interval = setInterval(() => {
     refreshLoadsData();
   }, 5000);
 
   return () => clearInterval(interval);
-}, [authToken, activeView, isEditing]);
+}, [authToken, isDemoMode, activeView, isEditing]);
 
   /*const getDriverName = (driverId) =>
     driversList.find((d) => d.id === driverId)?.name || 'Unknown';*/
@@ -6126,6 +6352,7 @@ const handleLogout = () => {
   setAuthToken('');
   setCurrentUser(null);
   setCompany(null);
+  setShowPublicLanding(!isDriverApp);
 };
 
 const handlePrintInvoice = () => {
@@ -6576,6 +6803,138 @@ const handleSelectedLoadCustomerChange = (e) => {
   }));
 };
 
+if (!authToken && !isDriverApp && showPublicLanding) {
+return (
+    <div className="public-page">
+      <header className="public-nav">
+        <div className="public-brand">
+          <img src="/portflow-icon-192.png" alt="PortFlow" />
+          <div>
+            <strong>PortFlow</strong>
+            <span>Logistics Analytics</span>
+          </div>
+        </div>
+        <div className="public-nav-actions">
+          <button
+            type="button"
+            className="public-link-btn"
+            onClick={() => {
+              setAuthMode('login');
+              setShowPublicLanding(false);
+            }}
+          >
+            Client Login
+          </button>
+          <a className="public-primary-btn" href="mailto:oliver@portflow-net.com?subject=PortFlow%20Demo%20Request">
+            Request Demo
+          </a>
+        </div>
+      </header>
+
+      <main>
+        <section className="public-hero">
+          <div className="public-hero-copy">
+            <span className="public-kicker">Built for port trucking teams</span>
+            <h1>Dispatch, driver paperwork, billing, and settlements in one clean TMS.</h1>
+            <p>
+              PortFlow helps container carriers run daily dispatch, mobile driver updates, document scanning,
+              customer billing, payroll settlement, and Port Houston visibility from one connected workspace.
+            </p>
+            <div className="public-hero-actions">
+              <a className="public-primary-btn" href="mailto:oliver@portflow-net.com?subject=PortFlow%20Demo%20Request">
+                Schedule a Demo
+              </a>
+              <button
+                type="button"
+                className="public-link-btn"
+                onClick={() => {
+                  setAuthMode('login');
+                  setShowPublicLanding(false);
+                }}
+              >
+                Open Login
+              </button>
+            </div>
+          </div>
+
+          <div className="public-product-preview" aria-label="PortFlow dashboard preview">
+            <div className="public-preview-top">
+              <span>Today's Loads</span>
+              <strong>Operations Board</strong>
+            </div>
+            <div className="public-preview-stats">
+              <div><span>Available</span><strong>18</strong></div>
+              <div><span>Dispatched</span><strong>24</strong></div>
+              <div><span>Completed</span><strong>11</strong></div>
+            </div>
+            <div className="public-preview-table">
+              {[
+                ['BCT', 'MSCU4527810', 'Available', 'LFD Today'],
+                ['BPT', 'TCLU3389021', 'Dispatched', 'Driver ETA 2:15'],
+                ['BCT', 'CMAU7703914', 'Completed', 'Ready to bill'],
+              ].map(([terminal, container, status, note]) => (
+                <div className="public-preview-row" key={container}>
+                  <span>{terminal}</span>
+                  <strong>{container}</strong>
+                  <em>{status}</em>
+                  <small>{note}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="public-feature-grid">
+          {[
+            ['Dispatch Board', 'Track available, dispatched, dropped, completed, appointment, and LFD loads.'],
+            ['Driver Mobile', 'Drivers see assigned loads, scan documents, add chassis/container details, and complete PODs.'],
+            ['Accounting', 'Bill completed loads, track paid/unpaid status, print invoices, and attach paperwork.'],
+            ['Settlements', 'Create payroll statements with loads, deductions, reimbursements, CSV export, and print reports.'],
+            ['Port Houston', 'Use smart container lookup for availability, LFD, terminal, line, size, holds, and port details.'],
+            ['Documents', 'Upload POD, BOL, EIR, receipts, and customer paperwork directly to each shipment.'],
+          ].map(([title, text]) => (
+            <article className="public-feature-card" key={title}>
+              <h2>{title}</h2>
+              <p>{text}</p>
+            </article>
+          ))}
+        </section>
+
+        <section className="public-demo-band">
+          <div>
+            <span className="public-kicker">Demo access by request</span>
+            <h2>Approved prospects can try PortFlow without touching your live operation.</h2>
+            <p>
+              Request demo access first. Once approved, use the access code provided by PortFlow to launch the sample workspace.
+            </p>
+          </div>
+          <div className="public-demo-access">
+            <label>
+              <span>Demo Access Code</span>
+              <input
+                type="password"
+                value={demoAccessCode}
+                onChange={(e) => {
+                  setDemoAccessCode(e.target.value);
+                  setDemoAccessError('');
+                }}
+                placeholder="Enter code"
+              />
+            </label>
+            {demoAccessError && <p>{demoAccessError}</p>}
+            <button type="button" className="public-primary-btn" onClick={handleStartDemo}>
+              Launch Approved Demo
+            </button>
+            <a className="public-secondary-btn" href="mailto:oliver@portflow-net.com?subject=PortFlow%20Demo%20Request">
+              Request Demo Access
+            </a>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
 if (!authToken) {
 return (
     <div className={isDriverApp ? 'driver-mobile-login' : 'auth-shell'}>
@@ -6648,18 +7007,27 @@ return (
       </form>
 
       {!isDriverApp && (
-        <button
-          type="button"
-          onClick={() => {
-            setLoginError('');
-            setAuthMode(authMode === 'register' ? 'login' : 'register');
-          }}
-          className="auth-secondary-btn"
-        >
-          {authMode === 'register'
-            ? 'Already have an account? Log in'
-            : 'Create first company account'}
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setLoginError('');
+              setAuthMode(authMode === 'register' ? 'login' : 'register');
+            }}
+            className="auth-secondary-btn"
+          >
+            {authMode === 'register'
+              ? 'Already have an account? Log in'
+              : 'Create first company account'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPublicLanding(true)}
+            className="auth-secondary-btn"
+          >
+            Back to PortFlow overview
+          </button>
+        </>
       )}
       </div>
     </div>
@@ -8267,6 +8635,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           )}
           <div>
           <h1>{company?.name || 'PortFlow Dispatch'}</h1>
+          {isDemoMode && <span className="demo-mode-badge">Demo Mode - sample data only</span>}
           <p>Dispatch • Settlements • Paperwork • Load Tracking</p>
         </div>
 
