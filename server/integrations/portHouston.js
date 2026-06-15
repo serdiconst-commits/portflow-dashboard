@@ -493,6 +493,24 @@ const normalizeImpediments = (value) => {
   return [String(value)].filter(Boolean);
 };
 
+const normalizeContainerSizeCode = (value = '') => {
+  const raw = String(value || '').trim();
+  const normalized = raw.replace(/[^a-z0-9]/gi, '').toUpperCase();
+  const sizeMap = {
+    '45G1': '40 HC',
+    '42G1': '40 ST',
+    '22G1': '20 ST',
+    '45RT': '40 RF',
+    '40HC': '40 HC',
+    '40HQ': '40 HC',
+    '40ST': '40 ST',
+    '20ST': '20 ST',
+    '40RF': '40 RF',
+  };
+
+  return sizeMap[normalized] || raw;
+};
+
 const normalizeAvailability = (response) => {
   const records = unwrapRecords(response);
   const unit = records[0] || {};
@@ -521,7 +539,7 @@ const normalizeAvailability = (response) => {
     roadImpediments: impediments,
     lastFreeDay: getFirstValue(unit, ['lastFreeDay', 'lineLastFreeDay', 'lfd']),
     containerNumber: getFirstValue(unit, ['unitId', 'ctrId', 'containerNumber']),
-    containerSize: getFirstValue(unit, ['eqtypeId', 'ctrTypeId', 'equipmentType', 'isoGroup']),
+    containerSize: normalizeContainerSizeCode(getFirstValue(unit, ['eqtypeId', 'ctrTypeId', 'equipmentType', 'isoGroup'])),
     shipLine: getFirstValue(unit, ['lineId', 'line', 'shippingLine', 'operator', 'scope.operator_id']),
     bookingNumber: getFirstValue(unit, ['eqoNbr', 'bookingNumber', 'bookingNbr', 'blNbr']),
     billOfLading: getFirstValue(unit, ['blNbr']),
@@ -546,7 +564,7 @@ const normalizeGateTransaction = (record = {}) => ({
   truckingCompany: getFirstValue(record, ['trkcoId']),
   containerNumber: getFirstValue(record, ['ctrId', 'unitId']),
   shipLine: getFirstValue(record, ['lineId']),
-  containerSize: getFirstValue(record, ['ctrTypeId']),
+  containerSize: normalizeContainerSizeCode(getFirstValue(record, ['ctrTypeId'])),
   chassisNumber: getFirstValue(record, ['chsId']),
   bookingNumber: getFirstValue(record, ['eqoNbr']),
   billOfLading: getFirstValue(record, ['blNbr']),
@@ -631,7 +649,7 @@ export const getAssociatedEquipment = async (bookingNumber, credentials = {}, fa
   return {
     containers: unwrapRecords(response).map((record) => ({
       containerNumber: getFirstValue(record, ['unitId']),
-      containerSize: getFirstValue(record, ['eqtypeId', 'isoGroup']),
+      containerSize: normalizeContainerSizeCode(getFirstValue(record, ['eqtypeId', 'isoGroup'])),
       equipmentClass: getFirstValue(record, ['eqClass']),
       freightKind: getFirstValue(record, ['freightKind']),
       category: getFirstValue(record, ['category']),
