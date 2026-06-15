@@ -409,7 +409,6 @@ const handleAuthError = (message) => {
   const calculateLoadSettlement = ({ driverRate, detention, lumper, fuelAdvance }) => {
     const total =
       parseMoney(driverRate) +
-      parseMoney(detention) +
       parseMoney(lumper) -
       parseMoney(fuelAdvance);
 
@@ -588,7 +587,7 @@ const handleAuthError = (message) => {
     parseMoney(load?.rate) + parseMoney(load?.detention);
 
   const getDriverPayWithDetention = (load) =>
-    parseMoney(load?.driverRate) + parseMoney(load?.detention);
+    parseMoney(load?.driverRate);
 
 const getPaperworkStatusFromDocuments = (documents = []) => {
   return documents.length > 0 ? 'Submitted' : 'Pending';
@@ -4297,7 +4296,7 @@ const handleAddBackendDeduction = async () => {
     setActiveBackendSettlement(data);
     setBackendDeductionDraft({ kind: 'deduction', calculationType: 'flat', description: '', amount: '' });
     setSettlementBackendStatus(
-      `${kind === 'deduction' ? 'Deduction' : 'Reimbursement'} saved to the database settlement.`
+      `${kind === 'deduction' ? 'Deduction' : 'Add pay / reimbursement'} saved to the database settlement.`
     );
   } catch (error) {
     console.error('Failed to add database deduction:', error);
@@ -7326,10 +7325,6 @@ const DriverLoadCard = ({ load }) => {
           <strong>{load.driverRate ? formatMoney(getDriverPayWithDetention(load)) : '-'}</strong>
         </div>
         <div className="driver-info-item">
-          <span>Detention</span>
-          <strong>{load.detention ? formatMoney(parseMoney(load.detention)) : '$0.00'}</strong>
-        </div>
-        <div className="driver-info-item">
           <span>PO #</span>
           <strong>{load.poNumber || '-'}</strong>
         </div>
@@ -9937,18 +9932,18 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="detail-box"><span>Load Rate</span><strong>{selectedLoad.rate}</strong></div>
                         <div className="detail-box"><span>Bill Total</span><strong>{formatMoney(getCustomerBillAmount(selectedLoad))}</strong></div>
                         <div className="detail-box"><span>Driver Rate</span><strong>{selectedLoad.driverRate}</strong></div>
-                        <div className="detail-box"><span>Driver Pay + Detention</span><strong>{formatMoney(getDriverPayWithDetention(selectedLoad))}</strong></div>
+                        <div className="detail-box"><span>Driver Pay</span><strong>{formatMoney(getDriverPayWithDetention(selectedLoad))}</strong></div>
                         <div className="detail-box"><span>Paperwork</span><strong>{selectedLoad.paperwork}</strong></div>
-                        <div className="detail-box"><span>Detention</span><strong>{selectedLoad.detention}</strong></div>
+                        <div className="detail-box"><span>Customer Detention</span><strong>{selectedLoad.detention}</strong></div>
                         
                       </div>
 
                       <div className="settlement-box">
-                        <h4>Settlement Breakdown</h4>
+                        <h4>Customer / Driver Amounts</h4>
                         <div className="settlement-row"><span>Load Rate</span><strong>{selectedLoad.rate}</strong></div>
                         <div className="settlement-row"><span>Bill Total</span><strong>{formatMoney(getCustomerBillAmount(selectedLoad))}</strong></div>
                         <div className="settlement-row"><span>Driver Rate</span><strong>{selectedLoad.driverRate}</strong></div>
-                        <div className="settlement-row"><span>Detention</span><strong>{selectedLoad.detention}</strong></div>
+                        <div className="settlement-row"><span>Customer Detention</span><strong>{selectedLoad.detention}</strong></div>
                         <div className="settlement-row"><span>Lumper</span><strong>{selectedLoad.lumper}</strong></div>
                         <div className="settlement-row"><span>Fuel Advance</span><strong>- {selectedLoad.fuelAdvance}</strong></div>
                         <div className="settlement-row total"><span>Settlement</span><strong>{selectedLoad.settlement}</strong></div>
@@ -10458,18 +10453,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 </label>
 
                 <label className="settlement-entry-field">
-                  <span>Detention</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={getSettlementPayValue(selectedSettlementLoad, 'detention')}
-                    onChange={(e) =>
-                      handleSettlementPayChange(selectedSettlementLoad.id, 'detention', e.target.value)
-                    }
-                  />
-                </label>
-
-                <label className="settlement-entry-field">
                   <span>Lumper</span>
                   <input
                     type="text"
@@ -10629,7 +10612,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   onChange={(e) => handleBackendDeductionDraftChange('kind', e.target.value)}
                 >
                   <option value="deduction">Deduction - subtract from pay</option>
-                  <option value="reimbursement">Reimbursement - add to pay</option>
+                  <option value="reimbursement">Add Pay / Reimbursement - add to pay</option>
                 </select>
               </label>
               <label className="settlement-entry-field">
@@ -10637,7 +10620,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <input
                   type="search"
                   list="settlement-deduction-reasons"
-                  placeholder="Parking, repair, reimbursement"
+                  placeholder="Driver detention pay, parking, repair, reimbursement"
                   value={backendDeductionDraft.description}
                   onChange={(e) => handleBackendDeductionDraftChange('description', e.target.value)}
                 />
@@ -10669,7 +10652,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onClick={handleAddBackendDeduction}
                 disabled={settlementBackendLoading}
               >
-                Add {backendDeductionDraft.kind === 'reimbursement' ? 'Reimbursement' : 'Deduction'}
+                Add {backendDeductionDraft.kind === 'reimbursement' ? 'Pay / Reimbursement' : 'Deduction'}
               </button>
               {backendDeductionDraft.calculationType === 'percent' && backendDeductionDraft.amount && (
                 <p className="settlement-manual-note">
@@ -10829,7 +10812,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <th>Customer</th>
                   <th>Container</th>
                   <th>Load Pay</th>
-                  <th>Detention</th>
                   <th>Lumper</th>
                   <th>Deductions</th>
                   <th>Deduction Reason</th>
@@ -10840,7 +10822,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <tbody>
                 {visibleSettlementLoads.length === 0 ? (
                   <tr>
-                    <td colSpan="12" className="settlement-empty-cell">
+                      <td colSpan="11" className="settlement-empty-cell">
                       No loads found for this settlement period or container search.
                     </td>
                   </tr>
@@ -10859,7 +10841,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         </td>
                         <td>{load.customer || '-'}</td>
                         <td>{load.containerNumber || '-'}</td>
-                        {['driverRate', 'detention', 'lumper', 'fuelAdvance'].map((field) => (
+                        {['driverRate', 'lumper', 'fuelAdvance'].map((field) => (
                           <td key={field}>
                             <input
                               type="text"
@@ -11858,15 +11840,15 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="detail-box"><span>Load Rate</span><strong>{selectedAccountingLoad.rate || '$0.00'}</strong></div>
                 <div className="detail-box"><span>Bill Total</span><strong>{formatMoney(getCustomerBillAmount(selectedAccountingLoad))}</strong></div>
                 <div className="detail-box"><span>Driver Rate</span><strong>{selectedAccountingLoad.driverRate || '$0.00'}</strong></div>
-                <div className="detail-box"><span>Driver Pay + Detention</span><strong>{formatMoney(getDriverPayWithDetention(selectedAccountingLoad))}</strong></div>
+                <div className="detail-box"><span>Driver Pay</span><strong>{formatMoney(getDriverPayWithDetention(selectedAccountingLoad))}</strong></div>
               </div>
 
               <div className="settlement-box accounting-settlement-box">
-                <h4>Settlement Breakdown</h4>
+                <h4>Customer / Driver Amounts</h4>
                 <div className="settlement-row"><span>Load Rate</span><strong>{selectedAccountingLoad.rate || '$0.00'}</strong></div>
                 <div className="settlement-row"><span>Bill Total</span><strong>{formatMoney(getCustomerBillAmount(selectedAccountingLoad))}</strong></div>
                 <div className="settlement-row"><span>Driver Rate</span><strong>{selectedAccountingLoad.driverRate || '$0.00'}</strong></div>
-                <div className="settlement-row"><span>Detention</span><strong>{selectedAccountingLoad.detention || '$0.00'}</strong></div>
+                <div className="settlement-row"><span>Customer Detention</span><strong>{selectedAccountingLoad.detention || '$0.00'}</strong></div>
                 <div className="settlement-row"><span>Lumper</span><strong>{selectedAccountingLoad.lumper || '$0.00'}</strong></div>
                 <div className="settlement-row"><span>Fuel Advance</span><strong>- {selectedAccountingLoad.fuelAdvance || '$0.00'}</strong></div>
                 <div className="settlement-row total"><span>Settlement</span><strong>{selectedAccountingLoad.settlement || '$0.00'}</strong></div>
