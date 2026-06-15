@@ -1925,6 +1925,7 @@ const [settlementBackendLoading, setSettlementBackendLoading] = useState(false);
 const [settlementBackendStatus, setSettlementBackendStatus] = useState('');
 const [backendDeductionDraft, setBackendDeductionDraft] = useState({
   kind: 'deduction',
+  calculationType: 'flat',
   description: '',
   amount: '',
 });
@@ -4246,20 +4247,32 @@ const handleBackendDeductionDraftChange = (field, value) => {
 
 const handleAddBackendDeduction = async () => {
   const kind = backendDeductionDraft.kind === 'reimbursement' ? 'reimbursement' : 'deduction';
+  const calculationType = backendDeductionDraft.calculationType === 'percent' ? 'percent' : 'flat';
   const description = backendDeductionDraft.description.trim();
-  const amount = Math.abs(parseMoney(backendDeductionDraft.amount));
+  const rawAmount = Math.abs(parseMoney(backendDeductionDraft.amount));
 
   if (!description || !backendDeductionDraft.amount.trim()) {
     setSettlementBackendStatus('Add a description and amount first.');
     return;
   }
 
-  if (!amount) {
-    setSettlementBackendStatus('Enter an amount greater than $0.00.');
+  if (!rawAmount) {
+    setSettlementBackendStatus(`Enter a ${calculationType === 'percent' ? 'percent' : 'amount'} greater than 0.`);
     return;
   }
 
+  const grossPay = parseMoney(activeBackendSettlement?.statement?.totals?.grossPay || 0);
+  if (calculationType === 'percent' && !grossPay) {
+    setSettlementBackendStatus('This settlement needs gross pay before a percent deduction can be calculated.');
+    return;
+  }
+
+  const amount = calculationType === 'percent' ? grossPay * (rawAmount / 100) : rawAmount;
   const signedAmount = kind === 'deduction' ? -amount : amount;
+  const savedDescription =
+    calculationType === 'percent'
+      ? `${description} (${rawAmount}% of gross pay ${formatMoney(grossPay)})`
+      : description;
   const backendSettlement = await ensureBackendSettlement();
   if (!backendSettlement?.id) return;
 
@@ -4272,7 +4285,7 @@ const handleAddBackendDeduction = async () => {
         Authorization: `Bearer ${authToken}`,
       },
       body: JSON.stringify({
-        description,
+        description: savedDescription,
         amount: signedAmount,
       }),
     });
@@ -4282,7 +4295,7 @@ const handleAddBackendDeduction = async () => {
     }
 
     setActiveBackendSettlement(data);
-    setBackendDeductionDraft({ kind: 'deduction', description: '', amount: '' });
+    setBackendDeductionDraft({ kind: 'deduction', calculationType: 'flat', description: '', amount: '' });
     setSettlementBackendStatus(
       `${kind === 'deduction' ? 'Deduction' : 'Reimbursement'} saved to the database settlement.`
     );
@@ -10630,11 +10643,22 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 />
               </label>
               <label className="settlement-entry-field">
-                <span>Amount</span>
+                <span>Calculation</span>
+                <select
+                  className="filter-select"
+                  value={backendDeductionDraft.calculationType}
+                  onChange={(e) => handleBackendDeductionDraftChange('calculationType', e.target.value)}
+                >
+                  <option value="flat">Flat $</option>
+                  <option value="percent">Percent % of gross pay</option>
+                </select>
+              </label>
+              <label className="settlement-entry-field">
+                <span>{backendDeductionDraft.calculationType === 'percent' ? 'Percent' : 'Amount'}</span>
                 <input
                   type="text"
                   inputMode="decimal"
-                  placeholder="37.50"
+                  placeholder={backendDeductionDraft.calculationType === 'percent' ? '10' : '37.50'}
                   value={backendDeductionDraft.amount}
                   onChange={(e) => handleBackendDeductionDraftChange('amount', e.target.value)}
                 />
@@ -10647,6 +10671,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               >
                 Add {backendDeductionDraft.kind === 'reimbursement' ? 'Reimbursement' : 'Deduction'}
               </button>
+              {backendDeductionDraft.calculationType === 'percent' && backendDeductionDraft.amount && (
+                <p className="settlement-manual-note">
+                  Calculates to {formatMoney(
+                    parseMoney(activeBackendSettlement.statement?.totals?.grossPay || 0) *
+                      (Math.abs(parseMoney(backendDeductionDraft.amount)) / 100)
+                  )} from gross pay.
+                </p>
+              )}
             </div>
 
             <div className="table-wrap">
