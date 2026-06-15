@@ -5005,6 +5005,15 @@ const handleGenerateCustomerPdf = async (loadForPacket) => {
   if (!loadForPacket?.id) return;
 
   try {
+    const sanitizePdfDownloadName = (value, fallback = 'customer-packet') => {
+      const safe = String(value || fallback)
+        .trim()
+        .replace(/[^a-z0-9._-]+/gi, '-')
+        .replace(/^-+|-+$/g, '');
+      return safe || fallback;
+    };
+    const savedInvoiceNumber =
+      savedInvoices.find((invoice) => invoice.loadId === loadForPacket.id)?.invoiceNumber || '';
     const res = await fetch(
       `${API_BASE}/api/loads/${loadForPacket.id}/customer-packet`,
       {
@@ -5021,8 +5030,23 @@ const handleGenerateCustomerPdf = async (loadForPacket) => {
 
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const headerFilename =
+      disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)?.[1] || '';
+    const filenameBase = sanitizePdfDownloadName(
+      decodeURIComponent(headerFilename || '').replace(/\.pdf$/i, '') ||
+        savedInvoiceNumber ||
+        loadForPacket.invoiceNumber ||
+        loadForPacket.id,
+      loadForPacket.id
+    );
 
-    window.open(url, '_blank');
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filenameBase}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
 
     setTimeout(() => window.URL.revokeObjectURL(url), 5000);
   } catch (error) {
@@ -6134,6 +6158,17 @@ const handleMarkInvoiceUnpaid = async (invoice) => {
 const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
   if (!loadForPod) return;
 
+  const sanitizePrintFilename = (value, fallback = 'POD') => {
+    const safe = String(value || fallback)
+      .trim()
+      .replace(/[^a-z0-9._-]+/gi, '-')
+      .replace(/^-+|-+$/g, '');
+    return safe || fallback;
+  };
+  const podFilename = sanitizePrintFilename(
+    loadForPod.containerNumber || loadForPod.id,
+    'POD'
+  );
   const escapePodHtml = (value) =>
     String(value || '—')
       .replace(/&/g, '&amp;')
@@ -6227,7 +6262,7 @@ const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
   const modernPodHtml = `
     <html>
       <head>
-        <title>Proof of Delivery - ${escapePodHtml(loadForPod.id)}</title>
+        <title>${escapePodHtml(podFilename)}</title>
         <style>
           * { box-sizing: border-box; }
           body {
@@ -6411,6 +6446,7 @@ const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
 
   modernWindow.document.write(modernPodHtml);
   modernWindow.document.close();
+  modernWindow.document.title = podFilename;
   modernWindow.print();
   return;
 

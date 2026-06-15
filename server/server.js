@@ -391,6 +391,14 @@ const getExternalDocumentName = (category, loadId, url = '') => {
   return cleanName || `${loadId}-${category.replace(/\s+/g, '-').toLowerCase()}.pdf`;
 };
 
+const sanitizePdfFilename = (value, fallback = 'document') => {
+  const safe = String(value || fallback)
+    .trim()
+    .replace(/[^a-z0-9._-]+/gi, '-')
+    .replace(/^-+|-+$/g, '');
+  return safe || fallback;
+};
+
 const ensureExternalDocumentRecord = ({
   loadId,
   companyId,
@@ -3561,6 +3569,22 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
           });
           const packetCompanyName = packetCompany.invoiceName || packetCompany.name || 'Company';
           const packetCompanyAddress = packetCompany.invoiceAddress || '';
+          const packetInvoice = await new Promise((resolve) => {
+            db.get(
+              `SELECT invoiceNumber FROM invoices WHERE loadId = ? AND companyId = ? ORDER BY id DESC LIMIT 1`,
+              [loadId, companyId],
+              (invoiceErr, invoice) => {
+                if (invoiceErr) {
+                  console.error('Error loading invoice number for packet:', invoiceErr.message);
+                }
+                resolve(invoice || {});
+              }
+            );
+          });
+          const packetFilenameBase = sanitizePdfFilename(
+            packetInvoice.invoiceNumber || loadRow.invoiceNumber || loadRow.id || loadId,
+            loadId
+          );
 
           const mergedPdf = await PDFDocument.create();
 
@@ -3790,7 +3814,7 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
           res.setHeader('Content-Type', 'application/pdf');
           res.setHeader(
             'Content-Disposition',
-            `inline; filename="${loadId}-customer-packet.pdf"`
+            `inline; filename="${packetFilenameBase}.pdf"`
           );
 
           return res.send(Buffer.from(pdfBytes));
