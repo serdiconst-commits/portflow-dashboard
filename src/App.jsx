@@ -904,6 +904,7 @@ const [liveDriverLocations, setLiveDriverLocations] = useState([]);
 const driverMapRef = useRef(null);
 const driverMapInstanceRef = useRef(null);
 const driverMapMarkersRef = useRef({});
+const driverMapHasFitRef = useRef(false);
 
 const getAddressPartsFromPlace = (place) => {
   let street = '';
@@ -3217,7 +3218,6 @@ useEffect(() => {
 
   const interval = setInterval(() => {
     fetchLoads();
-    fetchDriverLocations();
   }, 5000);
 
   return () => clearInterval(interval);
@@ -7770,11 +7770,14 @@ useEffect(() => {
     }
   });
 
-  if (trackedDriverLocations.length === 1) {
-    driverMapInstanceRef.current.setCenter(bounds.getCenter());
-    driverMapInstanceRef.current.setZoom(12);
-  } else {
-    driverMapInstanceRef.current.fitBounds(bounds, 48);
+  if (!driverMapHasFitRef.current) {
+    if (trackedDriverLocations.length === 1) {
+      driverMapInstanceRef.current.setCenter(bounds.getCenter());
+      driverMapInstanceRef.current.setZoom(12);
+    } else {
+      driverMapInstanceRef.current.fitBounds(bounds, 48);
+    }
+    driverMapHasFitRef.current = true;
   }
 }, [trackedDriverLocations]);
 
@@ -9618,9 +9621,18 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             <div className="panel-header compact-header">
               <div>
                 <h3>Driver Live Tracking</h3>
-                <p className="panel-subtitle">Drivers appear here after they tap Start in the phone app.</p>
+                <p className="panel-subtitle">Drivers appear here after they tap Start in the phone app. Use Refresh to update locations.</p>
               </div>
-              <span>{trackedDriverLocations.length} online</span>
+              <div className="details-actions">
+                <span>{trackedDriverLocations.length} online</span>
+                <button
+                  type="button"
+                  className="secondary-btn compact-btn"
+                  onClick={fetchDriverLocations}
+                >
+                  Refresh
+                </button>
+              </div>
             </div>
 
             {trackedDriverLocations.length > 0 ? (
