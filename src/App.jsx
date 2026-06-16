@@ -10603,8 +10603,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                   <strong>
                                     {summary.eirNote ||
                                       (summary.hasPortDocuments
-                                        ? 'Port says documents exist, but no EIR download link was returned.'
-                                        : 'No EIR document returned yet.')}
+                                        ? 'Port says official EIR documents exist in the Customer Service Portal. EVP returns digital EIR data only.'
+                                        : 'No EIR data returned yet.')}
                                   </strong>
                                 </div>
                                 <div className="detail-box"><span>Checked By</span><strong>{summary.checkedBy || 'Not returned'}</strong></div>

@@ -2042,6 +2042,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
     const inEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate, gateTransactions }, 'IN EIR');
     const downloadedDocuments = [];
     const eirDownloadErrors = [];
+    const eirDocumentDownloadEnabled = Boolean(process.env.PORT_HOUSTON_EIR_DOCUMENT_URL_PATTERN);
 
     for (const transaction of [
       gateTransactions?.outEirTransaction,
@@ -2050,6 +2051,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       const category = getPortHoustonEirCategory(transaction);
       const transactionId = getPortHoustonTransactionId(transaction);
       if (!category || !transactionId) continue;
+      if (!eirDocumentDownloadEnabled) continue;
 
       try {
         const document = await downloadGateTransactionDocument(transactionId, credentials);
@@ -2107,29 +2109,30 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
           }
         : null,
       hasPortDocuments: portDocumentSignals.hasDocuments,
+      hasDigitalEirData: gateTransactionCount > 0,
+      officialDocumentSource: 'Port Houston Customer Service Portal',
       transactionNumbers: portDocumentSignals.transactionNumbers,
       documentUrlsFound: portDocumentSignals.documentUrls.length,
       downloadedDocuments,
       downloadErrors: eirDownloadErrors,
+      documentDownloadEnabled: eirDocumentDownloadEnabled,
       gateTransactionError: gateTransactions?.error || '',
       equipmentHistoryTransactionNumbers: gateTransactionNumbers,
       note: downloadedDocuments.length
         ? 'Port Houston EIR document was downloaded and synced to paperwork.'
         : outEirUrl || inEirUrl
           ? 'EIR document links were returned by Port Houston and synced to paperwork.'
+          : gateTransactionCount
+            ? `Port Houston returned digital EIR data${gateTransactionTypes ? ` including ${gateTransactionTypes}` : ''}. Official EIR documents are not available through the EVP API; retrieve the official document from the Port Houston Customer Service Portal.`
           : portDocumentSignals.hasDocuments
-            ? `Port Houston found EIR document flag on transaction ${portDocumentSignals.transactionNumbers.join(', ')}, but the document download endpoint did not return a file yet.`
+            ? `Port Houston found an EIR document flag on transaction ${portDocumentSignals.transactionNumbers.join(', ')}, but EVP does not provide the official EIR document link. Use the Port Houston Customer Service Portal.`
             : gateTransactions?.error
               ? `Gate transaction lookup failed: ${gateTransactions.error}`
               : gateTransactions?.reason
                 ? gateTransactions.reason
               : gateTransactions?.transactions?.length === 0
                 ? 'No Port Houston gate transaction was returned for this container.'
-              : gateTransactionCount
-                ? `Port Houston returned ${gateTransactionCount} gate transaction(s)${
-                    gateTransactionTypes ? ` including ${gateTransactionTypes}` : ''
-                  }, but no EIR PDF document link was returned for this check.`
-              : 'No EIR document was returned by Port Houston for this check.',
+              : 'No EIR data was returned by Port Houston for this check.',
     };
     const response = {
       loadId,
