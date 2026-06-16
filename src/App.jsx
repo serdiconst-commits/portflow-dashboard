@@ -3683,7 +3683,6 @@ useEffect(() => {
     const existingLoadIds = new Set(filteredSettlementLoads.map((load) => load.id));
 
     return (loadsData || [])
-      .filter((load) => normalizeDriverForStorage(load.driver) === activeSettlementDriverId)
       .filter((load) => isCompletedLoad(load))
       .filter((load) => !existingLoadIds.has(load.id))
       .filter((load) => {
@@ -3694,6 +3693,7 @@ useEffect(() => {
           load.poNumber,
           load.bookingNumber,
           load.customer,
+          getDriverLabel(load.driver),
           formatAppointmentTime(load.appointmentTime),
         ]
           .filter(Boolean)
@@ -4400,6 +4400,10 @@ const handleAddManualSettlementLoad = async (loadId) => {
   if (enteredPay === null) return;
   const outsidePeriod = isLoadOutsideSettlementPeriod(load);
   const priorSettlementLine = getBackendSettlementLineForLoad(load.id);
+  const originalLoadDriver = getDriverLabel(load.driver);
+  const settlementDriverLabel = getDriverLabel(activeSettlementDriverId);
+  const isCrossDriverAdjustment =
+    normalizeDriverForStorage(load.driver) !== normalizeDriverForStorage(activeSettlementDriverId);
   const backendSettlement = await ensureBackendSettlement();
   if (!backendSettlement?.id) return;
 
@@ -4416,10 +4420,11 @@ const handleAddManualSettlementLoad = async (loadId) => {
         movesCount: load.movesCount || 1,
         description: [
           outsidePeriod ? 'Outside-period load' : 'Manual load add',
+          isCrossDriverAdjustment ? `cross-driver adjustment from ${originalLoadDriver || 'unassigned driver'} to ${settlementDriverLabel}` : '',
           priorSettlementLine ? 'already listed in this settlement statement' : '',
           `appointment ${formatAppointmentTime(load.appointmentTime) || 'not set'}`,
         ].filter(Boolean).join(' - '),
-        source: outsidePeriod ? 'outside_period' : 'manual',
+        source: isCrossDriverAdjustment ? 'cross_driver' : outsidePeriod ? 'outside_period' : 'manual',
       }),
     });
     const data = await res.json();
@@ -4457,7 +4462,7 @@ const handleAddManualSettlementLoad = async (loadId) => {
 const handleRemoveManualSettlementLoad = async (loadId) => {
   const load = loadsData.find((item) => item.id === loadId);
   const backendLine = activeBackendSettlement?.statement?.loads?.find(
-    (item) => item.loadId === loadId && ['manual', 'outside_period'].includes(item.source)
+    (item) => item.loadId === loadId && ['manual', 'outside_period', 'cross_driver'].includes(item.source)
   );
 
   if (activeBackendSettlement?.id && backendLine?.settlementLoadId) {
@@ -11005,6 +11010,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           {formatAppointmentTime(load.appointmentTime) || 'No appointment'} - {load.customer || 'No customer'} - {load.referenceNumber || load.poNumber || load.id}
                         </span>
                         <span>
+                          Load driver: {getDriverLabel(load.driver)} - Pays to: {getDriverLabel(activeSettlementDriverId)}
+                        </span>
+                        <span>
                           {isLoadOutsideSettlementPeriod(load) ? 'Outside current period' : 'Inside current period'} - {getDeliveryDisplay(load.delivery) || 'No delivery'}
                         </span>
                       </button>
@@ -11511,6 +11519,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   visibleSettlementLoads.map((load) => {
                     const hasDraft = Boolean(settlementPayDrafts[load.id]);
                     const isManualSettlementLoad = currentSettlementManualLoadIds.includes(load.id);
+                    const backendLine = getBackendSettlementLineForLoad(load.id);
+                    const isCrossDriverSettlementLoad = backendLine?.source === 'cross_driver';
                     return (
                       <tr key={load.id}>
                         <td>{load.loadDate || '-'}</td>
@@ -11519,6 +11529,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <strong>{load.id}</strong>
                           <span>{load.referenceNumber || load.bookingNumber || 'No reference'}</span>
                           {isManualSettlementLoad && <span>Manual add</span>}
+                          {isCrossDriverSettlementLoad && <span>Cross-driver pay</span>}
                         </td>
                         <td>{load.customer || '-'}</td>
                         <td>
