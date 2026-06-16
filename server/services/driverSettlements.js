@@ -392,6 +392,40 @@ export async function addSettlementLoad(db, companyId, settlementId, input = {},
   return recalculateSettlement(db, companyId, settlementId, changedBy);
 }
 
+export async function updateSettlementLoad(db, companyId, settlementId, settlementLoadId, input = {}, changedBy = '') {
+  const existing = await dbGet(
+    db,
+    `SELECT sl.*
+     FROM settlement_loads sl
+     JOIN settlements s ON s.id = sl.settlementId
+     WHERE sl.id = ? AND sl.settlementId = ? AND s.companyId = ?`,
+    [settlementLoadId, settlementId, companyId]
+  );
+  if (!existing) return null;
+
+  const payAmount = roundMoney(parseMoney(input.payAmount ?? existing.payAmount));
+  const movesCount = Math.max(1, Number.parseInt(input.movesCount || existing.movesCount || 1, 10) || 1);
+  const description = input.description !== undefined ? String(input.description || '') : existing.description;
+
+  await dbRun(
+    db,
+    `UPDATE settlement_loads
+     SET payAmount = ?, movesCount = ?, description = ?
+     WHERE id = ? AND settlementId = ?`,
+    [payAmount, movesCount, description, settlementLoadId, settlementId]
+  );
+
+  await writeSettlementAudit(
+    db,
+    settlementId,
+    'UPDATE_LOAD_PAY',
+    existing,
+    { ...existing, payAmount, movesCount, description },
+    changedBy
+  );
+  return recalculateSettlement(db, companyId, settlementId, changedBy);
+}
+
 export async function removeSettlementLoad(db, companyId, settlementId, settlementLoadId, changedBy = '') {
   const existing = await dbGet(
     db,

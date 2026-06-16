@@ -4789,8 +4789,42 @@ const handleSaveSettlementPay = async (load) => {
     );
     setSelectedLoad((prev) => (prev?.id === data.id ? data : prev));
     setEditingLoad((prev) => (prev?.id === data.id ? data : prev));
+
+    let backendSettlementForPay = activeBackendSettlement;
+    if (!backendSettlementForPay?.id && activeSettlementDriverId) {
+      backendSettlementForPay = await ensureBackendSettlement();
+    }
+
+    if (backendSettlementForPay?.id) {
+      const backendLine = backendSettlementForPay.statement?.loads?.find((line) => line.loadId === data.id);
+      const settlementPayload = {
+        loadId: data.id,
+        payAmount: updatedLoad.driverRate,
+        movesCount: updatedLoad.movesCount || data.movesCount || 1,
+        description: backendLine?.description || 'Updated from settlement sheet',
+        source: backendLine?.source || 'manual',
+      };
+      const settlementUrl = backendLine?.settlementLoadId
+        ? `${API_BASE}/api/driver-settlements/${backendSettlementForPay.id}/loads/${backendLine.settlementLoadId}`
+        : `${API_BASE}/api/driver-settlements/${backendSettlementForPay.id}/loads`;
+      const settlementRes = await fetch(settlementUrl, {
+        method: backendLine?.settlementLoadId ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(settlementPayload),
+      });
+      const settlementData = await settlementRes.json();
+      if (!settlementRes.ok) {
+        throw new Error(settlementData.error || 'Load saved, but database statement pay did not update');
+      }
+      setActiveBackendSettlement(settlementData);
+      setSettlementBackendStatus(`Database settlement updated for ${data.containerNumber || data.id}.`);
+    }
+
     handleResetSettlementPayDraft(load.id);
-    setSettlementPayStatus(`Load pay saved for ${data.id}.`);
+    setSettlementPayStatus(`Load pay saved for ${data.id} and synced to the database statement.`);
   } catch (error) {
     console.error('Failed to update load pay:', error);
     setSettlementPayStatus(`Failed to save load pay: ${error.message}`);
