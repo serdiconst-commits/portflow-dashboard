@@ -2510,6 +2510,25 @@ td {
   font-size: 12px;
 }
 
+.settlement-link-button {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.settlement-link-button:hover,
+.settlement-link-button:focus {
+  color: #0f172a;
+}
+
 .settlement-manual-note {
   margin-top: 8px;
 }
@@ -3748,6 +3767,43 @@ button:disabled {
   max-height: 70vh;
   display: block;
   margin: 0 auto;
+}
+
+.settlement-review-modal {
+  width: min(1080px, 92vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.settlement-review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.settlement-review-route {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.settlement-review-docs {
+  margin-top: 16px;
+}
+
+.settlement-review-checks {
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  width: min(420px, 100%);
+}
+
+@media (max-width: 800px) {
+  .settlement-review-grid,
+  .settlement-review-route,
+  .settlement-review-checks {
+    grid-template-columns: 1fr;
+  }
 }
 .active-summary-card {
   border: 2px solid #2563eb;

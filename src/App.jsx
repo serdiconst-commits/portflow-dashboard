@@ -2177,6 +2177,7 @@ const [fuelStatus, setFuelStatus] = useState('');
 const [fuelSubmitting, setFuelSubmitting] = useState(false);
 const [selectedAccountingLoadId, setSelectedAccountingLoadId] = useState('');
 const [selectedSettlementLoadId, setSelectedSettlementLoadId] = useState('');
+const [settlementReviewLoadId, setSettlementReviewLoadId] = useState('');
 const [settlementPayDrafts, setSettlementPayDrafts] = useState({});
 const [settlementPayStatus, setSettlementPayStatus] = useState('');
 const [backendSettlements, setBackendSettlements] = useState([]);
@@ -3673,6 +3674,8 @@ useEffect(() => {
         String(load.containerNumber || '').toLowerCase().includes(normalizedSettlementContainerSearch)
       )
     : settlementDetailLoads;
+  const isCompletedLoad = (load) => ['delivered', 'completed'].includes(getLoadQuickStatusKey(load));
+  const isDeliveredLoad = isCompletedLoad;
 
   const settlementManualLoadCandidates = useMemo(() => {
     const term = settlementManualLoadSearch.trim().toLowerCase();
@@ -3681,6 +3684,7 @@ useEffect(() => {
 
     return (loadsData || [])
       .filter((load) => normalizeDriverForStorage(load.driver) === activeSettlementDriverId)
+      .filter((load) => isCompletedLoad(load))
       .filter((load) => !existingLoadIds.has(load.id))
       .filter((load) => {
         const haystack = [
@@ -3697,8 +3701,24 @@ useEffect(() => {
           .toLowerCase();
         return haystack.includes(term);
       })
-      .slice(0, 8);
+      .sort((a, b) => getSettlementAppointmentDateValue(b) - getSettlementAppointmentDateValue(a))
+      .slice(0, 12);
   }, [activeSettlementDriverId, filteredSettlementLoads, loadsData, settlementManualLoadSearch]);
+
+  const isLoadOutsideSettlementPeriod = (load) => {
+    const settlementAppointmentDate = getSettlementAppointmentDate(load);
+    if (!settlementAppointmentDate) return true;
+    if (settlementStartDate && settlementAppointmentDate < settlementStartDate) return true;
+    if (settlementEndDate && settlementAppointmentDate > settlementEndDate) return true;
+    return false;
+  };
+
+  const getBackendSettlementLineForLoad = (loadId) =>
+    activeBackendSettlement?.statement?.loads?.find((line) => line.loadId === loadId) || null;
+
+  const settlementReviewLoad = settlementReviewLoadId
+    ? loadsData.find((load) => load.id === settlementReviewLoadId) || null
+    : null;
 
   const selectedSettlementLoad =
     visibleSettlementLoads.find((load) => load.id === selectedSettlementLoadId) ||
@@ -3718,8 +3738,6 @@ useEffect(() => {
 
   const paperworkAlerts = loadsData.filter((load) => load.paperwork);
 
-const isCompletedLoad = (load) => ['delivered', 'completed'].includes(getLoadQuickStatusKey(load));
-const isDeliveredLoad = isCompletedLoad;
 const activeOperationsLoads = (loadsData || []).filter((load) => !isCompletedLoad(load));
 const completedAccountingLoads = (loadsData || [])
   .filter((load) => isCompletedLoad(load))
@@ -4374,6 +4392,14 @@ const handleAddManualSettlementLoad = async (loadId) => {
   const load = loadsData.find((item) => item.id === loadId);
   if (!load) return;
 
+  const currentPay = getSettlementPayValue(load, 'driverRate');
+  const enteredPay = window.prompt(
+    `Driver pay for ${load.containerNumber || load.id}`,
+    currentPay
+  );
+  if (enteredPay === null) return;
+  const outsidePeriod = isLoadOutsideSettlementPeriod(load);
+  const priorSettlementLine = getBackendSettlementLineForLoad(load.id);
   const backendSettlement = await ensureBackendSettlement();
   if (!backendSettlement?.id) return;
 
@@ -4386,9 +4412,14 @@ const handleAddManualSettlementLoad = async (loadId) => {
       },
       body: JSON.stringify({
         loadId,
-        payAmount: getSettlementPayValue(load, 'driverRate'),
+        payAmount: enteredPay,
         movesCount: load.movesCount || 1,
-        description: `Extra load added from ${formatAppointmentTime(load.appointmentTime) || 'outside period'}`,
+        description: [
+          outsidePeriod ? 'Outside-period load' : 'Manual load add',
+          priorSettlementLine ? 'already listed in this settlement statement' : '',
+          `appointment ${formatAppointmentTime(load.appointmentTime) || 'not set'}`,
+        ].filter(Boolean).join(' - '),
+        source: outsidePeriod ? 'outside_period' : 'manual',
       }),
     });
     const data = await res.json();
@@ -4411,6 +4442,13 @@ const handleAddManualSettlementLoad = async (loadId) => {
     };
   });
   setSelectedSettlementLoadId(loadId);
+  setSettlementPayDrafts((prev) => ({
+    ...prev,
+    [loadId]: {
+      ...(prev[loadId] || {}),
+      driverRate: enteredPay,
+    },
+  }));
   setSettlementManualLoadSearch('');
   setSettlementPayStatus(`Added ${load.containerNumber || load.id} to this settlement.`);
   setSettlementBackendStatus(`Saved ${load.containerNumber || load.id} to the database settlement.`);
@@ -4419,7 +4457,7 @@ const handleAddManualSettlementLoad = async (loadId) => {
 const handleRemoveManualSettlementLoad = async (loadId) => {
   const load = loadsData.find((item) => item.id === loadId);
   const backendLine = activeBackendSettlement?.statement?.loads?.find(
-    (item) => item.loadId === loadId && item.source === 'manual'
+    (item) => item.loadId === loadId && ['manual', 'outside_period'].includes(item.source)
   );
 
   if (activeBackendSettlement?.id && backendLine?.settlementLoadId) {
@@ -10966,6 +11004,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <span>
                           {formatAppointmentTime(load.appointmentTime) || 'No appointment'} - {load.customer || 'No customer'} - {load.referenceNumber || load.poNumber || load.id}
                         </span>
+                        <span>
+                          {isLoadOutsideSettlementPeriod(load) ? 'Outside current period' : 'Inside current period'} - {getDeliveryDisplay(load.delivery) || 'No delivery'}
+                        </span>
                       </button>
                     ))
                   )}
@@ -11380,7 +11421,19 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <td>{formatAppointmentTime(line.appointmentTime) || '-'}</td>
                         <td>{line.loadId || line.description || '-'}</td>
                         <td>{line.customer || '-'}</td>
-                        <td>{line.containerNumber || '-'}</td>
+                        <td>
+                          {line.loadId ? (
+                            <button
+                              type="button"
+                              className="settlement-link-button"
+                              onClick={() => setSettlementReviewLoadId(line.loadId)}
+                            >
+                              {line.containerNumber || line.loadId}
+                            </button>
+                          ) : (
+                            line.containerNumber || '-'
+                          )}
+                        </td>
                         <td>{line.source || 'auto'}</td>
                         <td>{formatMoney(line.payAmount)}</td>
                       </tr>
@@ -11468,7 +11521,15 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           {isManualSettlementLoad && <span>Manual add</span>}
                         </td>
                         <td>{load.customer || '-'}</td>
-                        <td>{load.containerNumber || '-'}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="settlement-link-button"
+                            onClick={() => setSettlementReviewLoadId(load.id)}
+                          >
+                            {load.containerNumber || load.id}
+                          </button>
+                        </td>
                         {['driverRate', 'lumper', 'fuelAdvance'].map((field) => (
                           <td key={field}>
                             <input
@@ -13064,6 +13125,103 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           </div>
         </section>
       )}
+      {settlementReviewLoad && (
+        <div className="modal-overlay" onClick={() => setSettlementReviewLoadId('')}>
+          <div className="modal-content settlement-review-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3>{settlementReviewLoad.containerNumber || settlementReviewLoad.id}</h3>
+                <p className="panel-subtitle">
+                  {settlementReviewLoad.customer || 'No customer'} - {formatAppointmentTime(settlementReviewLoad.appointmentTime) || 'No appointment'}
+                </p>
+              </div>
+              <button type="button" className="secondary-btn" onClick={() => setSettlementReviewLoadId('')}>
+                Close
+              </button>
+            </div>
+
+            <div className="settlement-review-grid">
+              <div className="detail-box">
+                <span>Load ID</span>
+                <strong>{settlementReviewLoad.id}</strong>
+              </div>
+              <div className="detail-box">
+                <span>Driver</span>
+                <strong>{getDriverLabel(settlementReviewLoad.driver)}</strong>
+              </div>
+              <div className="detail-box">
+                <span>Truck</span>
+                <strong>{settlementReviewLoad.truck || '-'}</strong>
+              </div>
+              <div className="detail-box">
+                <span>Driver Pay</span>
+                <strong>{getSettlementPayValue(settlementReviewLoad, 'driverRate')}</strong>
+              </div>
+              <div className="detail-box">
+                <span>Reference</span>
+                <strong>{settlementReviewLoad.referenceNumber || settlementReviewLoad.poNumber || '-'}</strong>
+              </div>
+              <div className="detail-box">
+                <span>Pickup #</span>
+                <strong>{settlementReviewLoad.pickupNumber || '-'}</strong>
+              </div>
+            </div>
+
+            <div className="settlement-review-route">
+              <div className="address-block">
+                <span>Pickup</span>
+                <p>{settlementReviewLoad.pickup || '-'}</p>
+              </div>
+              <div className="address-block">
+                <span>Delivery</span>
+                <p>{getDeliveryDisplay(settlementReviewLoad.delivery) || '-'}</p>
+              </div>
+              <div className="address-block">
+                <span>Return</span>
+                <p>{settlementReviewLoad.returnLocation || '-'}</p>
+              </div>
+            </div>
+
+            <div className="settlement-review-docs">
+              <div className="documents-header">
+                <h4>Documents / Paperwork</h4>
+                <div className="checklist-grid settlement-review-checks">
+                  {['POD', 'IN EIR', 'OUT EIR'].map((docType) => {
+                    const isUploaded = getChecklistStatus(settlementReviewLoad, docType);
+                    return (
+                      <div key={docType} className={`checklist-card ${isUploaded ? 'uploaded' : 'missing'}`}>
+                        <span>{docType}</span>
+                        <strong>{isUploaded ? 'Uploaded' : 'Missing'}</strong>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {settlementReviewLoad.documents?.length ? (
+                <div className="documents-list">
+                  {settlementReviewLoad.documents.map((doc) => (
+                    <div key={doc.id} className="document-card">
+                      <div className="document-info">
+                        <strong>{doc.name}</strong>
+                        <p>{doc.size} - {normalizeDocType(doc.type)}</p>
+                        <span className="document-badge">{doc.category}</span>
+                      </div>
+                      <div className="document-actions">
+                        <button className="secondary-btn" onClick={() => handleOpenDocument(doc)}>Open</button>
+                        <button className="secondary-btn" onClick={() => handleDownloadDocument(doc)}>Download</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="documents-empty">No documents uploaded for this load.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {previewDocument && previewUrl && (
   <div className="modal-overlay" onClick={handleClosePreview}>
     <div className="modal-content preview-modal" onClick={(e) => e.stopPropagation()}>
