@@ -2190,7 +2190,12 @@ const [backendDeductionDraft, setBackendDeductionDraft] = useState({
   description: '',
   amount: '',
 });
+const [backendNetDeductionDraft, setBackendNetDeductionDraft] = useState({
+  description: '',
+  amount: '',
+});
 const [editingBackendDeductionId, setEditingBackendDeductionId] = useState('');
+const [editingBackendNetDeductionId, setEditingBackendNetDeductionId] = useState('');
 const [invoiceLoadId, setInvoiceLoadId] = useState('');
 const [savedInvoices, setSavedInvoices] = useState([]);
 const [invoiceStatusMessage, setInvoiceStatusMessage] = useState('');
@@ -4637,6 +4642,86 @@ const handleCancelBackendDeductionEdit = () => {
   setSettlementBackendStatus('Deduction edit canceled.');
 };
 
+const resetBackendNetDeductionDraft = () => {
+  setBackendNetDeductionDraft({
+    description: '',
+    amount: '',
+  });
+  setEditingBackendNetDeductionId('');
+};
+
+const handleBackendNetDeductionDraftChange = (field, value) => {
+  setBackendNetDeductionDraft((prev) => ({
+    ...prev,
+    [field]: value,
+  }));
+  setSettlementBackendStatus('');
+};
+
+const handleEditBackendNetDeduction = (item) => {
+  if (!item?.id) return;
+
+  setEditingBackendNetDeductionId(item.id);
+  setBackendNetDeductionDraft({
+    description: item.description || '',
+    amount: Math.abs(parseMoney(item.amount)).toFixed(2),
+  });
+  setSettlementBackendStatus('Editing net deduction. Save when ready.');
+};
+
+const handleCancelBackendNetDeductionEdit = () => {
+  resetBackendNetDeductionDraft();
+  setSettlementBackendStatus('Net deduction edit canceled.');
+};
+
+const handleAddBackendNetDeduction = async () => {
+  const description = backendNetDeductionDraft.description.trim();
+  const amount = Math.abs(parseMoney(backendNetDeductionDraft.amount));
+
+  if (!description || !backendNetDeductionDraft.amount.trim()) {
+    setSettlementBackendStatus('Add a net deduction description and amount first.');
+    return;
+  }
+
+  if (!amount) {
+    setSettlementBackendStatus('Enter a net deduction amount greater than 0.');
+    return;
+  }
+
+  const backendSettlement = await ensureBackendSettlement();
+  if (!backendSettlement?.id) return;
+
+  const isEditing = Boolean(editingBackendNetDeductionId);
+  setSettlementBackendLoading(true);
+  try {
+    const res = await fetch(`${API_BASE}/api/driver-settlements/${backendSettlement.id}/deductions${isEditing ? `/${editingBackendNetDeductionId}` : ''}`, {
+      method: isEditing ? 'PUT' : 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        description,
+        amount: -amount,
+        stage: 'net_deduction',
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save net deduction');
+    }
+
+    setActiveBackendSettlement(data);
+    resetBackendNetDeductionDraft();
+    setSettlementBackendStatus(`Net deduction ${isEditing ? 'updated' : 'saved'} after net pay.`);
+  } catch (error) {
+    console.error('Failed to save net deduction:', error);
+    setSettlementBackendStatus(`Failed to save net deduction: ${error.message}`);
+  } finally {
+    setSettlementBackendLoading(false);
+  }
+};
+
 const handleAddBackendDeduction = async () => {
   const kind = backendDeductionDraft.kind === 'reimbursement' ? 'reimbursement' : 'deduction';
   const calculationType = backendDeductionDraft.calculationType === 'percent' ? 'percent' : 'flat';
@@ -4680,6 +4765,7 @@ const handleAddBackendDeduction = async () => {
       body: JSON.stringify({
         description: savedDescription,
         amount: signedAmount,
+        stage: 'gross_adjustment',
       }),
     });
     const data = await res.json();
@@ -5804,6 +5890,8 @@ const handleChangeUserRole = async (userId, newRole) => {
     const summaryRows = [
       ['Gross Pay', statement.totals?.grossPay],
       ['Adjustments Total', statement.totals?.adjustmentsTotal],
+      ['Net Before Deductions', statement.totals?.netBeforeDeductions],
+      ['Net Deductions', -(statement.totals?.netDeductionsTotal || 0)],
       ['Net Pay', statement.totals?.netPay],
       ['Load Count', statement.totals?.loadCount],
     ].map(([label, amount]) => ({
@@ -5848,7 +5936,21 @@ const handleChangeUserRole = async (userId, newRole) => {
       Amount: formatMoney(item.amount || 0),
     }));
 
-    const exportRows = [...summaryRows, ...loadRows, ...deductionRows];
+    const netDeductionRows = (statement.netDeductions || []).map((item) => ({
+      Type: 'Net Deduction',
+      Driver: `${statement.driver?.id || ''} - ${statement.driver?.name || ''}`.trim(),
+      Period: `${statement.settlement?.periodStart || ''} to ${statement.settlement?.periodEnd || ''}`,
+      Date: formatDateTime(item.createdAt),
+      Load: '',
+      Customer: '',
+      Container: '',
+      Reference: '',
+      Source: item.addedBy || '',
+      Description: item.description || '',
+      Amount: formatMoney(item.amount || 0),
+    }));
+
+    const exportRows = [...summaryRows, ...loadRows, ...deductionRows, ...netDeductionRows];
     const headers = Object.keys(exportRows[0] || {
       Type: '',
       Driver: '',
@@ -5929,6 +6031,19 @@ const handleChangeUserRole = async (userId, newRole) => {
       )
       .join('');
 
+    const netDeductionsHtml = (statement.netDeductions || [])
+      .map(
+        (item) => `
+          <tr>
+            <td>${escapeHtml(item.description || '-')}</td>
+            <td>${escapeHtml(item.addedBy || '-')}</td>
+            <td>${escapeHtml(formatDateTime(item.createdAt))}</td>
+            <td>${escapeHtml(formatMoney(item.amount || 0))}</td>
+          </tr>
+        `
+      )
+      .join('');
+
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) return;
 
@@ -5961,6 +6076,7 @@ const handleChangeUserRole = async (userId, newRole) => {
             <div class="box"><span>Loads</span><strong>${escapeHtml(statement.totals?.loadCount || 0)}</strong></div>
             <div class="box"><span>Gross Pay</span><strong>${escapeHtml(formatMoney(statement.totals?.grossPay || 0))}</strong></div>
             <div class="box"><span>Adjustments</span><strong>${escapeHtml(formatMoney(statement.totals?.adjustmentsTotal || 0))}</strong></div>
+            <div class="box"><span>Net Deductions</span><strong>${escapeHtml(formatMoney(-(statement.totals?.netDeductionsTotal || 0)))}</strong></div>
             <div class="box"><span>Net Pay</span><strong class="net">${escapeHtml(formatMoney(statement.totals?.netPay || 0))}</strong></div>
           </div>
 
@@ -5992,6 +6108,19 @@ const handleChangeUserRole = async (userId, newRole) => {
               </tr>
             </thead>
             <tbody>${adjustmentsHtml || '<tr><td colspan="5">No deductions or reimbursements</td></tr>'}</tbody>
+          </table>
+
+          <h2>Net Deductions</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Added By</th>
+                <th>Date</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>${netDeductionsHtml || '<tr><td colspan="4">No net deductions</td></tr>'}</tbody>
           </table>
         </body>
       </html>
@@ -11419,6 +11548,106 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           </section>
         )}
 
+        {activeBackendSettlement?.id && (
+          <section className="panel settlement-deductions-panel">
+            <div className="panel-header">
+              <div>
+                <h3>Net Deductions</h3>
+                <p className="panel-subtitle">Subtract after net pay for items like final payroll deductions or post-settlement charges.</p>
+              </div>
+              <span>-{formatMoney(activeBackendSettlement.statement?.totals?.netDeductionsTotal || 0)}</span>
+            </div>
+
+            <div className="settlement-custom-deduction-form">
+              <label className="settlement-entry-field">
+                <span>Description</span>
+                <input
+                  type="text"
+                  placeholder="Example: post-settlement repair, final deduction"
+                  value={backendNetDeductionDraft.description}
+                  onChange={(e) => handleBackendNetDeductionDraftChange('description', e.target.value)}
+                />
+              </label>
+              <label className="settlement-entry-field">
+                <span>Amount</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="37.50"
+                  value={backendNetDeductionDraft.amount}
+                  onChange={(e) => handleBackendNetDeductionDraftChange('amount', e.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={handleAddBackendNetDeduction}
+                disabled={settlementBackendLoading}
+              >
+                {editingBackendNetDeductionId ? 'Save Net Deduction' : 'Add Net Deduction'}
+              </button>
+              {editingBackendNetDeductionId && (
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={handleCancelBackendNetDeductionEdit}
+                  disabled={settlementBackendLoading}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th>Added By</th>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(activeBackendSettlement.statement?.netDeductions || []).length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className="settlement-empty-cell">No net deductions yet.</td>
+                    </tr>
+                  ) : (
+                    activeBackendSettlement.statement.netDeductions.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.description}</td>
+                        <td>{item.addedBy || '-'}</td>
+                        <td>{formatDateTime(item.createdAt)}</td>
+                        <td>{formatMoney(item.amount)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="secondary-btn"
+                            onClick={() => handleEditBackendNetDeduction(item)}
+                            disabled={settlementBackendLoading}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-btn"
+                            onClick={() => handleRemoveBackendDeduction(item.id)}
+                            disabled={settlementBackendLoading}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
         {activeBackendSettlement?.statement && (
           <section className="panel settlement-detail-panel">
             <div className="panel-header">
@@ -11430,6 +11659,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               </div>
               <div className="details-actions">
                 <span>Gross {formatMoney(activeBackendSettlement.statement.totals?.grossPay || 0)}</span>
+                <span>Net Deductions {formatMoney(-(activeBackendSettlement.statement.totals?.netDeductionsTotal || 0))}</span>
                 <span>Net {formatMoney(activeBackendSettlement.statement.totals?.netPay || 0)}</span>
                 <button type="button" className="secondary-btn" onClick={handleExportBackendSettlementCsv}>
                   Export CSV

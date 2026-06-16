@@ -629,11 +629,17 @@ db.run(`
     settlement_id TEXT NOT NULL,
     description TEXT NOT NULL,
     amount REAL NOT NULL,
+    stage TEXT DEFAULT 'gross_adjustment',
     added_by TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY (settlement_id) REFERENCES settlements(id) ON DELETE CASCADE
   )
 `);
+db.run(`ALTER TABLE deductions ADD COLUMN stage TEXT DEFAULT 'gross_adjustment'`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding stage column to deductions:', err.message);
+  }
+});
 db.run(`
   CREATE INDEX IF NOT EXISTS idx_deductions_settlement
   ON deductions(settlement_id)

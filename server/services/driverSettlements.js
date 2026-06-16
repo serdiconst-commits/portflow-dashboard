@@ -88,8 +88,12 @@ const buildStatement = ({ settlement, driver, loads, deductions, auditLogs }) =>
   }));
 
   const grossPay = roundMoney(loadLines.reduce((sum, row) => sum + row.payAmount, 0));
-  const deductionsTotal = roundMoney(deductions.reduce((sum, item) => sum + parseMoney(item.amount), 0));
-  const netPay = roundMoney(grossPay + deductionsTotal);
+  const grossAdjustments = deductions.filter((item) => (item.stage || 'gross_adjustment') !== 'net_deduction');
+  const netDeductions = deductions.filter((item) => item.stage === 'net_deduction');
+  const deductionsTotal = roundMoney(grossAdjustments.reduce((sum, item) => sum + parseMoney(item.amount), 0));
+  const netDeductionsTotal = roundMoney(netDeductions.reduce((sum, item) => sum + Math.abs(parseMoney(item.amount)), 0));
+  const netBeforeDeductions = roundMoney(grossPay + deductionsTotal);
+  const netPay = roundMoney(netBeforeDeductions - netDeductionsTotal);
 
   return {
     settlement: {
@@ -107,14 +111,25 @@ const buildStatement = ({ settlement, driver, loads, deductions, auditLogs }) =>
     totals: {
       grossPay,
       adjustmentsTotal: deductionsTotal,
+      netBeforeDeductions,
+      netDeductionsTotal,
       netPay,
       loadCount: loadLines.length,
     },
     loads: loadLines,
-    deductions: deductions.map((item) => ({
+    deductions: grossAdjustments.map((item) => ({
       id: item.id,
       description: item.description,
       amount: roundMoney(item.amount),
+      stage: item.stage || 'gross_adjustment',
+      addedBy: item.added_by || '',
+      createdAt: item.created_at,
+    })),
+    netDeductions: netDeductions.map((item) => ({
+      id: item.id,
+      description: item.description,
+      amount: -Math.abs(roundMoney(item.amount)),
+      stage: item.stage || 'net_deduction',
       addedBy: item.added_by || '',
       createdAt: item.created_at,
     })),
@@ -451,15 +466,18 @@ export async function addDeduction(db, companyId, settlementId, input = {}, chan
     throw new Error('Deduction description is required.');
   }
 
-  const amount = roundMoney(parseMoney(input.amount));
+  const stage = input.stage === 'net_deduction' ? 'net_deduction' : 'gross_adjustment';
+  const amount = stage === 'net_deduction'
+    ? -Math.abs(roundMoney(parseMoney(input.amount)))
+    : roundMoney(parseMoney(input.amount));
   await dbRun(
     db,
-    `INSERT INTO deductions (id, settlement_id, description, amount, added_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [uuidv4(), settlementId, description, amount, input.addedBy || changedBy || '', new Date().toISOString()]
+    `INSERT INTO deductions (id, settlement_id, description, amount, stage, added_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [uuidv4(), settlementId, description, amount, stage, input.addedBy || changedBy || '', new Date().toISOString()]
   );
 
-  await writeSettlementAudit(db, settlementId, 'ADD_DEDUCTION', null, { description, amount }, changedBy);
+  await writeSettlementAudit(db, settlementId, 'ADD_DEDUCTION', null, { description, amount, stage }, changedBy);
   return recalculateSettlement(db, companyId, settlementId, changedBy);
 }
 
@@ -479,16 +497,21 @@ export async function updateDeduction(db, companyId, settlementId, deductionId, 
     throw new Error('Deduction description is required.');
   }
 
-  const amount = roundMoney(parseMoney(input.amount));
+  const stage = input.stage === 'net_deduction' ? 'net_deduction' : existing.stage || 'gross_adjustment';
+  const amount = stage === 'net_deduction'
+    ? -Math.abs(roundMoney(parseMoney(input.amount)))
+    : roundMoney(parseMoney(input.amount));
   const updated = {
     ...existing,
     description,
     amount,
+    stage,
   };
 
-  await dbRun(db, `UPDATE deductions SET description = ?, amount = ? WHERE id = ? AND settlement_id = ?`, [
+  await dbRun(db, `UPDATE deductions SET description = ?, amount = ?, stage = ? WHERE id = ? AND settlement_id = ?`, [
     description,
     amount,
+    stage,
     deductionId,
     settlementId,
   ]);
