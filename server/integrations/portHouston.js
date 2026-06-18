@@ -87,6 +87,9 @@ const ASSOCIATED_EQUIPMENT_FIELDS = [
   'category',
 ].join(',');
 
+const OUT_GATE_SUBTYPES = ['RO', 'RM', 'DM', 'DI', 'DE'];
+const IN_GATE_SUBTYPES = ['RI', 'RE', 'RC', 'RB'];
+
 const DEFAULT_API_BASE = 'https://api.america.naviscloudops.com/v3/evp';
 const DEFAULT_AUTH_URL =
   'https://auth-v1.america.naviscloudops.com/auth/realms/phaprod/protocol/openid-connect/token';
@@ -563,9 +566,9 @@ const normalizeGateTransaction = (record = {}) => ({
   gkey: getFirstValue(record, ['gkey']),
   nbr: getFirstValue(record, ['nbr']),
   subType: String(getFirstValue(record, ['subType']) || '').trim().toUpperCase(),
-  eirType: String(getFirstValue(record, ['subType']) || '').trim().toUpperCase() === 'RI'
+  eirType: IN_GATE_SUBTYPES.includes(String(getFirstValue(record, ['subType']) || '').trim().toUpperCase())
     ? 'IN EIR'
-    : String(getFirstValue(record, ['subType']) || '').trim().toUpperCase() === 'RO'
+    : OUT_GATE_SUBTYPES.includes(String(getFirstValue(record, ['subType']) || '').trim().toUpperCase())
       ? 'OUT EIR'
       : '',
   status: getFirstValue(record, ['status']),
@@ -739,11 +742,11 @@ export const getGateTransactionsByContainer = async (containerNumber, credential
   return {
     transactions: sortedTransactions,
     outEirTransaction: sortedTransactions.find((item) =>
-      ['RO', 'RM', 'DM', 'DI', 'DE'].includes(item.subType) && item.hasDocuments === true
-    ) || sortedTransactions.find((item) => ['RO', 'RM', 'DM', 'DI', 'DE'].includes(item.subType)) || null,
+      OUT_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
+    ) || sortedTransactions.find((item) => OUT_GATE_SUBTYPES.includes(item.subType)) || null,
     inEirTransaction: sortedTransactions.find((item) =>
-      ['RI', 'RE', 'RC', 'RB'].includes(item.subType) && item.hasDocuments === true
-    ) || sortedTransactions.find((item) => ['RI', 'RE', 'RC', 'RB'].includes(item.subType)) || null,
+      IN_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
+    ) || sortedTransactions.find((item) => IN_GATE_SUBTYPES.includes(item.subType)) || null,
     lookupMethod: 'ctrId',
     requestedContainerNumber: cleanContainer,
     errors: [],
@@ -772,11 +775,11 @@ export const getGateTransactionsByNumbers = async (transactionNumbers = [], cred
   return {
     transactions: sortedTransactions,
     outEirTransaction: sortedTransactions.find((item) =>
-      ['RO', 'RM', 'DM', 'DI', 'DE'].includes(item.subType) && item.hasDocuments === true
-    ) || null,
+      OUT_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
+    ) || sortedTransactions.find((item) => OUT_GATE_SUBTYPES.includes(item.subType)) || null,
     inEirTransaction: sortedTransactions.find((item) =>
-      ['RI', 'RE', 'RC', 'RB'].includes(item.subType) && item.hasDocuments === true
-    ) || null,
+      IN_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
+    ) || sortedTransactions.find((item) => IN_GATE_SUBTYPES.includes(item.subType)) || null,
     lookupMethod: uniqueNumbers.length ? 'nbr' : '',
     requestedTransactionNumbers: uniqueNumbers,
     errors,

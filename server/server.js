@@ -467,11 +467,14 @@ const getPortHoustonTransactionId = (transaction = {}) => {
   return String(safeTransaction.nbr || safeTransaction.gkey || '').trim();
 };
 
+const portHoustonOutGateSubtypes = ['RO', 'RM', 'DM', 'DI', 'DE'];
+const portHoustonInGateSubtypes = ['RI', 'RE', 'RC', 'RB'];
+
 const getPortHoustonEirCategory = (transaction = {}) => {
   const safeTransaction = transaction || {};
   const subType = String(safeTransaction.subType || '').trim().toUpperCase();
-  if (['RI', 'RE', 'RC', 'RB'].includes(subType)) return 'IN EIR';
-  if (['RO', 'RM', 'DM', 'DI', 'DE'].includes(subType)) return 'OUT EIR';
+  if (portHoustonInGateSubtypes.includes(subType)) return 'IN EIR';
+  if (portHoustonOutGateSubtypes.includes(subType)) return 'OUT EIR';
   return '';
 };
 
