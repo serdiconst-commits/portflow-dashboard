@@ -1118,6 +1118,7 @@ const [companyLogoVersion, setCompanyLogoVersion] = useState(Date.now());
 const [invoiceBrandingForm, setInvoiceBrandingForm] = useState({
   invoiceName: savedCompany?.invoiceName || savedCompany?.name || '',
   invoiceAddress: savedCompany?.invoiceAddress || '',
+  settlementCompanyName: savedCompany?.settlementCompanyName || savedCompany?.invoiceName || savedCompany?.name || '',
 });
 const [invoiceBrandingStatus, setInvoiceBrandingStatus] = useState('');
 const defaultPodSettings = {
@@ -1307,8 +1308,9 @@ useEffect(() => {
   setInvoiceBrandingForm({
     invoiceName: company?.invoiceName || company?.name || '',
     invoiceAddress: company?.invoiceAddress || '',
+    settlementCompanyName: company?.settlementCompanyName || company?.invoiceName || company?.name || '',
   });
-}, [company?.invoiceName, company?.invoiceAddress, company?.name]);
+}, [company?.invoiceName, company?.invoiceAddress, company?.settlementCompanyName, company?.name]);
 
 useEffect(() => {
   setPodSettingsForm({
@@ -5810,6 +5812,14 @@ const handleChangeUserRole = async (userId, newRole) => {
 
   const handlePrintSettlementReport = () => {
     const periodLabel = settlementPeriodLabel;
+    const settlementCompanyName = company?.settlementCompanyName || company?.invoiceName || company?.name || 'Company';
+    const escapeSettlementHtml = (value) =>
+      String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 
     const rowsHtml = visibleSettlementLoads
       .map(
@@ -5865,7 +5875,8 @@ const handleChangeUserRole = async (userId, newRole) => {
           </style>
         </head>
         <body>
-          <h1>Driver Settlement Report</h1>
+          <h1>${escapeSettlementHtml(settlementCompanyName)}</h1>
+          <p>Driver Settlement Report</p>
           <p>Driver: ${activeSettlementDriver ? `${activeSettlementDriver.id} - ${activeSettlementDriver.name}` : '-'}</p>
           <p>Period: ${periodLabel}</p>
           <div class="summary">
@@ -6028,6 +6039,7 @@ const handleChangeUserRole = async (userId, newRole) => {
   const handlePrintBackendSettlementReport = () => {
     const statement = activeBackendSettlement?.statement;
     if (!statement) return;
+    const settlementCompanyName = company?.settlementCompanyName || company?.invoiceName || company?.name || 'Company';
 
     const escapeHtml = (value) =>
       String(value ?? '')
@@ -6102,7 +6114,8 @@ const handleChangeUserRole = async (userId, newRole) => {
           </style>
         </head>
         <body>
-          <h1>Database Settlement Payroll Report</h1>
+          <h1>${escapeHtml(settlementCompanyName)}</h1>
+          <p>Database Settlement Payroll Report</p>
           <p>Driver: ${escapeHtml(`${statement.driver?.id || ''} - ${statement.driver?.name || ''}`.trim())}</p>
           <p>Period: ${escapeHtml(statement.settlement?.periodStart || '')} to ${escapeHtml(statement.settlement?.periodEnd || '')}</p>
           <p>Status: ${escapeHtml(activeBackendSettlement.status || statement.settlement?.status || 'Draft')}</p>
@@ -12467,6 +12480,20 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 }
                 placeholder="Street, city, state, zip"
                 rows={3}
+              />
+            </label>
+            <label>
+              <span>Company Name on Driver Settlements</span>
+              <input
+                type="text"
+                value={invoiceBrandingForm.settlementCompanyName}
+                onChange={(e) =>
+                  setInvoiceBrandingForm((prev) => ({
+                    ...prev,
+                    settlementCompanyName: e.target.value,
+                  }))
+                }
+                placeholder="Company name for payroll reports"
               />
             </label>
           </div>

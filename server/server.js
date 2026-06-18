@@ -103,6 +103,7 @@ const getCompanyPayload = (company = {}) => ({
   email: company.email,
   invoiceName: company.invoiceName || company.name || '',
   invoiceAddress: company.invoiceAddress || '',
+  settlementCompanyName: company.settlementCompanyName || company.invoiceName || company.name || '',
   podSettings: parsePodSettings(company),
   logoUrl: getCompanyLogoUrl(company),
   portHoustonUsername: company.portHoustonUsername || '',
@@ -111,7 +112,7 @@ const getCompanyPayload = (company = {}) => ({
 });
 
 const companyProfileSelect =
-  'id, name, email, logoPath, invoiceName, invoiceAddress, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson';
+  'id, name, email, logoPath, invoiceName, invoiceAddress, settlementCompanyName, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -1697,6 +1698,7 @@ app.put('/api/company/invoice-branding', authenticate, requireRoles(adminRoles),
   const companyId = req.company.companyId;
   const invoiceName = String(req.body.invoiceName || '').trim().slice(0, 120);
   const invoiceAddress = String(req.body.invoiceAddress || '').trim().slice(0, 500);
+  const settlementCompanyName = String(req.body.settlementCompanyName || invoiceName).trim().slice(0, 120);
 
   if (!invoiceName) {
     return res.status(400).json({ error: 'Invoice company name is required.' });
@@ -1704,9 +1706,9 @@ app.put('/api/company/invoice-branding', authenticate, requireRoles(adminRoles),
 
   db.run(
     `UPDATE companies
-     SET invoiceName = ?, invoiceAddress = ?
+     SET invoiceName = ?, invoiceAddress = ?, settlementCompanyName = ?
      WHERE id = ?`,
-    [invoiceName, invoiceAddress, companyId],
+    [invoiceName, invoiceAddress, settlementCompanyName, companyId],
     function (err) {
       if (err) {
         console.error('Invoice branding update error:', err.message);
@@ -1728,10 +1730,11 @@ app.put('/api/company/invoice-branding', authenticate, requireRoles(adminRoles),
             entityId: companyId,
             entityLabel: company.name,
             oldValue: null,
-            newValue: { invoiceName, invoiceAddress },
+            newValue: { invoiceName, invoiceAddress, settlementCompanyName },
             changedFields: {
               invoiceName: { oldValue: '', newValue: invoiceName },
               invoiceAddress: { oldValue: '', newValue: invoiceAddress },
+              settlementCompanyName: { oldValue: '', newValue: settlementCompanyName },
             },
           });
 
