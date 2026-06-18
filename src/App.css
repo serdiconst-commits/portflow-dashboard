@@ -3368,6 +3368,21 @@ button:disabled {
   background: #ffffff;
 }
 
+.accounting-detail-drawer {
+  width: min(940px, calc(100vw - 28px));
+  margin-top: 0;
+  align-content: start;
+}
+
+.accounting-detail-drawer .panel-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
 .accounting-detail-panel .panel-header {
   align-items: flex-start;
 }

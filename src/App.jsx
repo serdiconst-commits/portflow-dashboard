@@ -12984,7 +12984,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           </div>
 
           {selectedAccountingLoad && (
-            <div className="accounting-detail-panel">
+            <>
+              <button
+                type="button"
+                className="load-details-backdrop accounting-details-backdrop"
+                aria-label="Close billing load details"
+                onClick={() => setSelectedAccountingLoadId('')}
+              />
+              <section className="panel load-details-drawer accounting-detail-panel accounting-detail-drawer open">
               <div className="panel-header">
                 <div>
                   <h3>Bill Load Details</h3>
@@ -13023,6 +13030,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     onClick={() => handleRestoreCompletedLoad(selectedAccountingLoad)}
                   >
                     Restore
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn compact-btn drawer-close-btn"
+                    onClick={() => setSelectedAccountingLoadId('')}
+                  >
+                    Close
                   </button>
                 </div>
               </div>
@@ -13484,7 +13498,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <h4>Dispatcher Notes</h4>
                 <p>{selectedAccountingLoad.notes || 'No notes saved.'}</p>
               </div>
-            </div>
+              </section>
+            </>
           )}
         </section>
       )}
