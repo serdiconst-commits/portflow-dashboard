@@ -947,17 +947,22 @@ const insertPortCheckLog = ({
 
 const getPreferredPortHoustonCredentialKey = (terminal = '') => {
   const normalized = String(terminal || '').toLowerCase();
-  if (normalized.includes('barbours') || normalized.includes('barbour')) {
+  if (normalized.includes('barbours') || normalized.includes('barbour') || normalized.includes('bct')) {
     return 'barboursCutContainerTracking';
   }
-  if (normalized.includes('bayport')) {
+  if (normalized.includes('bayport') || normalized.includes('bpt')) {
     return 'bayportContainerTracking';
   }
   return '';
 };
 
 const getLoadPortHoustonFacility = (load = {}) =>
-  getPortHoustonFacilityCode(`${load.pickup || ''} ${load.returnLocation || ''}`);
+  getPortHoustonFacilityCode([
+    load.pickup,
+    load.returnLocation,
+    load.availabilityStatus,
+    load.notes,
+  ].filter(Boolean).join(' '));
 
 const pickPortHoustonCredentials = (credentials = {}, preferredKey = '') => {
   const order = [
@@ -2180,11 +2185,11 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Container number or BOL/reference number is required for Port Houston check.' });
     }
 
+    const facility = getLoadPortHoustonFacility(load);
     const credentials = await getCompanyPortHoustonCredentials(
       companyId,
-      `${load.pickup || ''} ${load.returnLocation || ''}`
+      facility || `${load.pickup || ''} ${load.returnLocation || ''}`
     );
-    const facility = getLoadPortHoustonFacility(load);
     const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials, facility) : null;
     const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials, facility) : null;
     const gate = containerNumber ? await getGateHistory(containerNumber, credentials, facility) : null;

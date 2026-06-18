@@ -3801,9 +3801,9 @@ const filteredAccountingLoads = normalizedAccountingSearchTerm
     })
   : completedAccountingLoads;
 const selectedAccountingLoad =
-  filteredAccountingLoads.find((load) => load.id === selectedAccountingLoadId) ||
-  filteredAccountingLoads[0] ||
-  null;
+  selectedAccountingLoadId
+    ? filteredAccountingLoads.find((load) => load.id === selectedAccountingLoadId) || null
+    : null;
 const selectedAccountingInvoice = selectedAccountingLoad
   ? savedInvoices.find((invoice) => invoice.loadId === selectedAccountingLoad.id) || null
   : null;
