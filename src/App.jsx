@@ -586,8 +586,41 @@ const handleAuthError = (message) => {
     };
   };
 
+  const customerExtraChargeTypes = [
+    'Chassis Charge',
+    'Storage Charge',
+    'Scale Ticket',
+    'Lumper Charge',
+    'Waiting Time',
+    'Other',
+  ];
+
+  const parseCustomerExtraCharges = (load = {}) => {
+    const source = load.customerExtraCharges || load.customerExtraChargesJson || [];
+    if (Array.isArray(source)) return source;
+    try {
+      const parsed = JSON.parse(source || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const normalizeCustomerExtraCharges = (charges = []) =>
+    charges
+      .map((charge) => ({
+        id: charge.id || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        type: String(charge.type || 'Other').trim() || 'Other',
+        description: String(charge.description || '').trim(),
+        amount: parseMoney(charge.amount),
+      }))
+      .filter((charge) => charge.description || charge.amount);
+
+  const getCustomerExtraChargesTotal = (load) =>
+    parseCustomerExtraCharges(load).reduce((sum, charge) => sum + parseMoney(charge.amount), 0);
+
   const getCustomerBillAmount = (load) =>
-    parseMoney(load?.rate) + parseMoney(load?.detention);
+    parseMoney(load?.rate) + parseMoney(load?.detention) + getCustomerExtraChargesTotal(load);
 
   const getDriverPayWithDetention = (load) =>
     parseMoney(load?.driverRate);
@@ -2201,6 +2234,8 @@ const [savedInvoices, setSavedInvoices] = useState([]);
 const [invoiceStatusMessage, setInvoiceStatusMessage] = useState('');
 const [invoicePaymentDrafts, setInvoicePaymentDrafts] = useState({});
 const [accountingBillAmountDrafts, setAccountingBillAmountDrafts] = useState({});
+const [accountingExtraChargeDrafts, setAccountingExtraChargeDrafts] = useState({});
+const [accountingExtraChargeStatus, setAccountingExtraChargeStatus] = useState('');
 const [activeLocationPicker, setActiveLocationPicker] = useState('');
 
 useEffect(() => {
@@ -6266,6 +6301,90 @@ const handleAccountingBillAmountChange = (loadId, value) => {
     [loadId]: value,
   }));
   setInvoiceStatusMessage('');
+};
+
+const getAccountingExtraChargeDraft = (load) => {
+  if (!load?.id) return [];
+  return accountingExtraChargeDrafts[load.id] ?? parseCustomerExtraCharges(load);
+};
+
+const handleAccountingExtraChargeChange = (load, index, field, value) => {
+  if (!load?.id) return;
+  const currentRows = getAccountingExtraChargeDraft(load);
+  const nextRows = currentRows.map((row, rowIndex) =>
+    rowIndex === index ? { ...row, [field]: value } : row
+  );
+  setAccountingExtraChargeDrafts((prev) => ({ ...prev, [load.id]: nextRows }));
+  setAccountingExtraChargeStatus('');
+};
+
+const handleAddAccountingExtraCharge = (load) => {
+  if (!load?.id) return;
+  setAccountingExtraChargeDrafts((prev) => ({
+    ...prev,
+    [load.id]: [
+      ...(prev[load.id] ?? parseCustomerExtraCharges(load)),
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        type: 'Chassis Charge',
+        description: '',
+        amount: '',
+      },
+    ],
+  }));
+  setAccountingExtraChargeStatus('');
+};
+
+const handleRemoveAccountingExtraCharge = (load, index) => {
+  if (!load?.id) return;
+  const nextRows = getAccountingExtraChargeDraft(load).filter((_, rowIndex) => rowIndex !== index);
+  setAccountingExtraChargeDrafts((prev) => ({ ...prev, [load.id]: nextRows }));
+  setAccountingExtraChargeStatus('');
+};
+
+const handleSaveAccountingExtraCharges = async (load) => {
+  if (!load?.id) return;
+  const charges = normalizeCustomerExtraCharges(getAccountingExtraChargeDraft(load));
+  const updatedLoad = {
+    ...load,
+    customerExtraCharges: charges,
+    customerExtraChargesJson: JSON.stringify(charges),
+  };
+
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${load.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(updatedLoad),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.details || data.error || 'Failed to save extra charges');
+    }
+
+    const normalizedLoad = normalizeLoadedLoads([data])[0];
+    setLoadsData((prev) =>
+      prev.map((item) => (item.id === normalizedLoad.id ? normalizedLoad : item))
+    );
+    setSelectedAccountingLoadId(normalizedLoad.id);
+    setAccountingExtraChargeDrafts((prev) => {
+      const next = { ...prev };
+      delete next[load.id];
+      return next;
+    });
+    setAccountingBillAmountDrafts((prev) => ({
+      ...prev,
+      [load.id]: formatMoney(getCustomerBillAmount(normalizedLoad)),
+    }));
+    setAccountingExtraChargeStatus('Customer extra charges saved.');
+  } catch (error) {
+    console.error('Failed to save customer extra charges:', error);
+    setAccountingExtraChargeStatus(`Failed to save charges: ${error.message}`);
+  }
 };
 
 const handleInvoicePaymentDraftChange = (invoiceId, field, value) => {
@@ -12905,12 +13024,123 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <div className="settlement-box accounting-settlement-box">
                 <h4>Customer / Driver Amounts</h4>
                 <div className="settlement-row"><span>Load Rate</span><strong>{selectedAccountingLoad.rate || '$0.00'}</strong></div>
+                <div className="settlement-row"><span>Customer Extras</span><strong>{formatMoney(getCustomerExtraChargesTotal(selectedAccountingLoad))}</strong></div>
                 <div className="settlement-row"><span>Bill Total</span><strong>{formatMoney(getCustomerBillAmount(selectedAccountingLoad))}</strong></div>
                 <div className="settlement-row"><span>Driver Rate</span><strong>{selectedAccountingLoad.driverRate || '$0.00'}</strong></div>
                 <div className="settlement-row"><span>Customer Detention</span><strong>{selectedAccountingLoad.detention || '$0.00'}</strong></div>
                 <div className="settlement-row"><span>Lumper</span><strong>{selectedAccountingLoad.lumper || '$0.00'}</strong></div>
                 <div className="settlement-row"><span>Fuel Advance</span><strong>- {selectedAccountingLoad.fuelAdvance || '$0.00'}</strong></div>
                 <div className="settlement-row total"><span>Settlement</span><strong>{selectedAccountingLoad.settlement || '$0.00'}</strong></div>
+              </div>
+
+              <div className="invoice-box accounting-extra-charges-box">
+                <div className="documents-header">
+                  <h4>Customer Extra Charges</h4>
+                  <button
+                    type="button"
+                    className="secondary-btn compact-btn"
+                    onClick={() => handleAddAccountingExtraCharge(selectedAccountingLoad)}
+                  >
+                    Add Charge
+                  </button>
+                </div>
+                {getAccountingExtraChargeDraft(selectedAccountingLoad).length > 0 ? (
+                  <div className="table-wrap accounting-table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Type</th>
+                          <th>Description</th>
+                          <th>Amount</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {getAccountingExtraChargeDraft(selectedAccountingLoad).map((charge, index) => (
+                          <tr key={charge.id || index}>
+                            <td>
+                              <select
+                                className="filter-select"
+                                value={charge.type || 'Other'}
+                                onChange={(e) =>
+                                  handleAccountingExtraChargeChange(selectedAccountingLoad, index, 'type', e.target.value)
+                                }
+                              >
+                                {customerExtraChargeTypes.map((type) => (
+                                  <option key={type} value={type}>{type}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td>
+                              <input
+                                type="text"
+                                value={charge.description || ''}
+                                placeholder="Reason or note"
+                                onChange={(e) =>
+                                  handleAccountingExtraChargeChange(selectedAccountingLoad, index, 'description', e.target.value)
+                                }
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={charge.amount ?? ''}
+                                placeholder="$0.00"
+                                onChange={(e) =>
+                                  handleAccountingExtraChargeChange(selectedAccountingLoad, index, 'amount', e.target.value)
+                                }
+                              />
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                className="danger-btn compact-btn"
+                                onClick={() => handleRemoveAccountingExtraCharge(selectedAccountingLoad, index)}
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="empty-state compact-empty">
+                    <p>No customer extra charges added yet.</p>
+                  </div>
+                )}
+                <div className="accounting-payment-summary">
+                  <div>
+                    <span>Extras Total</span>
+                    <strong>{formatMoney(getAccountingExtraChargeDraft(selectedAccountingLoad).reduce((sum, charge) => sum + parseMoney(charge.amount), 0))}</strong>
+                  </div>
+                  <div>
+                    <span>Bill Total After Extras</span>
+                    <strong>
+                      {formatMoney(
+                        parseMoney(selectedAccountingLoad.rate) +
+                        parseMoney(selectedAccountingLoad.detention) +
+                        getAccountingExtraChargeDraft(selectedAccountingLoad).reduce((sum, charge) => sum + parseMoney(charge.amount), 0)
+                      )}
+                    </strong>
+                  </div>
+                </div>
+                <div className="details-actions">
+                  <button
+                    type="button"
+                    className="primary-btn compact-btn"
+                    onClick={() => handleSaveAccountingExtraCharges(selectedAccountingLoad)}
+                  >
+                    Save Extra Charges
+                  </button>
+                  {accountingExtraChargeStatus && (
+                    <span className={accountingExtraChargeStatus.includes('Failed') ? 'settings-status error' : 'settings-status success'}>
+                      {accountingExtraChargeStatus}
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="invoice-box accounting-payment-box">

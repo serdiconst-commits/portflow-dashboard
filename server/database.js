@@ -413,6 +413,7 @@ droppedBy TEXT,
   fuelAdvance TEXT,
   settlement TEXT,
   notes TEXT,
+  customerExtraChargesJson TEXT,
   companyId TEXT,
   lastFreeDay TEXT,
   carrierId TEXT
@@ -510,6 +511,11 @@ db.run(`ALTER TABLE loads ADD COLUMN poNumber TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN pickupNumber TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding pickupNumber column:', err.message);
+  }
+});
+db.run(`ALTER TABLE loads ADD COLUMN customerExtraChargesJson TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding customerExtraChargesJson column:', err.message);
   }
 });
 db.run(`ALTER TABLE loads ADD COLUMN deliveryType TEXT`, (err) => {

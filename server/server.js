@@ -5,7 +5,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 const customerPacketOrder = [
   'Rate Confirmation',
   'BOL',
@@ -554,6 +554,186 @@ const ensureDownloadedPortHoustonDocument = ({
     );
   });
 
+const formatPortHoustonDate = (value = '') => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('en-US', {
+    timeZone: 'America/Chicago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const formatPortHoustonYesNo = (value) => {
+  if (value === true) return 'Yes';
+  if (value === false) return 'No';
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return '';
+  if (normalized.toLowerCase() === 'true') return 'Yes';
+  if (normalized.toLowerCase() === 'false') return 'No';
+  return normalized;
+};
+
+const buildGeneratedEirRows = ({ transaction = {}, load = {} }) => [
+  ['Terminal', transaction.terminal || ''],
+  ['Line', transaction.shipLine || ''],
+  ['EIR #', transaction.nbr || transaction.gkey || ''],
+  ['Type', transaction.subType || ''],
+  ['Created', formatPortHoustonDate(transaction.created)],
+  ['Handled', formatPortHoustonDate(transaction.handled || transaction.changed)],
+  ['Truck Co.', transaction.truckingCompany || ''],
+  ['Truck License #', transaction.truckLicenseNbr || ''],
+  ['Driver', load.driver || load.driverName || ''],
+  ['Container', transaction.containerNumber || load.containerNumber || ''],
+  ['Container Size/Type', transaction.containerSize || transaction.containerType || load.containerSize || ''],
+  ['Chassis', transaction.chassisNumber || load.chassisNumber || ''],
+  ['Owner Chassis', formatPortHoustonYesNo(transaction.chassisIsOwner)],
+  ['Release / Booking', transaction.bookingNumber || load.bookingNumber || load.referenceNumber || ''],
+  ['BOL', transaction.billOfLading || load.referenceNumber || ''],
+  ['Ticket Position', transaction.ticketPosition || ''],
+  ['Scale WT', transaction.scaleWeight || ''],
+  ['Gross WT', transaction.containerGrossWeight || ''],
+  ['Seal', transaction.sealNumber || load.sealNumber || ''],
+  ['Status', transaction.status || ''],
+  ['Stage', transaction.stageId || ''],
+];
+
+const createGeneratedPortHoustonEirPdf = async ({ category, transaction, load }) => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([612, 792]);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const darkBlue = rgb(0.03, 0.19, 0.38);
+  const muted = rgb(0.35, 0.42, 0.5);
+  const border = rgb(0.82, 0.86, 0.9);
+  const softBlue = rgb(0.9, 0.96, 1);
+  const black = rgb(0.08, 0.1, 0.12);
+  const title = category === 'IN EIR' ? 'PORTFLOW IN EIR DATA SUMMARY' : 'PORTFLOW OUT EIR DATA SUMMARY';
+
+  page.drawRectangle({ x: 36, y: 700, width: 540, height: 56, color: darkBlue });
+  page.drawText(title, { x: 54, y: 730, size: 18, font: boldFont, color: rgb(1, 1, 1) });
+  page.drawText('Generated from Port Houston gate transaction data', {
+    x: 54,
+    y: 710,
+    size: 9,
+    font,
+    color: rgb(0.86, 0.93, 1),
+  });
+
+  page.drawText(`Load: ${load.loadNumber || load.id || ''}`, { x: 54, y: 674, size: 10, font: boldFont, color: black });
+  page.drawText(`Container: ${transaction.containerNumber || load.containerNumber || ''}`, { x: 220, y: 674, size: 10, font: boldFont, color: black });
+  page.drawText(`Generated: ${formatPortHoustonDate(new Date().toISOString())}`, { x: 390, y: 674, size: 9, font, color: muted });
+
+  const rows = buildGeneratedEirRows({ transaction, load }).filter(([, value]) => String(value || '').trim());
+  let y = 642;
+  rows.forEach(([label, value], index) => {
+    const isEven = index % 2 === 0;
+    if (isEven) {
+      page.drawRectangle({ x: 54, y: y - 7, width: 504, height: 22, color: softBlue });
+    }
+    page.drawRectangle({ x: 54, y: y - 7, width: 504, height: 22, borderColor: border, borderWidth: 0.5 });
+    page.drawText(label, { x: 66, y, size: 9, font: boldFont, color: darkBlue });
+    page.drawText(String(value), { x: 230, y, size: 9, font, color: black });
+    y -= 22;
+  });
+
+  page.drawText(
+    'Note: This Portflow summary is generated from Port Houston EVP/Road Service data. The official EIR document remains in the Port Houston Customer Service Portal.',
+    { x: 54, y: 54, size: 8, font, color: muted, maxWidth: 504 }
+  );
+
+  return Buffer.from(await pdfDoc.save());
+};
+
+const ensureGeneratedPortHoustonEirDocument = ({
+  loadId,
+  companyId,
+  category,
+  transaction,
+  load,
+}) =>
+  new Promise((resolve, reject) => {
+    const transactionId = getPortHoustonTransactionId(transaction);
+    if (!transactionId || !category) {
+      resolve(null);
+      return;
+    }
+
+    db.get(
+      `SELECT d.*
+       FROM documents d
+       JOIN loads l ON l.id = d.loadId
+       WHERE d.loadId = ?
+         AND l.companyId = ?
+         AND UPPER(TRIM(d.category)) = ?
+         AND d.name LIKE ?`,
+      [loadId, companyId, category, `%${transactionId}%`],
+      async (findErr, existingDoc) => {
+        if (findErr) {
+          reject(findErr);
+          return;
+        }
+
+        if (existingDoc) {
+          resolve(existingDoc);
+          return;
+        }
+
+        try {
+          const id = uuidv4();
+          const uploadedAt = new Date().toISOString();
+          const safeContainer = sanitizePdfFilename(transaction.containerNumber || load.containerNumber || loadId, 'container');
+          const safeCategory = category.replace(/\s+/g, '-').toLowerCase();
+          const fileName = `${safeContainer}-${safeCategory}-${transactionId}-portflow-summary.pdf`;
+          const filePath = path.join(uploadsDir, fileName);
+          const buffer = await createGeneratedPortHoustonEirPdf({ category, transaction, load });
+
+          fs.writeFileSync(filePath, buffer);
+
+          db.run(
+            `INSERT INTO documents (id, loadId, name, size, type, category, filePath, uploadedAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              id,
+              loadId,
+              fileName,
+              `${(buffer.length / 1024).toFixed(1)} KB`,
+              'application/pdf',
+              category,
+              filePath,
+              uploadedAt,
+            ],
+            (insertErr) => {
+              if (insertErr) {
+                reject(insertErr);
+                return;
+              }
+
+              resolve({
+                id,
+                loadId,
+                name: fileName,
+                size: `${(buffer.length / 1024).toFixed(1)} KB`,
+                type: 'application/pdf',
+                category,
+                filePath,
+                uploadedAt,
+                url: `/uploads/${path.basename(filePath)}`,
+                generated: true,
+              });
+            }
+          );
+        } catch (generateErr) {
+          reject(generateErr);
+        }
+      }
+    );
+  });
+
 const updateLoadFromPortHoustonCheck = ({
   load,
   companyId,
@@ -582,7 +762,10 @@ const updateLoadFromPortHoustonCheck = ({
         }
 
         try {
-          const syncedDocuments = [...(eir?.downloadedDocuments || [])];
+          const syncedDocuments = [
+            ...(eir?.downloadedDocuments || []),
+            ...(eir?.generatedDocuments || []),
+          ];
           const outUrl = eir?.out?.url || '';
           const outDoc = /^https?:\/\//i.test(outUrl)
             ? await ensureExternalDocumentRecord({
@@ -2072,8 +2255,44 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       }
     }
 
+    const generatedDocuments = [];
+    for (const transaction of [
+      gateTransactions?.outEirTransaction,
+      gateTransactions?.inEirTransaction,
+    ].filter(Boolean)) {
+      const category = getPortHoustonEirCategory(transaction);
+      const transactionId = getPortHoustonTransactionId(transaction);
+      if (!category || !transactionId) continue;
+
+      const alreadyHasOfficialDocument = downloadedDocuments.some((doc) =>
+        String(doc.category || '').trim().toUpperCase() === category
+      );
+      if (alreadyHasOfficialDocument) continue;
+
+      try {
+        const generatedDoc = await ensureGeneratedPortHoustonEirDocument({
+          loadId,
+          companyId,
+          category,
+          transaction,
+          load,
+        });
+        if (generatedDoc) generatedDocuments.push(generatedDoc);
+      } catch (generateErr) {
+        eirDownloadErrors.push({
+          category,
+          transactionId,
+          message: `Generated EIR summary failed: ${generateErr.message}`,
+        });
+      }
+    }
+
     const downloadedOutDoc = downloadedDocuments.find((doc) => doc.category === 'OUT EIR');
     const downloadedInDoc = downloadedDocuments.find((doc) => doc.category === 'IN EIR');
+    const generatedOutDoc = generatedDocuments.find((doc) => doc.category === 'OUT EIR');
+    const generatedInDoc = generatedDocuments.find((doc) => doc.category === 'IN EIR');
+    const getPortHoustonDocumentUrl = (doc) =>
+      doc?.id ? `/api/documents/${doc.id}/file` : doc?.url || '';
     const outTransactionId = getPortHoustonTransactionId(gateTransactions?.outEirTransaction);
     const inTransactionId = getPortHoustonTransactionId(gateTransactions?.inEirTransaction);
     const gateTransactionCount = gateTransactions?.transactions?.length || 0;
@@ -2084,8 +2303,14 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
     const eir = {
       out: downloadedOutDoc
         ? {
-            url: `/api/documents/${downloadedOutDoc.id}/file`,
+            url: getPortHoustonDocumentUrl(downloadedOutDoc),
             source: 'Port Houston',
+            transactionNumber: outTransactionId,
+          }
+        : generatedOutDoc
+        ? {
+            url: getPortHoustonDocumentUrl(generatedOutDoc),
+            source: 'Portflow Generated from Port Houston Data',
             transactionNumber: outTransactionId,
           }
         : outEirUrl
@@ -2097,8 +2322,14 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
         : null,
       in: downloadedInDoc
         ? {
-            url: `/api/documents/${downloadedInDoc.id}/file`,
+            url: getPortHoustonDocumentUrl(downloadedInDoc),
             source: 'Port Houston',
+            transactionNumber: inTransactionId,
+          }
+        : generatedInDoc
+        ? {
+            url: getPortHoustonDocumentUrl(generatedInDoc),
+            source: 'Portflow Generated from Port Houston Data',
             transactionNumber: inTransactionId,
           }
         : inEirUrl
@@ -2114,12 +2345,15 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       transactionNumbers: portDocumentSignals.transactionNumbers,
       documentUrlsFound: portDocumentSignals.documentUrls.length,
       downloadedDocuments,
+      generatedDocuments,
       downloadErrors: eirDownloadErrors,
       documentDownloadEnabled: eirDocumentDownloadEnabled,
       gateTransactionError: gateTransactions?.error || '',
       equipmentHistoryTransactionNumbers: gateTransactionNumbers,
       note: downloadedDocuments.length
         ? 'Port Houston EIR document was downloaded and synced to paperwork.'
+        : generatedDocuments.length
+          ? 'Portflow generated an EIR data summary from Port Houston gate transaction data and synced it to paperwork.'
         : outEirUrl || inEirUrl
           ? 'EIR document links were returned by Port Houston and synced to paperwork.'
           : gateTransactionCount
@@ -2943,6 +3177,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           fuelAdvance = ?,
           settlement = ?,
           notes = ?,
+          customerExtraChargesJson = ?,
           lastFreeDay = ?
          WHERE id = ? AND companyId = ?`,
         [
@@ -2983,6 +3218,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           l.fuelAdvance || 0,
           l.settlement || 0,
           l.notes || '',
+          typeof l.customerExtraChargesJson === 'string' ? l.customerExtraChargesJson : JSON.stringify(l.customerExtraCharges || []),
           body.lastFreeDay || '',
           loadId,
           companyId,
@@ -3415,10 +3651,11 @@ dropDateTime,
               fuelAdvance,
               settlement,
               notes,
+              customerExtraChargesJson,
               companyId,
               lastFreeDay,
               carrierId
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               generatedLoadId,
               l.loadDate || new Date().toISOString().slice(0, 10),
@@ -3457,6 +3694,7 @@ dropDateTime,
               l.fuelAdvance || 0,
               l.settlement || 0,
               l.notes || '',
+              typeof l.customerExtraChargesJson === 'string' ? l.customerExtraChargesJson : JSON.stringify(l.customerExtraCharges || []),
               companyId,
               l.lastFreeDay || '',
               l.carrierId || ''
