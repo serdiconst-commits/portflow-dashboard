@@ -99,6 +99,7 @@ const buildStatement = ({ settlement, driver, loads, deductions, auditLogs }) =>
     settlement: {
       id: settlement.id,
       status: settlement.status || 'Draft',
+      notes: settlement.notes || '',
       periodStart: settlement.periodStart,
       periodEnd: settlement.periodEnd,
       version: Number(settlement.version || 1),
@@ -307,9 +308,20 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
   const now = new Date().toISOString();
   await dbRun(
     db,
-    `INSERT INTO settlements (id, companyId, driverId, periodStart, periodEnd, status, createdAt, updatedAt, createdBy)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [settlementId, companyId, driverId, periodStart, periodEnd, input.status || 'Draft', now, now, createdBy]
+    `INSERT INTO settlements (id, companyId, driverId, periodStart, periodEnd, status, notes, createdAt, updatedAt, createdBy)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      settlementId,
+      companyId,
+      driverId,
+      periodStart,
+      periodEnd,
+      input.status || 'Draft',
+      String(input.notes || ''),
+      now,
+      now,
+      createdBy,
+    ]
   );
 
   const config = getDriverPayConfig(driver);
@@ -354,13 +366,16 @@ export async function updateSettlement(db, companyId, settlementId, input = {}, 
   const nextPeriodStart = normalizeDate(input.periodStart) || existing.periodStart;
   const nextPeriodEnd = normalizeDate(input.periodEnd) || existing.periodEnd;
   const nextStatus = input.status || existing.status || 'Draft';
+  const nextNotes = Object.prototype.hasOwnProperty.call(input, 'notes')
+    ? String(input.notes || '')
+    : existing.notes || '';
 
   await dbRun(
     db,
     `UPDATE settlements
-     SET periodStart = ?, periodEnd = ?, status = ?, updatedAt = ?
+     SET periodStart = ?, periodEnd = ?, status = ?, notes = ?, updatedAt = ?
      WHERE id = ? AND companyId = ?`,
-    [nextPeriodStart, nextPeriodEnd, nextStatus, new Date().toISOString(), settlementId, companyId]
+    [nextPeriodStart, nextPeriodEnd, nextStatus, nextNotes, new Date().toISOString(), settlementId, companyId]
   );
   await writeSettlementAudit(db, settlementId, 'UPDATE', existing, input, changedBy);
   return recalculateSettlement(db, companyId, settlementId, changedBy);

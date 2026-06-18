@@ -2566,6 +2566,13 @@ td {
   resize: vertical;
 }
 
+.settlement-note-actions {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  margin-top: -6px;
+}
+
 .settlement-entry-field input:focus,
 .settlement-entry-field textarea:focus,
 .settlement-entry-field select:focus {

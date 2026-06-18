@@ -3619,6 +3619,7 @@ useEffect(() => {
 
       const fullSettlement = await fetchBackendSettlementById(current.id);
       setActiveBackendSettlement(fullSettlement);
+      setSettlementNote(fullSettlement.notes || fullSettlement.statement?.settlement?.notes || '');
       return fullSettlement;
     } catch (error) {
       console.error('Failed to load backend settlement:', error);
@@ -3647,6 +3648,7 @@ useEffect(() => {
           driverId: activeSettlementDriverId,
           periodStart: settlementStartDate,
           periodEnd: settlementEndDate,
+          notes: settlementNote,
         }),
       });
       const data = await res.json();
@@ -3655,6 +3657,7 @@ useEffect(() => {
       }
 
       setActiveBackendSettlement(data);
+      setSettlementNote(data.notes || data.statement?.settlement?.notes || settlementNote);
       setSettlementBackendStatus(`Database settlement created for ${settlementPeriodLabel}.`);
       await fetchActiveBackendSettlement();
       return data;
@@ -3670,6 +3673,43 @@ useEffect(() => {
   const ensureBackendSettlement = async () => {
     if (activeBackendSettlement?.id) return activeBackendSettlement;
     return createBackendSettlement();
+  };
+
+  const handleSaveBackendSettlementNote = async () => {
+    if (!activeSettlementDriverId || !settlementStartDate || !settlementEndDate) {
+      setSettlementBackendStatus('Choose a driver and week before saving the payroll note.');
+      return;
+    }
+
+    setSettlementBackendLoading(true);
+    try {
+      const settlement = await ensureBackendSettlement();
+      if (!settlement?.id) {
+        throw new Error('No database settlement is available for this payroll note.');
+      }
+
+      const res = await fetch(`${API_BASE}/api/driver-settlements/${settlement.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ notes: settlementNote }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to save payroll note');
+      }
+
+      setActiveBackendSettlement(data);
+      setSettlementNote(data.notes || data.statement?.settlement?.notes || settlementNote);
+      setSettlementBackendStatus('Payroll note saved to the database settlement.');
+    } catch (error) {
+      console.error('Failed to save payroll note:', error);
+      setSettlementBackendStatus(`Failed to save payroll note: ${error.message}`);
+    } finally {
+      setSettlementBackendLoading(false);
+    }
   };
 
   const handleCompleteBackendSettlement = async () => {
@@ -6080,6 +6120,7 @@ const handleChangeUserRole = async (userId, newRole) => {
     const statement = activeBackendSettlement?.statement;
     if (!statement) return;
     const settlementCompanyName = company?.settlementCompanyName || company?.invoiceName || company?.name || 'Company';
+    const payrollNote = activeBackendSettlement?.notes || statement.settlement?.notes || '';
 
     const escapeHtml = (value) =>
       String(value ?? '')
@@ -6146,6 +6187,8 @@ const handleChangeUserRole = async (userId, newRole) => {
             .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 18px 0; }
             .box { border: 1px solid #d1d5db; padding: 10px; border-radius: 8px; }
             .box span { display: block; color: #6b7280; font-size: 12px; margin-bottom: 4px; }
+            .note { border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 10px; padding: 12px; margin: 18px 0; color: #1e3a8a; }
+            .note strong { display: block; margin-bottom: 6px; color: #1e40af; }
             h2 { margin: 22px 0 8px; font-size: 18px; }
             table { width: 100%; border-collapse: collapse; margin-top: 16px; }
             th, td { border: 1px solid #d1d5db; padding: 10px; text-align: left; font-size: 13px; }
@@ -6160,6 +6203,12 @@ const handleChangeUserRole = async (userId, newRole) => {
           <p>Period: ${escapeHtml(statement.settlement?.periodStart || '')} to ${escapeHtml(statement.settlement?.periodEnd || '')}</p>
           <p>Status: ${escapeHtml(activeBackendSettlement.status || statement.settlement?.status || 'Draft')}</p>
           <p>Statement Version: ${escapeHtml(statement.settlement?.version || activeBackendSettlement.version || 1)}</p>
+
+          ${
+            payrollNote
+              ? `<div class="note"><strong>Payroll Note</strong>${escapeHtml(payrollNote).replace(/\n/g, '<br>')}</div>`
+              : ''
+          }
 
           <div class="summary">
             <div class="box"><span>Loads</span><strong>${escapeHtml(statement.totals?.loadCount || 0)}</strong></div>
@@ -11435,6 +11484,16 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onChange={(e) => setSettlementNote(e.target.value)}
               />
             </label>
+            <div className="settlement-note-actions">
+              <button
+                type="button"
+                className="secondary-btn compact-btn"
+                onClick={handleSaveBackendSettlementNote}
+                disabled={settlementBackendLoading || !activeSettlementDriverId || !settlementStartDate || !settlementEndDate}
+              >
+                Save Payroll Note
+              </button>
+            </div>
 
             <div className="settlement-entry-meta">
               <div>
