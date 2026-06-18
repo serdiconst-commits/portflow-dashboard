@@ -1115,6 +1115,12 @@ const [company, setCompany] = useState(savedCompany || null);
 const isDemoMode = authToken === DEMO_TOKEN || currentUser?.id === 'demo-dispatcher';
 const [companyLogoUploading, setCompanyLogoUploading] = useState(false);
 const [companyLogoVersion, setCompanyLogoVersion] = useState(Date.now());
+const [companyProfileEditing, setCompanyProfileEditing] = useState(false);
+const [companyProfileStatus, setCompanyProfileStatus] = useState('');
+const [companyProfileForm, setCompanyProfileForm] = useState({
+  name: savedCompany?.name || '',
+  invoiceAddress: savedCompany?.invoiceAddress || '',
+});
 const [invoiceBrandingForm, setInvoiceBrandingForm] = useState({
   invoiceName: savedCompany?.invoiceName || savedCompany?.name || '',
   invoiceAddress: savedCompany?.invoiceAddress || '',
@@ -1305,6 +1311,10 @@ useEffect(() => {
 }, [company?.portHoustonCredentials]);
 
 useEffect(() => {
+  setCompanyProfileForm({
+    name: company?.name || '',
+    invoiceAddress: company?.invoiceAddress || '',
+  });
   setInvoiceBrandingForm({
     invoiceName: company?.invoiceName || company?.name || '',
     invoiceAddress: company?.invoiceAddress || '',
@@ -2707,6 +2717,36 @@ const handleCompanyLogoUpload = async (e) => {
   } finally {
     setCompanyLogoUploading(false);
     e.target.value = '';
+  }
+};
+
+const handleSaveCompanyProfile = async (e) => {
+  e.preventDefault();
+
+  try {
+    setCompanyProfileStatus('');
+    const res = await fetch(`${API_BASE}/api/company/profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(companyProfileForm),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save company profile');
+    }
+
+    setCompany(data);
+    localStorage.setItem('company', JSON.stringify(data));
+    setCompanyProfileEditing(false);
+    setCompanyProfileStatus('Company profile saved.');
+  } catch (error) {
+    console.error('Failed to save company profile:', error);
+    setCompanyProfileStatus(`Failed to save company profile: ${error.message}`);
   }
 };
 
@@ -12412,16 +12452,103 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     <section className="panel">
       <div className="panel-header">
         <h3>Company Profile</h3>
+        {!companyProfileEditing && (
+          <button
+            type="button"
+            className="secondary-btn compact-btn"
+            onClick={() => {
+              setCompanyProfileForm({
+                name: company?.name || '',
+                invoiceAddress: company?.invoiceAddress || '',
+              });
+              setCompanyProfileStatus('');
+              setCompanyProfileEditing(true);
+            }}
+          >
+            Edit Profile
+          </button>
+        )}
       </div>
       <div className="company-profile">
-        <div className="detail-box">
-          <span>Company</span>
-          <strong>{company?.name || 'PortFlow Dispatch'}</strong>
-        </div>
-        <div className="detail-box">
-          <span>Account Email</span>
-          <strong>{company?.email || currentUser?.email || 'Not available'}</strong>
-        </div>
+        {companyProfileEditing ? (
+          <form className="invoice-branding-settings" onSubmit={handleSaveCompanyProfile}>
+            <div className="settings-row-header">
+              <div>
+                <span>Company Profile</span>
+                <strong>Edit the company name and address</strong>
+              </div>
+              <div className="details-actions">
+                <button type="submit" className="primary-btn compact-btn">
+                  Save Profile
+                </button>
+                <button
+                  type="button"
+                  className="secondary-btn compact-btn"
+                  onClick={() => {
+                    setCompanyProfileForm({
+                      name: company?.name || '',
+                      invoiceAddress: company?.invoiceAddress || '',
+                    });
+                    setCompanyProfileStatus('');
+                    setCompanyProfileEditing(false);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+            <div className="invoice-branding-grid">
+              <label>
+                <span>Company Name</span>
+                <input
+                  type="text"
+                  value={companyProfileForm.name}
+                  onChange={(e) =>
+                    setCompanyProfileForm((prev) => ({
+                      ...prev,
+                      name: e.target.value,
+                    }))
+                  }
+                  placeholder="Company name"
+                />
+              </label>
+              <label>
+                <span>Company Address</span>
+                <textarea
+                  value={companyProfileForm.invoiceAddress}
+                  onChange={(e) =>
+                    setCompanyProfileForm((prev) => ({
+                      ...prev,
+                      invoiceAddress: e.target.value,
+                    }))
+                  }
+                  placeholder="Street, city, state, zip"
+                  rows={3}
+                />
+              </label>
+            </div>
+          </form>
+        ) : (
+          <>
+            <div className="detail-box">
+              <span>Company</span>
+              <strong>{company?.name || 'PortFlow Dispatch'}</strong>
+            </div>
+            <div className="detail-box">
+              <span>Company Address</span>
+              <strong>{company?.invoiceAddress || 'Not saved'}</strong>
+            </div>
+            <div className="detail-box">
+              <span>Account Email</span>
+              <strong>{company?.email || currentUser?.email || 'Not available'}</strong>
+            </div>
+          </>
+        )}
+        {companyProfileStatus && (
+          <p className={companyProfileStatus.includes('saved') ? 'settings-status success' : 'settings-status error'}>
+            {companyProfileStatus}
+          </p>
+        )}
         <div className="company-logo-settings">
           <span>Company Logo</span>
           <div className="company-logo-preview">

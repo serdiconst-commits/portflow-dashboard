@@ -1694,6 +1694,55 @@ app.get('/api/company', authenticate, (req, res) => {
   );
 });
 
+app.put('/api/company/profile', authenticate, requireRoles(adminRoles), (req, res) => {
+  const companyId = req.company.companyId;
+  const name = String(req.body.name || '').trim().slice(0, 120);
+  const invoiceAddress = String(req.body.invoiceAddress || '').trim().slice(0, 500);
+
+  if (!name) {
+    return res.status(400).json({ error: 'Company name is required.' });
+  }
+
+  db.run(
+    `UPDATE companies
+     SET name = ?, invoiceAddress = ?
+     WHERE id = ?`,
+    [name, invoiceAddress, companyId],
+    function (err) {
+      if (err) {
+        console.error('Company profile update error:', err.message);
+        return res.status(500).json({ error: 'Failed to save company profile.' });
+      }
+
+      db.get(
+        `SELECT ${companyProfileSelect} FROM companies WHERE id = ?`,
+        [companyId],
+        (lookupErr, company) => {
+          if (lookupErr || !company) {
+            console.error('Company profile refresh error:', lookupErr?.message);
+            return res.status(500).json({ error: 'Profile saved, but profile refresh failed.' });
+          }
+
+          writeAuditLog(req, {
+            action: 'UPDATE_COMPANY_PROFILE',
+            entityType: 'COMPANY',
+            entityId: companyId,
+            entityLabel: company.name,
+            oldValue: null,
+            newValue: { name, invoiceAddress },
+            changedFields: {
+              name: { oldValue: '', newValue: name },
+              invoiceAddress: { oldValue: '', newValue: invoiceAddress },
+            },
+          });
+
+          res.json(getCompanyPayload(company));
+        }
+      );
+    }
+  );
+});
+
 app.put('/api/company/invoice-branding', authenticate, requireRoles(adminRoles), (req, res) => {
   const companyId = req.company.companyId;
   const invoiceName = String(req.body.invoiceName || '').trim().slice(0, 120);
