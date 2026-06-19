@@ -101,6 +101,8 @@ const getCompanyPayload = (company = {}) => ({
   id: company.id,
   name: company.name,
   email: company.email,
+  serviceStatus: company.serviceStatus || 'Active',
+  subscriptionPlan: company.subscriptionPlan || 'Demo',
   invoiceName: company.invoiceName || company.name || '',
   invoiceAddress: company.invoiceAddress || '',
   settlementCompanyName: company.settlementCompanyName || company.invoiceName || company.name || '',
@@ -112,7 +114,7 @@ const getCompanyPayload = (company = {}) => ({
 });
 
 const companyProfileSelect =
-  'id, name, email, logoPath, invoiceName, invoiceAddress, settlementCompanyName, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson';
+  'id, name, email, logoPath, invoiceName, invoiceAddress, settlementCompanyName, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson, serviceStatus, subscriptionPlan, subscriptionNotes, tenantUpdatedAt';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -133,6 +135,7 @@ import {
 
 const isProduction = process.env.NODE_ENV === 'production' || process.env.APP_ENV === 'production';
 const JWT_SECRET = process.env.JWT_SECRET || (!isProduction ? 'portflow-dev-secret-change-before-production' : '');
+const PORTFLOW_OWNER_EMAIL = String(process.env.PORTFLOW_OWNER_EMAIL || 'oliver@portflow-net.com').trim().toLowerCase();
 
 const app = express();
 
@@ -1307,6 +1310,8 @@ const normalizeRole = (role) => String(role || '').trim().toLowerCase();
 const adminRoles = new Set(['admin', 'owner', 'carrier']);
 const staffRoles = new Set(['dispatcher', 'payroll', 'admin', 'manager']);
 const dispatchLocationRoles = new Set(['dispatcher', 'manager', ...adminRoles]);
+const isPortFlowOwner = (user = {}) =>
+  normalizeRole(user.role) === 'owner' || String(user.email || '').trim().toLowerCase() === PORTFLOW_OWNER_EMAIL;
 const requireRoles = (allowedRoles) => (req, res, next) => {
   const role = normalizeRole(req.user?.role);
   if (allowedRoles.has(role)) {
@@ -1316,9 +1321,149 @@ const requireRoles = (allowedRoles) => (req, res, next) => {
 
   res.status(403).json({ error: 'You do not have permission to access this area.' });
 };
+const requireTenantOwner = (req, res, next) => {
+  if (isPortFlowOwner(req.user)) {
+    next();
+    return;
+  }
+
+  res.status(403).json({ error: 'Tenant Management is only available to the PortFlow owner.' });
+};
 
 app.use('/api/invoices', authenticate, createInvoiceRoutes(db));
 app.use('/api/driver-settlements', authenticate, createDriverSettlementRoutes(db));
+
+app.post('/api/demo-requests', (req, res) => {
+  const companyName = String(req.body?.companyName || '').trim();
+  const contactName = String(req.body?.contactName || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const phone = String(req.body?.phone || '').trim();
+  const message = String(req.body?.message || '').trim();
+
+  if (!companyName || !email) {
+    return res.status(400).json({ error: 'Company name and email are required.' });
+  }
+
+  const id = uuidv4();
+  const createdAt = new Date().toISOString();
+  db.run(
+    `INSERT INTO demo_requests (id, companyName, contactName, email, phone, message, status, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, companyName, contactName, email, phone, message, 'New', createdAt, createdAt],
+    (err) => {
+      if (err) {
+        console.error('Demo request insert error:', err.message);
+        return res.status(500).json({ error: 'Failed to save demo request.' });
+      }
+
+      res.json({ ok: true, id, message: 'Demo request received.' });
+    }
+  );
+});
+
+app.get('/api/tenant-management/companies', authenticate, requireTenantOwner, (_req, res) => {
+  db.all(
+    `SELECT
+       c.id,
+       c.name,
+       c.email,
+       COALESCE(c.serviceStatus, 'Active') AS serviceStatus,
+       COALESCE(c.subscriptionPlan, 'Demo') AS subscriptionPlan,
+       COALESCE(c.subscriptionNotes, '') AS subscriptionNotes,
+       c.createdAt,
+       c.tenantUpdatedAt,
+       COUNT(DISTINCT u.id) AS usersCount,
+       COUNT(DISTINCT l.id) AS loadsCount
+     FROM companies c
+     LEFT JOIN users u ON u.companyId = c.id
+     LEFT JOIN loads l ON l.companyId = c.id
+     GROUP BY c.id
+     ORDER BY c.createdAt DESC`,
+    [],
+    (err, rows) => {
+      if (err) {
+        console.error('Tenant list error:', err.message);
+        return res.status(500).json({ error: 'Failed to load tenants.' });
+      }
+
+      res.json(rows || []);
+    }
+  );
+});
+
+app.put('/api/tenant-management/companies/:id', authenticate, requireTenantOwner, (req, res) => {
+  const { id } = req.params;
+  const serviceStatus = String(req.body?.serviceStatus || 'Active').trim();
+  const subscriptionPlan = String(req.body?.subscriptionPlan || 'Demo').trim();
+  const subscriptionNotes = String(req.body?.subscriptionNotes || '').trim();
+  const allowedStatuses = new Set(['Active', 'Trial', 'Past Due', 'Suspended', 'Canceled']);
+
+  if (!allowedStatuses.has(serviceStatus)) {
+    return res.status(400).json({ error: 'Invalid tenant status.' });
+  }
+
+  const tenantUpdatedAt = new Date().toISOString();
+  db.run(
+    `UPDATE companies
+     SET serviceStatus = ?, subscriptionPlan = ?, subscriptionNotes = ?, tenantUpdatedAt = ?
+     WHERE id = ?`,
+    [serviceStatus, subscriptionPlan, subscriptionNotes, tenantUpdatedAt, id],
+    function updateTenant(err) {
+      if (err) {
+        console.error('Tenant update error:', err.message);
+        return res.status(500).json({ error: 'Failed to update tenant.' });
+      }
+
+      if (this.changes === 0) {
+        return res.status(404).json({ error: 'Tenant not found.' });
+      }
+
+      res.json({ ok: true, id, serviceStatus, subscriptionPlan, subscriptionNotes, tenantUpdatedAt });
+    }
+  );
+});
+
+app.get('/api/tenant-management/demo-requests', authenticate, requireTenantOwner, (_req, res) => {
+  db.all(
+    `SELECT * FROM demo_requests ORDER BY createdAt DESC`,
+    [],
+    (err, rows) => {
+      if (err) {
+        console.error('Demo request list error:', err.message);
+        return res.status(500).json({ error: 'Failed to load demo requests.' });
+      }
+
+      res.json(rows || []);
+    }
+  );
+});
+
+app.put('/api/tenant-management/demo-requests/:id', authenticate, requireTenantOwner, (req, res) => {
+  const { id } = req.params;
+  const status = String(req.body?.status || 'New').trim();
+  const allowedStatuses = new Set(['New', 'Contacted', 'Approved', 'Closed']);
+
+  if (!allowedStatuses.has(status)) {
+    return res.status(400).json({ error: 'Invalid demo request status.' });
+  }
+
+  db.run(
+    `UPDATE demo_requests SET status = ?, updatedAt = ? WHERE id = ?`,
+    [status, new Date().toISOString(), id],
+    function updateDemoRequest(err) {
+      if (err) {
+        console.error('Demo request update error:', err.message);
+        return res.status(500).json({ error: 'Failed to update demo request.' });
+      }
+
+      if (this.changes === 0) {
+        return res.status(404).json({ error: 'Demo request not found.' });
+      }
+
+      res.json({ ok: true, id, status });
+    }
+  );
+});
 
 const fuelAccessRoles = new Set(['dispatcher', 'payroll', 'manager', ...adminRoles]);
 const getFuelReceiptUrl = (fuel = {}) =>
@@ -2974,6 +3119,14 @@ app.post('/api/login', (req, res) => {
           (companyErr, company) => {
             if (companyErr) {
               console.error('Login company lookup error:', companyErr.message);
+            }
+
+            const serviceStatus = String(company?.serviceStatus || 'Active').trim();
+            const blockedStatuses = new Set(['Suspended', 'Canceled']);
+            if (company && blockedStatuses.has(serviceStatus) && !isPortFlowOwner(user)) {
+              return res.status(403).json({
+                error: `This company account is ${serviceStatus}. Please contact PortFlow support.`,
+              });
             }
 
             res.json({
@@ -4755,6 +4908,13 @@ app.post('/api/auth/login', (req, res) => {
 
       if (!isValid) {
         return res.status(401).json({ error: 'Invalid email or password.' });
+      }
+
+      const serviceStatus = String(company.serviceStatus || 'Active').trim();
+      if (['Suspended', 'Canceled'].includes(serviceStatus)) {
+        return res.status(403).json({
+          error: `This company account is ${serviceStatus}. Please contact PortFlow support.`,
+        });
       }
 
       const token = jwt.sign(

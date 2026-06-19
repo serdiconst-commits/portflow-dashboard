@@ -36,6 +36,7 @@ const APP_PORTAL = import.meta.env.VITE_APP_PORTAL || 'web';
 const APP_TIME_ZONE = 'America/Chicago';
 const DEMO_TOKEN = 'PORTFLOW_DEMO';
 const DEMO_ACCESS_CODE = import.meta.env.VITE_DEMO_ACCESS_CODE || 'PORTFLOW-DEMO';
+const PORTFLOW_OWNER_EMAIL = (import.meta.env.VITE_PORTFLOW_OWNER_EMAIL || 'oliver@portflow-net.com').toLowerCase();
 
 const getDateStringInAppTimeZone = (dateValue = new Date()) => {
   const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
@@ -99,8 +100,11 @@ const staffRoleOptions = [
 
 const fullAccessRoles = new Set(['admin', 'owner', 'carrier']);
 const getNormalizedRole = (role) => String(role || '').trim().toLowerCase();
+const isPortFlowOwnerUser = (user = {}) =>
+  getNormalizedRole(user.role) === 'owner' || String(user.email || '').trim().toLowerCase() === PORTFLOW_OWNER_EMAIL;
 const getDefaultViewForRole = (role) => {
   const normalizedRole = getNormalizedRole(role);
+  if (normalizedRole === 'owner') return 'tenants';
   if (normalizedRole === 'driver') return 'driver';
   if (normalizedRole === 'payroll') return 'settlements';
   return 'dispatch';
@@ -108,6 +112,7 @@ const getDefaultViewForRole = (role) => {
 
 const roleCanAccessView = (role, view) => {
   const normalizedRole = getNormalizedRole(role);
+  if (view === 'tenants') return normalizedRole === 'owner';
   if (fullAccessRoles.has(normalizedRole)) return true;
   if (normalizedRole === 'driver') return view === 'driver';
   if (normalizedRole === 'payroll') return ['settlements', 'invoices', 'accounting', 'settings'].includes(view);
@@ -1112,7 +1117,20 @@ const [registerName, setRegisterName] = useState('');
 const [authToken, setAuthToken] = useState(localStorage.getItem('authToken') || '');
 const [currentUser, setCurrentUser] = useState(savedUser || null);
 const [company, setCompany] = useState(savedCompany || null);
+const canManageTenants = isPortFlowOwnerUser(currentUser);
 const isDemoMode = authToken === DEMO_TOKEN || currentUser?.id === 'demo-dispatcher';
+const [tenantCompanies, setTenantCompanies] = useState([]);
+const [demoRequests, setDemoRequests] = useState([]);
+const [tenantStatusMessage, setTenantStatusMessage] = useState('');
+const [tenantLoading, setTenantLoading] = useState(false);
+const [demoRequestForm, setDemoRequestForm] = useState({
+  companyName: '',
+  contactName: '',
+  email: '',
+  phone: '',
+  message: '',
+});
+const [demoRequestStatus, setDemoRequestStatus] = useState('');
 const [companyLogoUploading, setCompanyLogoUploading] = useState(false);
 const [companyLogoVersion, setCompanyLogoVersion] = useState(Date.now());
 const [companyProfileEditing, setCompanyProfileEditing] = useState(false);
@@ -1446,6 +1464,120 @@ const handleStartDemo = () => {
   }
   setDemoAccessError('');
   applyDemoData();
+};
+
+const handleSubmitDemoRequest = async (e) => {
+  e.preventDefault();
+  setDemoRequestStatus('Sending demo request...');
+
+  try {
+    const res = await fetch(`${API_BASE}/api/demo-requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(demoRequestForm),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to send demo request');
+    }
+
+    setDemoRequestForm({ companyName: '', contactName: '', email: '', phone: '', message: '' });
+    setDemoRequestStatus('Demo request received. PortFlow will follow up soon.');
+  } catch (error) {
+    console.error('Demo request failed:', error);
+    setDemoRequestStatus(`Could not send demo request: ${error.message}`);
+  }
+};
+
+const fetchTenantManagement = async () => {
+  if (!authToken || !canManageTenants) return;
+
+  setTenantLoading(true);
+  try {
+    const [companiesRes, requestsRes] = await Promise.all([
+      fetch(`${API_BASE}/api/tenant-management/companies`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      }),
+      fetch(`${API_BASE}/api/tenant-management/demo-requests`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      }),
+    ]);
+
+    const companiesData = await companiesRes.json();
+    const requestsData = await requestsRes.json();
+
+    if (!companiesRes.ok) throw new Error(companiesData.error || 'Failed to load tenants');
+    if (!requestsRes.ok) throw new Error(requestsData.error || 'Failed to load demo requests');
+
+    setTenantCompanies(Array.isArray(companiesData) ? companiesData : []);
+    setDemoRequests(Array.isArray(requestsData) ? requestsData : []);
+    setTenantStatusMessage('');
+  } catch (error) {
+    console.error('Tenant Management load failed:', error);
+    setTenantStatusMessage(`Tenant Management error: ${error.message}`);
+  } finally {
+    setTenantLoading(false);
+  }
+};
+
+const handleTenantFieldChange = (tenantId, field, value) => {
+  setTenantCompanies((prev) =>
+    prev.map((tenant) => (tenant.id === tenantId ? { ...tenant, [field]: value } : tenant))
+  );
+};
+
+const handleSaveTenant = async (tenant) => {
+  if (!tenant?.id) return;
+
+  setTenantStatusMessage('Saving tenant...');
+  try {
+    const res = await fetch(`${API_BASE}/api/tenant-management/companies/${tenant.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        serviceStatus: tenant.serviceStatus,
+        subscriptionPlan: tenant.subscriptionPlan,
+        subscriptionNotes: tenant.subscriptionNotes,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save tenant');
+    }
+
+    setTenantStatusMessage(`${tenant.name} updated.`);
+    await fetchTenantManagement();
+  } catch (error) {
+    console.error('Tenant update failed:', error);
+    setTenantStatusMessage(`Could not update tenant: ${error.message}`);
+  }
+};
+
+const handleUpdateDemoRequestStatus = async (requestId, status) => {
+  setTenantStatusMessage('Updating demo request...');
+  try {
+    const res = await fetch(`${API_BASE}/api/tenant-management/demo-requests/${requestId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ status }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to update demo request');
+    }
+
+    setTenantStatusMessage('Demo request updated.');
+    await fetchTenantManagement();
+  } catch (error) {
+    console.error('Demo request update failed:', error);
+    setTenantStatusMessage(`Could not update demo request: ${error.message}`);
+  }
 };
 const handleDriverDocumentUpload = async (loadId) => {
   try {
@@ -3250,10 +3382,11 @@ useEffect(() => {
 
 useEffect(() => {
   if (!currentUser) return;
+  if (activeView === 'tenants' && canManageTenants) return;
   if (!roleCanAccessView(currentUser.role, activeView)) {
     setActiveView(getDefaultViewForRole(currentUser.role));
   }
-}, [activeView, currentUser]);
+}, [activeView, currentUser, canManageTenants]);
 
 useEffect(() => {
   if (isDemoMode) return;
@@ -3261,6 +3394,13 @@ useEffect(() => {
     fetchDrivers();
   }
 }, [activeView, authToken, isDemoMode]);
+
+useEffect(() => {
+  if (isDemoMode) return;
+  if (activeView === 'tenants' && canManageTenants) {
+    fetchTenantManagement();
+  }
+}, [activeView, authToken, isDemoMode, canManageTenants]);
 
 
 useEffect(() => {
@@ -7421,7 +7561,7 @@ return (
           >
             Client Login
           </button>
-          <a className="public-primary-btn" href="mailto:oliver@portflow-net.com?subject=PortFlow%20Demo%20Request">
+          <a className="public-primary-btn" href="#demo-request">
             Request Demo
           </a>
         </div>
@@ -7437,7 +7577,7 @@ return (
               customer billing, payroll settlement, and Port Houston visibility from one connected workspace.
             </p>
             <div className="public-hero-actions">
-              <a className="public-primary-btn" href="mailto:oliver@portflow-net.com?subject=PortFlow%20Demo%20Request">
+              <a className="public-primary-btn" href="#demo-request">
                 Schedule a Demo
               </a>
               <button
@@ -7496,7 +7636,7 @@ return (
           ))}
         </section>
 
-        <section className="public-demo-band">
+        <section className="public-demo-band" id="demo-request">
           <div>
             <span className="public-kicker">Demo access by request</span>
             <h2>Approved prospects can try PortFlow without touching your live operation.</h2>
@@ -7505,6 +7645,56 @@ return (
             </p>
           </div>
           <div className="public-demo-access">
+            <form className="public-demo-form" onSubmit={handleSubmitDemoRequest}>
+              <label>
+                <span>Company Name</span>
+                <input
+                  value={demoRequestForm.companyName}
+                  onChange={(e) => setDemoRequestForm((prev) => ({ ...prev, companyName: e.target.value }))}
+                  placeholder="Company name"
+                  required
+                />
+              </label>
+              <label>
+                <span>Contact Name</span>
+                <input
+                  value={demoRequestForm.contactName}
+                  onChange={(e) => setDemoRequestForm((prev) => ({ ...prev, contactName: e.target.value }))}
+                  placeholder="Your name"
+                />
+              </label>
+              <label>
+                <span>Email</span>
+                <input
+                  type="email"
+                  value={demoRequestForm.email}
+                  onChange={(e) => setDemoRequestForm((prev) => ({ ...prev, email: e.target.value }))}
+                  placeholder="email@company.com"
+                  required
+                />
+              </label>
+              <label>
+                <span>Phone</span>
+                <input
+                  value={demoRequestForm.phone}
+                  onChange={(e) => setDemoRequestForm((prev) => ({ ...prev, phone: e.target.value }))}
+                  placeholder="Phone"
+                />
+              </label>
+              <label className="public-demo-message">
+                <span>What do you want to improve?</span>
+                <textarea
+                  rows="3"
+                  value={demoRequestForm.message}
+                  onChange={(e) => setDemoRequestForm((prev) => ({ ...prev, message: e.target.value }))}
+                  placeholder="Dispatch, driver app, billing, settlements..."
+                />
+              </label>
+              <button type="submit" className="public-primary-btn">
+                Send Demo Request
+              </button>
+              {demoRequestStatus && <p>{demoRequestStatus}</p>}
+            </form>
             <label>
               <span>Demo Access Code</span>
               <input
@@ -7521,9 +7711,6 @@ return (
             <button type="button" className="public-primary-btn" onClick={handleStartDemo}>
               Launch Approved Demo
             </button>
-            <a className="public-secondary-btn" href="mailto:oliver@portflow-net.com?subject=PortFlow%20Demo%20Request">
-              Request Demo Access
-            </a>
           </div>
         </section>
       </main>
@@ -9299,6 +9486,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             >
               Accounting
             </button>
+            )}
+            {canManageTenants && (
+              <button
+                className={activeView === 'tenants' ? 'toggle-btn active' : 'toggle-btn'}
+                onClick={() => setActiveView('tenants')}
+              >
+                Tenant Management
+              </button>
             )}
           </div>
 
@@ -12336,6 +12531,126 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           ))}
         </div>
       )}
+    </section>
+  </div>
+)}
+
+{activeView === 'tenants' && canManageTenants && (
+  <div className="dashboard-grid tenant-grid">
+    <section className="panel tenant-panel">
+      <div className="panel-header">
+        <div>
+          <h3>Tenant Management</h3>
+          <p className="panel-subtitle">Control company access, subscription status, and service notes.</p>
+        </div>
+        <button type="button" className="secondary-btn compact-btn" onClick={fetchTenantManagement} disabled={tenantLoading}>
+          {tenantLoading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+      {tenantStatusMessage && <p className="status-message">{tenantStatusMessage}</p>}
+
+      <div className="tenant-summary-row">
+        <div><span>Companies</span><strong>{tenantCompanies.length}</strong></div>
+        <div><span>Active</span><strong>{tenantCompanies.filter((item) => item.serviceStatus === 'Active').length}</strong></div>
+        <div><span>Past Due</span><strong>{tenantCompanies.filter((item) => item.serviceStatus === 'Past Due').length}</strong></div>
+        <div><span>Suspended</span><strong>{tenantCompanies.filter((item) => item.serviceStatus === 'Suspended').length}</strong></div>
+      </div>
+
+      <div className="tenant-list">
+        {tenantCompanies.length === 0 ? (
+          <div className="empty-state"><p>No companies found yet.</p></div>
+        ) : (
+          tenantCompanies.map((tenant) => (
+            <article key={tenant.id} className="tenant-card">
+              <div className="tenant-card-main">
+                <div>
+                  <span className={`tenant-status tenant-status-${String(tenant.serviceStatus || 'Active').toLowerCase().replace(/\s+/g, '-')}`}>
+                    {tenant.serviceStatus || 'Active'}
+                  </span>
+                  <h4>{tenant.name}</h4>
+                  <p>{tenant.email}</p>
+                  <small>Created {formatDateTime(tenant.createdAt)} | Users {tenant.usersCount || 0} | Loads {tenant.loadsCount || 0}</small>
+                </div>
+                <button type="button" className="primary-btn compact-btn" onClick={() => handleSaveTenant(tenant)}>
+                  Save Tenant
+                </button>
+              </div>
+
+              <div className="tenant-controls">
+                <label>
+                  <span>Status</span>
+                  <select
+                    value={tenant.serviceStatus || 'Active'}
+                    onChange={(e) => handleTenantFieldChange(tenant.id, 'serviceStatus', e.target.value)}
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Trial">Trial</option>
+                    <option value="Past Due">Past Due</option>
+                    <option value="Suspended">Suspended</option>
+                    <option value="Canceled">Canceled</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Plan</span>
+                  <input
+                    value={tenant.subscriptionPlan || ''}
+                    onChange={(e) => handleTenantFieldChange(tenant.id, 'subscriptionPlan', e.target.value)}
+                    placeholder="Demo, Monthly, Enterprise..."
+                  />
+                </label>
+                <label className="tenant-notes-field">
+                  <span>Owner Notes</span>
+                  <textarea
+                    rows="2"
+                    value={tenant.subscriptionNotes || ''}
+                    onChange={(e) => handleTenantFieldChange(tenant.id, 'subscriptionNotes', e.target.value)}
+                    placeholder="Payment status, contact notes, renewal details..."
+                  />
+                </label>
+              </div>
+            </article>
+          ))
+        )}
+      </div>
+    </section>
+
+    <section className="panel tenant-panel">
+      <div className="panel-header">
+        <div>
+          <h3>Demo Requests</h3>
+          <p className="panel-subtitle">Prospects submitted from the public PortFlow page.</p>
+        </div>
+        <span>{demoRequests.length} request(s)</span>
+      </div>
+
+      <div className="tenant-list">
+        {demoRequests.length === 0 ? (
+          <div className="empty-state"><p>No demo requests yet.</p></div>
+        ) : (
+          demoRequests.map((request) => (
+            <article key={request.id} className="tenant-card demo-request-card">
+              <div className="tenant-card-main">
+                <div>
+                  <span className="tenant-status tenant-status-trial">{request.status || 'New'}</span>
+                  <h4>{request.companyName}</h4>
+                  <p>{request.contactName || 'No contact name'} | {request.email} | {request.phone || 'No phone'}</p>
+                  <small>Requested {formatDateTime(request.createdAt)}</small>
+                </div>
+                <select
+                  value={request.status || 'New'}
+                  onChange={(e) => handleUpdateDemoRequestStatus(request.id, e.target.value)}
+                >
+                  <option value="New">New</option>
+                  <option value="Contacted">Contacted</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Closed">Closed</option>
+                </select>
+              </div>
+              {request.message && <p className="tenant-request-message">{request.message}</p>}
+            </article>
+          ))
+        )}
+      </div>
     </section>
   </div>
 )}

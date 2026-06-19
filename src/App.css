@@ -106,6 +106,54 @@ button {
   color: #0f4f8f;
 }
 
+.public-demo-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #dbe4ef;
+}
+
+.public-demo-form label,
+.public-demo-access label {
+  display: grid;
+  gap: 6px;
+}
+
+.public-demo-form span,
+.public-demo-access span {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.public-demo-form input,
+.public-demo-form textarea,
+.public-demo-access input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.public-demo-message {
+  grid-column: 1 / -1;
+}
+
+.public-demo-form .public-primary-btn {
+  width: fit-content;
+}
+
+.public-demo-form p {
+  grid-column: 1 / -1;
+  color: #bbf7d0;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .public-hero {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
@@ -2831,8 +2879,150 @@ button:disabled {
 }
 
 .admin-grid,
-.settings-grid {
+.settings-grid,
+.tenant-grid {
   align-items: start;
+}
+
+.tenant-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tenant-panel {
+  max-width: 1280px;
+}
+
+.tenant-summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.tenant-summary-row div {
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.tenant-summary-row span,
+.tenant-card small,
+.tenant-controls span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tenant-summary-row strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 22px;
+}
+
+.tenant-list {
+  display: grid;
+  gap: 12px;
+}
+
+.tenant-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #dbe4ef;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.tenant-card-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.tenant-card h4 {
+  margin: 8px 0 4px;
+  font-size: 18px;
+}
+
+.tenant-card p {
+  margin: 0;
+  color: #475569;
+}
+
+.tenant-controls {
+  display: grid;
+  grid-template-columns: 180px 220px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.tenant-controls label {
+  display: grid;
+  gap: 6px;
+}
+
+.tenant-controls input,
+.tenant-controls select,
+.tenant-controls textarea,
+.demo-request-card select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font: inherit;
+}
+
+.tenant-status {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 26px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.tenant-status-active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.tenant-status-trial {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.tenant-status-past-due {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.tenant-status-suspended,
+.tenant-status-canceled {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.tenant-request-message {
+  padding: 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+@media (max-width: 900px) {
+  .public-demo-form,
+  .tenant-summary-row,
+  .tenant-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .tenant-card-main {
+    flex-direction: column;
+  }
 }
 
 .admin-form {

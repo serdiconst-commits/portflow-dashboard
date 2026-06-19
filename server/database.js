@@ -279,6 +279,26 @@ db.run(`ALTER TABLE companies ADD COLUMN portHoustonCredentialsJson TEXT`, (err)
     console.error('Error adding portHoustonCredentialsJson column to companies:', err.message);
   }
 });
+db.run(`ALTER TABLE companies ADD COLUMN serviceStatus TEXT DEFAULT 'Active'`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding serviceStatus column to companies:', err.message);
+  }
+});
+db.run(`ALTER TABLE companies ADD COLUMN subscriptionPlan TEXT DEFAULT 'Demo'`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding subscriptionPlan column to companies:', err.message);
+  }
+});
+db.run(`ALTER TABLE companies ADD COLUMN subscriptionNotes TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding subscriptionNotes column to companies:', err.message);
+  }
+});
+db.run(`ALTER TABLE companies ADD COLUMN tenantUpdatedAt TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding tenantUpdatedAt column to companies:', err.message);
+  }
+});
 db.run(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -312,6 +332,19 @@ db.run(`
     ipAddress TEXT,
     userAgent TEXT,
     createdAt TEXT NOT NULL
+  )
+`);
+db.run(`
+  CREATE TABLE IF NOT EXISTS demo_requests (
+    id TEXT PRIMARY KEY,
+    companyName TEXT NOT NULL,
+    contactName TEXT,
+    email TEXT NOT NULL,
+    phone TEXT,
+    message TEXT,
+    status TEXT DEFAULT 'New',
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT
   )
 `);
 db.run(`
