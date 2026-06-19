@@ -607,12 +607,18 @@ db.run(`
     deductionsTotal REAL DEFAULT 0,
     netPay REAL DEFAULT 0,
     statementJson TEXT,
+    notes TEXT,
     version INTEGER DEFAULT 1,
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL,
     createdBy TEXT
   )
 `);
+db.run(`ALTER TABLE settlements ADD COLUMN notes TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding notes column to settlements:', err.message);
+  }
+});
 db.run(`
   CREATE INDEX IF NOT EXISTS idx_settlements_company_driver_period
   ON settlements(companyId, driverId, periodStart, periodEnd)

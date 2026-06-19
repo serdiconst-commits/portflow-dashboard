@@ -3675,43 +3675,6 @@ useEffect(() => {
     return createBackendSettlement();
   };
 
-  const handleSaveBackendSettlementNote = async () => {
-    if (!activeSettlementDriverId || !settlementStartDate || !settlementEndDate) {
-      setSettlementBackendStatus('Choose a driver and week before saving the payroll note.');
-      return;
-    }
-
-    setSettlementBackendLoading(true);
-    try {
-      const settlement = await ensureBackendSettlement();
-      if (!settlement?.id) {
-        throw new Error('No database settlement is available for this payroll note.');
-      }
-
-      const res = await fetch(`${API_BASE}/api/driver-settlements/${settlement.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({ notes: settlementNote }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to save payroll note');
-      }
-
-      setActiveBackendSettlement(data);
-      setSettlementNote(data.notes || data.statement?.settlement?.notes || settlementNote);
-      setSettlementBackendStatus('Payroll note saved to the database settlement.');
-    } catch (error) {
-      console.error('Failed to save payroll note:', error);
-      setSettlementBackendStatus(`Failed to save payroll note: ${error.message}`);
-    } finally {
-      setSettlementBackendLoading(false);
-    }
-  };
-
   const handleCompleteBackendSettlement = async () => {
     if (!activeBackendSettlement?.id) return;
 
@@ -3728,7 +3691,7 @@ useEffect(() => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${authToken}`,
         },
-        body: JSON.stringify({ status: 'Complete' }),
+        body: JSON.stringify({ status: 'Complete', notes: settlementNote }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -3736,7 +3699,8 @@ useEffect(() => {
       }
 
       setActiveBackendSettlement(data);
-      setSettlementBackendStatus('Database settlement marked complete. You can now print or export it for the driver.');
+      setSettlementNote(data.notes || data.statement?.settlement?.notes || settlementNote);
+      setSettlementBackendStatus('Database settlement marked complete with payroll note saved. You can now print or export it for the driver.');
     } catch (error) {
       console.error('Failed to complete backend settlement:', error);
       setSettlementBackendStatus(`Failed to complete settlement: ${error.message}`);
@@ -11484,16 +11448,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onChange={(e) => setSettlementNote(e.target.value)}
               />
             </label>
-            <div className="settlement-note-actions">
-              <button
-                type="button"
-                className="secondary-btn compact-btn"
-                onClick={handleSaveBackendSettlementNote}
-                disabled={settlementBackendLoading || !activeSettlementDriverId || !settlementStartDate || !settlementEndDate}
-              >
-                Save Payroll Note
-              </button>
-            </div>
 
             <div className="settlement-entry-meta">
               <div>
