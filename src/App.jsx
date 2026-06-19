@@ -1420,6 +1420,14 @@ const handleRegister = async (e) => {
       throw new Error(`Server said: ${data.error || 'Registration failed'}`);
     }
 
+    if (data.pendingApproval) {
+      setLoginError(data.message || 'Account request received. PortFlow will approve access before login is enabled.');
+      setAuthMode('login');
+      setRegisterName('');
+      setLoginPassword('');
+      return;
+    }
+
     setAuthToken(data.token);
     setCurrentUser(data.user);
     setCompany(data.company || null);
@@ -7732,7 +7740,7 @@ return (
             <img src="/portflow-icon-192.png" alt="PortFlow" />
             <div>
               <span>PortFlow</span>
-              <strong>{authMode === 'register' ? 'Create company access' : 'Dispatcher login'}</strong>
+              <strong>{authMode === 'register' ? 'Request company access' : 'Dispatcher login'}</strong>
             </div>
           </div>
         )}
@@ -7748,7 +7756,7 @@ return (
         {!isDriverApp && (
           <p className="auth-subtitle">
             {authMode === 'register'
-              ? 'Set up the first dispatch account for your company.'
+              ? 'Send a company access request. PortFlow will approve it before login is enabled.'
               : 'Sign in to manage loads, drivers, documents, and dispatch updates.'}
           </p>
         )}
@@ -7790,7 +7798,7 @@ return (
         )}
 
         <button type="submit" className={isDriverApp ? '' : 'auth-primary-btn'}>
-          {authMode === 'register' ? 'Create Account' : 'Log In'}
+          {authMode === 'register' ? 'Request Account Access' : 'Log In'}
         </button>
       </form>
 
@@ -7806,7 +7814,7 @@ return (
           >
             {authMode === 'register'
               ? 'Already have an account? Log in'
-              : 'Create first company account'}
+              : 'Request company access'}
           </button>
           <button
             type="button"
@@ -12547,6 +12555,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         <div>
           <h3>Tenant Management</h3>
           <p className="panel-subtitle">Control company access, subscription status, and service notes.</p>
+          <p className="panel-subtitle">Set status to Active or Trial to enable login. Suspended or Canceled blocks users from entering.</p>
         </div>
         <button type="button" className="secondary-btn compact-btn" onClick={fetchTenantManagement} disabled={tenantLoading}>
           {tenantLoading ? 'Refreshing...' : 'Refresh'}

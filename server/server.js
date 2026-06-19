@@ -1416,7 +1416,19 @@ app.put('/api/tenant-management/companies/:id', authenticate, requireTenantOwner
         return res.status(404).json({ error: 'Tenant not found.' });
       }
 
-      res.json({ ok: true, id, serviceStatus, subscriptionPlan, subscriptionNotes, tenantUpdatedAt });
+      const isEnabledStatus = serviceStatus === 'Active' || serviceStatus === 'Trial';
+      db.run(
+        `UPDATE users SET isActive = ? WHERE companyId = ? AND role != 'owner'`,
+        [isEnabledStatus ? 1 : 0, id],
+        (userErr) => {
+          if (userErr) {
+            console.error('Tenant user status update error:', userErr.message);
+            return res.status(500).json({ error: 'Tenant updated, but user access could not be synced.' });
+          }
+
+          res.json({ ok: true, id, serviceStatus, subscriptionPlan, subscriptionNotes, tenantUpdatedAt });
+        }
+      );
     }
   );
 });
@@ -3098,17 +3110,18 @@ app.post('/api/login', (req, res) => {
           return res.status(401).json({ error: 'Invalid email or password' });
         }
 
+        const effectiveRole = isPortFlowOwner(user) ? 'owner' : user.role;
         const token = jwt.sign(
           {
             id: user.id,
             name: user.name,
             email: user.email,
-            role: user.role,
+            role: effectiveRole,
             companyId: user.companyId || null,
             driverId: user.driverId || null,
           },
           JWT_SECRET,
-          { expiresIn: user.role === 'driver' ? '30d' : '7d' }
+          { expiresIn: effectiveRole === 'driver' ? '30d' : '7d' }
         );
 
         db.get(
@@ -3125,7 +3138,7 @@ app.post('/api/login', (req, res) => {
                 id: user.id,
                 name: user.name,
                 email: user.email,
-                role: user.role,
+                role: effectiveRole,
                 companyId: user.companyId || null,
                 driverId: user.driverId || null,
               },
@@ -4812,9 +4825,19 @@ app.post('/api/auth/register', async (req, res) => {
         const createdAt = new Date().toISOString();
 
         db.run(
-          `INSERT INTO companies (id, name, email, passwordHash, createdAt)
-           VALUES (?, ?, ?, ?, ?)`,
-          [companyId, name, email, passwordHash, createdAt],
+          `INSERT INTO companies (id, name, email, passwordHash, createdAt, serviceStatus, subscriptionPlan, subscriptionNotes, tenantUpdatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            companyId,
+            name,
+            email,
+            passwordHash,
+            createdAt,
+            'Trial',
+            'Pending Approval',
+            'Created from public account request. Owner approval required before login.',
+            createdAt,
+          ],
           function (companyErr) {
             if (companyErr) {
               console.error('Register company insert error:', companyErr.message);
@@ -4824,43 +4847,23 @@ app.post('/api/auth/register', async (req, res) => {
             db.run(
               `INSERT INTO users (id, companyId, name, email, password, role, isActive)
                VALUES (?, ?, ?, ?, ?, ?, ?)`,
-              [userId, companyId, name, email, passwordHash, 'admin', 1],
+              [userId, companyId, name, email, passwordHash, 'admin', 0],
               function (userErr) {
                 if (userErr) {
                   console.error('Register user insert error:', userErr.message);
                   return res.status(500).json({ error: 'Failed to create admin user.' });
                 }
 
-                const token = jwt.sign(
-                  {
-                    id: userId,
-                    name,
-                    email,
-                    role: 'admin',
-                    companyId,
-                    driverId: null,
-                  },
-                  JWT_SECRET,
-                  { expiresIn: '7d' }
-                );
-
                 res.json({
-                  token,
-                  user: {
-                    id: userId,
-                    name,
-                    email,
-                    role: 'admin',
-                    companyId,
-                    driverId: null,
-                  },
+                  ok: true,
+                  pendingApproval: true,
+                  message: 'Account request received. PortFlow will approve access before login is enabled.',
                   company: {
                     id: companyId,
                     name,
                     email,
-                    logoUrl: '',
-                    portHoustonUsername: '',
-                    portHoustonConfigured: false,
+                    serviceStatus: 'Trial',
+                    subscriptionPlan: 'Pending Approval',
                   },
                 });
               }
@@ -4901,7 +4904,7 @@ app.post('/api/auth/login', (req, res) => {
       }
 
       const token = jwt.sign(
-        { companyId: company.id, email: company.email },
+        { companyId: company.id, email: company.email, role: String(company.email || '').trim().toLowerCase() === PORTFLOW_OWNER_EMAIL ? 'owner' : 'admin' },
         JWT_SECRET,
         { expiresIn: '7d' }
       );
