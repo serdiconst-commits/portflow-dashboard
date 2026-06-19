@@ -100,8 +100,13 @@ const staffRoleOptions = [
 
 const fullAccessRoles = new Set(['admin', 'owner', 'carrier']);
 const getNormalizedRole = (role) => String(role || '').trim().toLowerCase();
-const isPortFlowOwnerUser = (user = {}) =>
-  getNormalizedRole(user.role) === 'owner' || String(user.email || '').trim().toLowerCase() === PORTFLOW_OWNER_EMAIL;
+const isPortFlowOwnerUser = (user = {}) => {
+  const safeUser = user || {};
+  return (
+    getNormalizedRole(safeUser.role) === 'owner' ||
+    String(safeUser.email || '').trim().toLowerCase() === PORTFLOW_OWNER_EMAIL
+  );
+};
 const getDefaultViewForRole = (role) => {
   const normalizedRole = getNormalizedRole(role);
   if (normalizedRole === 'owner') return 'tenants';
