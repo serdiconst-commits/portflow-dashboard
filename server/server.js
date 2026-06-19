@@ -101,8 +101,6 @@ const getCompanyPayload = (company = {}) => ({
   id: company.id,
   name: company.name,
   email: company.email,
-  serviceStatus: company.serviceStatus || 'Active',
-  subscriptionPlan: company.subscriptionPlan || 'Demo',
   invoiceName: company.invoiceName || company.name || '',
   invoiceAddress: company.invoiceAddress || '',
   settlementCompanyName: company.settlementCompanyName || company.invoiceName || company.name || '',
@@ -114,7 +112,7 @@ const getCompanyPayload = (company = {}) => ({
 });
 
 const companyProfileSelect =
-  'id, name, email, logoPath, invoiceName, invoiceAddress, settlementCompanyName, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson, serviceStatus, subscriptionPlan, subscriptionNotes, tenantUpdatedAt';
+  'id, name, email, logoPath, invoiceName, invoiceAddress, settlementCompanyName, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -3121,14 +3119,6 @@ app.post('/api/login', (req, res) => {
               console.error('Login company lookup error:', companyErr.message);
             }
 
-            const serviceStatus = String(company?.serviceStatus || 'Active').trim();
-            const blockedStatuses = new Set(['Suspended', 'Canceled']);
-            if (company && blockedStatuses.has(serviceStatus) && !isPortFlowOwner(user)) {
-              return res.status(403).json({
-                error: `This company account is ${serviceStatus}. Please contact PortFlow support.`,
-              });
-            }
-
             res.json({
               token,
               user: {
@@ -4908,13 +4898,6 @@ app.post('/api/auth/login', (req, res) => {
 
       if (!isValid) {
         return res.status(401).json({ error: 'Invalid email or password.' });
-      }
-
-      const serviceStatus = String(company.serviceStatus || 'Active').trim();
-      if (['Suspended', 'Canceled'].includes(serviceStatus)) {
-        return res.status(403).json({
-          error: `This company account is ${serviceStatus}. Please contact PortFlow support.`,
-        });
       }
 
       const token = jwt.sign(
