@@ -134,6 +134,7 @@ import {
 const isProduction = process.env.NODE_ENV === 'production' || process.env.APP_ENV === 'production';
 const JWT_SECRET = process.env.JWT_SECRET || (!isProduction ? 'portflow-dev-secret-change-before-production' : '');
 const PORTFLOW_OWNER_EMAIL = String(process.env.PORTFLOW_OWNER_EMAIL || 'oliver@portflow-net.com').trim().toLowerCase();
+const PORTFLOW_OWNER_RESET_CODE = String(process.env.PORTFLOW_OWNER_RESET_CODE || '').trim();
 
 const app = express();
 
@@ -3083,6 +3084,54 @@ app.delete('/api/locations/:id', authenticate, (req, res) => {
       res.json({ success: true, changes: this.changes });
     }
   );
+});
+
+app.post('/api/owner/reset-password', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const resetCode = String(req.body?.resetCode || '').trim();
+  const newPassword = String(req.body?.newPassword || '');
+
+  if (!PORTFLOW_OWNER_RESET_CODE) {
+    return res.status(503).json({ error: 'Owner password reset is not configured.' });
+  }
+
+  if (email !== PORTFLOW_OWNER_EMAIL || resetCode !== PORTFLOW_OWNER_RESET_CODE) {
+    return res.status(403).json({ error: 'Invalid reset email or reset code.' });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+  }
+
+  try {
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    db.run(
+      `UPDATE users SET password = ?, isActive = 1 WHERE LOWER(email) = ?`,
+      [passwordHash, email],
+      function updateOwnerUser(err) {
+        if (err) {
+          console.error('Owner user password reset error:', err.message);
+          return res.status(500).json({ error: 'Failed to reset owner password.' });
+        }
+
+        db.run(
+          `UPDATE companies SET passwordHash = ? WHERE LOWER(email) = ?`,
+          [passwordHash, email],
+          (companyErr) => {
+            if (companyErr) {
+              console.error('Owner company password reset error:', companyErr.message);
+              return res.status(500).json({ error: 'Owner user reset, but company password could not be synced.' });
+            }
+
+            res.json({ ok: true, message: 'Owner password reset. You can log in now.' });
+          }
+        );
+      }
+    );
+  } catch (error) {
+    console.error('Owner password reset route error:', error.message);
+    res.status(500).json({ error: 'Server error resetting password.' });
+  }
 });
 
 app.post('/api/login', (req, res) => {

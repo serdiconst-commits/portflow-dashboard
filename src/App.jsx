@@ -1115,6 +1115,8 @@ const [loginEmail, setLoginEmail] = useState('');
 const [loginPassword, setLoginPassword] = useState('');
 const [loginError, setLoginError] = useState('');
 const [authMode, setAuthMode] = useState('login');
+const [ownerResetCode, setOwnerResetCode] = useState('');
+const [ownerNewPassword, setOwnerNewPassword] = useState('');
 const [showPublicLanding, setShowPublicLanding] = useState(!isDriverApp && !savedUser);
 const [demoAccessCode, setDemoAccessCode] = useState('');
 const [demoAccessError, setDemoAccessError] = useState('');
@@ -1443,6 +1445,36 @@ const handleRegister = async (e) => {
     setLoginError('');
   } catch (error) {
     console.error('Registration failed:', error);
+    setLoginError(error.message);
+  }
+};
+
+const handleOwnerPasswordReset = async (e) => {
+  e.preventDefault();
+
+  try {
+    const res = await fetch(`${API_BASE}/api/owner/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: loginEmail,
+        resetCode: ownerResetCode,
+        newPassword: ownerNewPassword,
+      }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Password reset failed');
+    }
+
+    setLoginPassword('');
+    setOwnerResetCode('');
+    setOwnerNewPassword('');
+    setAuthMode('login');
+    setLoginError(data.message || 'Password reset. You can log in now.');
+  } catch (error) {
+    console.error('Owner password reset failed:', error);
     setLoginError(error.message);
   }
 };
@@ -7740,7 +7772,13 @@ return (
             <img src="/portflow-icon-192.png" alt="PortFlow" />
             <div>
               <span>PortFlow</span>
-              <strong>{authMode === 'register' ? 'Request company access' : 'Dispatcher login'}</strong>
+              <strong>
+                {authMode === 'register'
+                  ? 'Request company access'
+                  : authMode === 'reset'
+                  ? 'Reset owner password'
+                  : 'Dispatcher login'}
+              </strong>
             </div>
           </div>
         )}
@@ -7750,6 +7788,8 @@ return (
             ? 'PortFlow Driver'
             : authMode === 'register'
             ? 'Create PortFlow Account'
+            : authMode === 'reset'
+            ? 'Reset Owner Password'
             : 'Welcome Back'}
         </h2>
 
@@ -7757,11 +7797,22 @@ return (
           <p className="auth-subtitle">
             {authMode === 'register'
               ? 'Send a company access request. PortFlow will approve it before login is enabled.'
+              : authMode === 'reset'
+              ? 'Use your private reset code to set a new owner password.'
               : 'Sign in to manage loads, drivers, documents, and dispatch updates.'}
           </p>
         )}
 
-      <form className={isDriverApp ? '' : 'auth-form'} onSubmit={!isDriverApp && authMode === 'register' ? handleRegister : handleLogin}>
+      <form
+        className={isDriverApp ? '' : 'auth-form'}
+        onSubmit={
+          !isDriverApp && authMode === 'register'
+            ? handleRegister
+            : !isDriverApp && authMode === 'reset'
+            ? handleOwnerPasswordReset
+            : handleLogin
+        }
+      >
         {!isDriverApp && authMode === 'register' && (
           <div className="auth-field">
             <label>Company Name</label>
@@ -7782,14 +7833,35 @@ return (
           />
         </div>
 
-        <div className={isDriverApp ? '' : 'auth-field'}>
-          <label>Password</label>
-          <input
-            type="password"
-            value={loginPassword}
-            onChange={(e) => setLoginPassword(e.target.value)}
-          />
-        </div>
+        {authMode === 'reset' ? (
+          <>
+            <div className="auth-field">
+              <label>Reset Code</label>
+              <input
+                type="password"
+                value={ownerResetCode}
+                onChange={(e) => setOwnerResetCode(e.target.value)}
+              />
+            </div>
+            <div className="auth-field">
+              <label>New Password</label>
+              <input
+                type="password"
+                value={ownerNewPassword}
+                onChange={(e) => setOwnerNewPassword(e.target.value)}
+              />
+            </div>
+          </>
+        ) : (
+          <div className={isDriverApp ? '' : 'auth-field'}>
+            <label>Password</label>
+            <input
+              type="password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+            />
+          </div>
+        )}
 
         {loginError && (
           <p className={isDriverApp ? 'driver-login-error' : 'auth-error'}>
@@ -7798,7 +7870,11 @@ return (
         )}
 
         <button type="submit" className={isDriverApp ? '' : 'auth-primary-btn'}>
-          {authMode === 'register' ? 'Request Account Access' : 'Log In'}
+          {authMode === 'register'
+            ? 'Request Account Access'
+            : authMode === 'reset'
+            ? 'Reset Password'
+            : 'Log In'}
         </button>
       </form>
 
@@ -7815,6 +7891,16 @@ return (
             {authMode === 'register'
               ? 'Already have an account? Log in'
               : 'Request company access'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setLoginError('');
+              setAuthMode(authMode === 'reset' ? 'login' : 'reset');
+            }}
+            className="auth-secondary-btn"
+          >
+            {authMode === 'reset' ? 'Back to login' : 'Reset owner password'}
           </button>
           <button
             type="button"
