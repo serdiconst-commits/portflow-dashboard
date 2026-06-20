@@ -3116,29 +3116,96 @@ app.post('/api/owner/reset-password', async (req, res) => {
 
   try {
     const passwordHash = await bcrypt.hash(newPassword, 10);
-    db.run(
-      `UPDATE users SET password = ?, isActive = 1 WHERE LOWER(email) = ?`,
-      [passwordHash, email],
-      function updateOwnerUser(err) {
-        if (err) {
-          console.error('Owner user password reset error:', err.message);
-          return res.status(500).json({ error: 'Failed to reset owner password.' });
+    db.get(`SELECT * FROM companies WHERE LOWER(email) = ?`, [email], (companyLookupErr, company) => {
+      if (companyLookupErr) {
+        console.error('Owner company lookup error:', companyLookupErr.message);
+        return res.status(500).json({ error: 'Failed to prepare owner account reset.' });
+      }
+
+      const ownerCompanyId = company?.id || uuidv4();
+      const now = new Date().toISOString();
+      const saveOwnerCompany = (done) => {
+        if (company?.id) {
+          db.run(
+            `UPDATE companies
+             SET passwordHash = ?,
+                 serviceStatus = 'Active',
+                 subscriptionPlan = COALESCE(NULLIF(subscriptionPlan, ''), 'Owner'),
+                 tenantUpdatedAt = ?
+             WHERE id = ?`,
+            [passwordHash, now, ownerCompanyId],
+            done
+          );
+          return;
         }
 
         db.run(
-          `UPDATE companies SET passwordHash = ? WHERE LOWER(email) = ?`,
-          [passwordHash, email],
-          (companyErr) => {
-            if (companyErr) {
-              console.error('Owner company password reset error:', companyErr.message);
-              return res.status(500).json({ error: 'Owner user reset, but company password could not be synced.' });
-            }
-
-            res.json({ ok: true, message: 'Owner password reset. You can log in now.' });
-          }
+          `INSERT INTO companies (id, name, email, passwordHash, createdAt, serviceStatus, subscriptionPlan, subscriptionNotes, tenantUpdatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            ownerCompanyId,
+            'PortFlow Owner',
+            email,
+            passwordHash,
+            now,
+            'Active',
+            'Owner',
+            'Owner account created by secure password reset.',
+            now,
+          ],
+          done
         );
-      }
-    );
+      };
+
+      saveOwnerCompany((companyErr) => {
+        if (companyErr) {
+          console.error('Owner company password reset error:', companyErr.message);
+          return res.status(500).json({ error: 'Failed to reset owner company account.' });
+        }
+
+        db.get(`SELECT * FROM users WHERE LOWER(email) = ?`, [email], (userLookupErr, user) => {
+          if (userLookupErr) {
+            console.error('Owner user lookup error:', userLookupErr.message);
+            return res.status(500).json({ error: 'Failed to prepare owner user reset.' });
+          }
+
+          if (user?.id) {
+            db.run(
+              `UPDATE users
+               SET password = ?,
+                   role = 'owner',
+                   companyId = ?,
+                   isActive = 1
+               WHERE id = ?`,
+              [passwordHash, ownerCompanyId, user.id],
+              (userErr) => {
+                if (userErr) {
+                  console.error('Owner user password reset error:', userErr.message);
+                  return res.status(500).json({ error: 'Failed to reset owner password.' });
+                }
+
+                res.json({ ok: true, message: 'Owner password reset. You can log in now.' });
+              }
+            );
+            return;
+          }
+
+          db.run(
+            `INSERT INTO users (id, companyId, name, email, password, role, isActive)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [uuidv4(), ownerCompanyId, 'PortFlow Owner', email, passwordHash, 'owner', 1],
+            (userErr) => {
+              if (userErr) {
+                console.error('Owner user create error:', userErr.message);
+                return res.status(500).json({ error: 'Failed to create owner login.' });
+              }
+
+              res.json({ ok: true, message: 'Owner password reset. You can log in now.' });
+            }
+          );
+        });
+      });
+    });
   } catch (error) {
     console.error('Owner password reset route error:', error.message);
     res.status(500).json({ error: 'Server error resetting password.' });
@@ -3152,7 +3219,7 @@ app.post('/api/login', (req, res) => {
   }
 
   db.get(
-    `SELECT * FROM users WHERE email = ? AND isActive = 1`,
+    `SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND isActive = 1`,
     [email],
     async (err, user) => {
       if (err) {
