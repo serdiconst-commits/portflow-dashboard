@@ -8635,6 +8635,10 @@ const DriverLoadCard = ({ load }) => {
           <strong>{load.poNumber || '-'}</strong>
         </div>
         <div className="driver-info-item">
+          <span>Booking #</span>
+          <strong>{load.bookingNumber || '-'}</strong>
+        </div>
+        <div className="driver-info-item">
           <span>Pick Up #</span>
           <strong>{load.pickupNumber || '-'}</strong>
         </div>
@@ -9156,6 +9160,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       margin: '10px 0',
     }}
   />
+  <p><strong>Booking #:</strong> {load.bookingNumber || '-'}</p>
   <p>
     🚛 <strong>Container:</strong><br />
     {load.containerNumber || '-'}
