@@ -425,6 +425,10 @@ const portHoustonFetchBuffer = async (path, query = {}, credentials = {}) => {
 const unwrapRecords = (response) => {
   if (Array.isArray(response)) return response;
   if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.data?.content)) return response.data.content;
+  if (Array.isArray(response?.data?.items)) return response.data.items;
+  if (Array.isArray(response?.data?.results)) return response.data.results;
+  if (Array.isArray(response?.records)) return response.records;
   if (Array.isArray(response?.content)) return response.content;
   if (Array.isArray(response?.items)) return response.items;
   if (Array.isArray(response?.results)) return response.results;
@@ -706,13 +710,39 @@ export const getGateHistory = async (containerNumber, credentials = {}, facility
 
 export const getGateTransactionByNumber = async (transactionNumber, credentials = {}, facility = '') => {
   const cleanNumber = String(transactionNumber || '').trim();
-  const response = await portHoustonFetch('/road/gatetransactions', {
-    operator: 'POHA',
-    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
-    predicate: `nbr = ${cleanNumber}`,
-    fields: GATE_TRANSACTION_FIELDS,
-  }, credentials);
+  const fetchByNumber = async (lookupFacility = '') => {
+    const query = {
+      operator: 'POHA',
+      predicate: `nbr=${cleanNumber}`,
+      fields: GATE_TRANSACTION_FIELDS,
+      size: 100,
+    };
+    const normalizedFacility = getPortHoustonFacilityCode(lookupFacility) || String(lookupFacility || '').trim().toUpperCase();
+    if (normalizedFacility) query.facility = normalizedFacility;
+    const response = await portHoustonFetch('/road/gatetransactions', query, credentials);
+    return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+  };
 
+  let transactions = await fetchByNumber('');
+  const normalizedFacility = getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase();
+  if (!transactions.length && normalizedFacility) {
+    transactions = await fetchByNumber(normalizedFacility);
+  }
+
+  return transactions;
+};
+
+const getGateTransactionsByContainerQuery = async (containerNumber, credentials = {}, facility = '') => {
+  const query = {
+    operator: 'POHA',
+    predicate: `ctrId=${containerNumber}`,
+    fields: GATE_TRANSACTION_FIELDS,
+    size: 100,
+  };
+  const normalizedFacility = getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase();
+  if (normalizedFacility) query.facility = normalizedFacility;
+
+  const response = await portHoustonFetch('/road/gatetransactions', query, credentials);
   return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
 };
 
@@ -730,14 +760,16 @@ export const getGateTransactionsByContainer = async (containerNumber, credential
     };
   }
 
-  const response = await portHoustonFetch('/road/gatetransactions', {
-    operator: 'POHA',
-    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
-    predicate: `ctrId = ${cleanContainer}`,
-    fields: GATE_TRANSACTION_FIELDS,
-  }, credentials);
-
-  const sortedTransactions = sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+  // Road Service gate transactions are the digital EIR data. Port Houston's
+  // examples query by ctrId without facility, which also avoids missing BCT/BPT
+  // transactions when a load location was typed differently by dispatch.
+  let sortedTransactions = await getGateTransactionsByContainerQuery(cleanContainer, credentials, '');
+  const normalizedFacility = getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase();
+  let lookupMethod = 'ctrId-all-facilities';
+  if (!sortedTransactions.length && normalizedFacility) {
+    sortedTransactions = await getGateTransactionsByContainerQuery(cleanContainer, credentials, normalizedFacility);
+    lookupMethod = `ctrId-${normalizedFacility}`;
+  }
 
   return {
     transactions: sortedTransactions,
@@ -747,7 +779,7 @@ export const getGateTransactionsByContainer = async (containerNumber, credential
     inEirTransaction: sortedTransactions.find((item) =>
       IN_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
     ) || sortedTransactions.find((item) => IN_GATE_SUBTYPES.includes(item.subType)) || null,
-    lookupMethod: 'ctrId',
+    lookupMethod,
     requestedContainerNumber: cleanContainer,
     errors: [],
     raw: sortedTransactions.map((item) => item.raw),
