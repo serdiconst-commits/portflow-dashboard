@@ -401,6 +401,61 @@ const getLocationOptionLabel = (location = {}) => {
   return address || location.name || 'Unnamed location';
 };
 
+const getAuthStorage = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+};
+
+const getAuthStorageItem = (key) => getAuthStorage()?.getItem(key) || '';
+const setAuthStorageItem = (key, value) => {
+  const storage = getAuthStorage();
+  if (storage) storage.setItem(key, value);
+};
+const removeAuthStorageItem = (key) => {
+  const storage = getAuthStorage();
+  if (storage) storage.removeItem(key);
+};
+const clearAuthSession = () => {
+  ['authToken', 'currentUser', 'company'].forEach((key) => {
+    removeAuthStorageItem(key);
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Ignore legacy storage cleanup failures.
+    }
+  });
+};
+const saveAuthSession = (token, user, companyData) => {
+  setAuthStorageItem('authToken', token || '');
+  setAuthStorageItem('currentUser', JSON.stringify(user || null));
+  if (companyData) {
+    setAuthStorageItem('company', JSON.stringify(companyData));
+  } else {
+    removeAuthStorageItem('company');
+  }
+};
+const saveCompanySession = (companyData) => {
+  if (companyData) {
+    setAuthStorageItem('company', JSON.stringify(companyData));
+  }
+};
+const parseAuthJson = (key) => {
+  try {
+    return JSON.parse(getAuthStorageItem(key) || 'null');
+  } catch {
+    return null;
+  }
+};
+const loginPathRequested =
+  typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/login';
+if (loginPathRequested) {
+  clearAuthSession();
+}
+
 const isInvalidTokenError = (message = '') =>
   String(message).toLowerCase().includes('invalid token') ||
   String(message).toLowerCase().includes('unauthorized') ||
@@ -408,11 +463,9 @@ const isInvalidTokenError = (message = '') =>
 
 const handleAuthError = (message) => {
   if (!isInvalidTokenError(message)) return false;
-  if (localStorage.getItem('authToken') === DEMO_TOKEN) return false;
+  if (getAuthStorageItem('authToken') === DEMO_TOKEN) return false;
 
-  localStorage.removeItem('authToken');
-  localStorage.removeItem('currentUser');
-  localStorage.removeItem('company');
+  clearAuthSession();
   setAuthToken('');
   setCurrentUser(null);
   setCompany(null);
@@ -982,8 +1035,8 @@ const getAddressPartsFromPlace = (place) => {
   return { street: street.trim(), city, state, zip };
 };
 
-const savedUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
-const savedCompany = JSON.parse(localStorage.getItem('company') || 'null');
+const savedUser = parseAuthJson('currentUser');
+const savedCompany = parseAuthJson('company');
 const defaultDispatchLoadColumnOrder = [
   'loadDate',
   'customer',
@@ -1117,11 +1170,11 @@ const [loginError, setLoginError] = useState('');
 const [authMode, setAuthMode] = useState('login');
 const [ownerResetCode, setOwnerResetCode] = useState('');
 const [ownerNewPassword, setOwnerNewPassword] = useState('');
-const [showPublicLanding, setShowPublicLanding] = useState(!isDriverApp && !savedUser);
+const [showPublicLanding, setShowPublicLanding] = useState(!isDriverApp && !savedUser && !loginPathRequested);
 const [demoAccessCode, setDemoAccessCode] = useState('');
 const [demoAccessError, setDemoAccessError] = useState('');
 const [registerName, setRegisterName] = useState('');
-const [authToken, setAuthToken] = useState(localStorage.getItem('authToken') || '');
+const [authToken, setAuthToken] = useState(getAuthStorageItem('authToken') || '');
 const [currentUser, setCurrentUser] = useState(savedUser || null);
 const [company, setCompany] = useState(savedCompany || null);
 const canManageTenants = isPortFlowOwnerUser(currentUser);
@@ -1384,12 +1437,10 @@ const handleLogin = async (e) => {
       : getDefaultViewForRole(data.user?.role);
     setActiveView(nextView);
 
-    localStorage.setItem('authToken', data.token);
-    localStorage.setItem('currentUser', JSON.stringify(data.user));
+    saveAuthSession(data.token, data.user, data.company);
 
     if (data.company) {
       setCompany(data.company);
-      localStorage.setItem('company', JSON.stringify(data.company));
     }
 
     setLoginError('');
@@ -1435,12 +1486,7 @@ const handleRegister = async (e) => {
     setCompany(data.company || null);
     setActiveView(isDriverApp ? 'driver' : getDefaultViewForRole(data.user?.role));
 
-    localStorage.setItem('authToken', data.token);
-    localStorage.setItem('currentUser', JSON.stringify(data.user));
-
-    if (data.company) {
-      localStorage.setItem('company', JSON.stringify(data.company));
-    }
+    saveAuthSession(data.token, data.user, data.company);
 
     setLoginError('');
   } catch (error) {
@@ -1497,9 +1543,7 @@ const applyDemoData = () => {
   setShowPublicLanding(false);
   setLoginError('');
 
-  localStorage.setItem('authToken', DEMO_TOKEN);
-  localStorage.setItem('currentUser', JSON.stringify(demo.user));
-  localStorage.setItem('company', JSON.stringify(demo.company));
+  saveAuthSession(DEMO_TOKEN, demo.user, demo.company);
 };
 
 const handleStartDemo = () => {
@@ -2483,9 +2527,7 @@ useEffect(() => {
   if (!currentUser) return;
 
   if (isDriverApp && currentUser.role !== 'driver') {
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('currentUser');
-    localStorage.removeItem('company');
+    clearAuthSession();
     setAuthToken('');
     setCurrentUser(null);
     setCompany(null);
@@ -2856,7 +2898,7 @@ const fetchCompanyProfile = async () => {
     }
 
     setCompany(data);
-    localStorage.setItem('company', JSON.stringify(data));
+    saveCompanySession(data);
   } catch (error) {
     console.error('Failed to fetch company profile:', error);
   }
@@ -2887,7 +2929,7 @@ const handleCompanyLogoUpload = async (e) => {
 
     setCompany(data);
     setCompanyLogoVersion(Date.now());
-    localStorage.setItem('company', JSON.stringify(data));
+    saveCompanySession(data);
   } catch (error) {
     console.error('Failed to upload company logo:', error);
     alert(`Failed to upload logo: ${error.message}`);
@@ -2918,7 +2960,7 @@ const handleSaveCompanyProfile = async (e) => {
     }
 
     setCompany(data);
-    localStorage.setItem('company', JSON.stringify(data));
+    saveCompanySession(data);
     setCompanyProfileEditing(false);
     setCompanyProfileStatus('Company profile saved.');
   } catch (error) {
@@ -2948,7 +2990,7 @@ const handleSaveInvoiceBranding = async (e) => {
     }
 
     setCompany(data);
-    localStorage.setItem('company', JSON.stringify(data));
+    saveCompanySession(data);
     setInvoiceBrandingStatus('Invoice branding saved.');
   } catch (error) {
     console.error('Failed to save invoice branding:', error);
@@ -2977,7 +3019,7 @@ const handleSavePodSettings = async (e) => {
     }
 
     setCompany(data);
-    localStorage.setItem('company', JSON.stringify(data));
+    saveCompanySession(data);
     setPodSettingsStatus('POD settings saved.');
   } catch (error) {
     console.error('Failed to save POD settings:', error);
@@ -3011,7 +3053,7 @@ const handleSavePortHoustonSettings = async (group) => {
     }
 
     setCompany(data);
-    localStorage.setItem('company', JSON.stringify(data));
+    saveCompanySession(data);
     setPortHoustonSettingsForm(buildPortHoustonCredentialForm(data));
     setPortHoustonSettingsStatus(`${group.terminal} credentials saved.`);
   } catch (error) {
@@ -3048,7 +3090,7 @@ const handleClearPortHoustonSettings = async (group) => {
     }
 
     setCompany(data);
-    localStorage.setItem('company', JSON.stringify(data));
+    saveCompanySession(data);
     setPortHoustonSettingsForm(buildPortHoustonCredentialForm(data));
     setPortHoustonSettingsStatus(`${group.terminal} credentials cleared.`);
   } catch (error) {
@@ -7127,9 +7169,7 @@ const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
 };
 
 const handleLogout = () => {
-  localStorage.removeItem('authToken');
-  localStorage.removeItem('currentUser');
-  localStorage.removeItem('company');
+  clearAuthSession();
   setAuthToken('');
   setCurrentUser(null);
   setCompany(null);
