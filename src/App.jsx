@@ -7596,6 +7596,9 @@ return (
           </div>
         </div>
         <div className="public-nav-actions">
+          <a className="public-link-btn" href="/privacy.html" target="_blank" rel="noreferrer">
+            Privacy
+          </a>
           <button
             type="button"
             className="public-link-btn"
@@ -7759,6 +7762,10 @@ return (
           </div>
         </section>
       </main>
+      <footer className="public-footer">
+        <span>PortFlow Logistics Analytics</span>
+        <a href="/privacy.html" target="_blank" rel="noreferrer">Privacy Policy</a>
+      </footer>
     </div>
   );
 }
@@ -7909,6 +7916,9 @@ return (
           >
             Back to PortFlow overview
           </button>
+          <a className="auth-privacy-link" href="/privacy.html" target="_blank" rel="noreferrer">
+            Privacy Policy
+          </a>
         </>
       )}
       </div>

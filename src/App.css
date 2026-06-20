@@ -315,6 +315,32 @@ button {
   color: #cbd5e1;
 }
 
+.public-footer {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 26px 0 34px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.public-footer a,
+.auth-privacy-link {
+  color: #0f4f8f;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.auth-privacy-link {
+  display: inline-flex;
+  justify-content: center;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
 .public-demo-access {
   min-width: min(100%, 360px);
   display: grid;
