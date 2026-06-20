@@ -7134,6 +7134,7 @@ const handleLogout = () => {
   setCurrentUser(null);
   setCompany(null);
   setShowPublicLanding(!isDriverApp);
+  window.location.replace(isDriverApp ? '/driver' : '/');
 };
 
 const handlePrintInvoice = () => {
