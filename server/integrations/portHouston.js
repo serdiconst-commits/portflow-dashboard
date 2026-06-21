@@ -422,6 +422,36 @@ const portHoustonFetchBuffer = async (path, query = {}, credentials = {}) => {
   return { buffer, contentType };
 };
 
+const findNestedRecordArray = (value, depth = 0) => {
+  if (!value || depth > 4) return null;
+  if (Array.isArray(value)) {
+    if (
+      value.some((item) =>
+        item &&
+        typeof item === 'object' &&
+        ['nbr', 'gkey', 'ctrId', 'unitId', 'subType', 'eventTypeId'].some((key) => key in item)
+      )
+    ) {
+      return value;
+    }
+
+    for (const item of value) {
+      const nested = findNestedRecordArray(item, depth + 1);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  if (typeof value === 'object') {
+    for (const child of Object.values(value)) {
+      const nested = findNestedRecordArray(child, depth + 1);
+      if (nested) return nested;
+    }
+  }
+
+  return null;
+};
+
 const unwrapRecords = (response) => {
   if (Array.isArray(response)) return response;
   if (Array.isArray(response?.data)) return response.data;
@@ -435,14 +465,7 @@ const unwrapRecords = (response) => {
   if (Array.isArray(response?.items)) return response.items;
   if (Array.isArray(response?.results)) return response.results;
   if (Array.isArray(response?.units)) return response.units;
-  const nestedRecordArray = Object.values(response || {}).find((value) =>
-    Array.isArray(value) &&
-    value.some((item) =>
-      item &&
-      typeof item === 'object' &&
-      ['nbr', 'gkey', 'ctrId', 'unitId', 'subType', 'eventTypeId'].some((key) => key in item)
-    )
-  );
+  const nestedRecordArray = findNestedRecordArray(response);
   if (nestedRecordArray) return nestedRecordArray;
   return response ? [response] : [];
 };
@@ -719,48 +742,61 @@ export const getGateHistory = async (containerNumber, credentials = {}, facility
   };
 };
 
-export const getGateTransactionByNumber = async (transactionNumber, credentials = {}, facility = '') => {
-  const cleanNumber = String(transactionNumber || '').trim();
-  const fetchByNumber = async (lookupFacility = '', spacedPredicate = false) => {
-    const query = {
-      operator: 'POHA',
-      predicate: spacedPredicate ? `nbr = ${cleanNumber}` : `nbr=${cleanNumber}`,
-      fields: GATE_TRANSACTION_FIELDS,
-      size: 100,
-    };
-    const normalizedFacility = getPortHoustonFacilityCode(lookupFacility) || String(lookupFacility || '').trim().toUpperCase();
-    if (normalizedFacility) query.facility = normalizedFacility;
-    const response = await portHoustonFetch('/road/gatetransactions', query, credentials);
-    return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
-  };
-
-  let transactions = await fetchByNumber('');
-  if (!transactions.length) {
-    transactions = await fetchByNumber('', true);
-  }
-  const normalizedFacility = getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase();
-  if (!transactions.length && normalizedFacility) {
-    transactions = await fetchByNumber(normalizedFacility);
-    if (!transactions.length) {
-      transactions = await fetchByNumber(normalizedFacility, true);
-    }
-  }
-
-  return transactions;
-};
-
-const getGateTransactionsByContainerQuery = async (containerNumber, credentials = {}, facility = '', spacedPredicate = false) => {
+const fetchGateTransactionsByPredicate = async (predicate, credentials = {}, facility = '', includeFields = true) => {
   const query = {
     operator: 'POHA',
-    predicate: spacedPredicate ? `ctrId = ${containerNumber}` : `ctrId=${containerNumber}`,
-    fields: GATE_TRANSACTION_FIELDS,
+    predicate,
     size: 100,
   };
+  if (includeFields) query.fields = GATE_TRANSACTION_FIELDS;
   const normalizedFacility = getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase();
   if (normalizedFacility) query.facility = normalizedFacility;
-
   const response = await portHoustonFetch('/road/gatetransactions', query, credentials);
   return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+};
+
+const fetchFirstGateTransactionsMatch = async (predicates = [], credentials = {}, facility = '') => {
+  const facilities = [
+    '',
+    getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
+  ].filter((item, index, list) => item || index === 0).filter((item, index, list) => list.indexOf(item) === index);
+  const errors = [];
+
+  for (const lookupFacility of facilities) {
+    for (const predicate of predicates) {
+      for (const includeFields of [true, false]) {
+        try {
+          const transactions = await fetchGateTransactionsByPredicate(predicate, credentials, lookupFacility, includeFields);
+          if (transactions.length) {
+            return {
+              transactions,
+              lookupMethod: `${predicate}${lookupFacility ? ` @ ${lookupFacility}` : ' @ all facilities'}${includeFields ? '' : ' no-fields'}`,
+              errors,
+            };
+          }
+        } catch (error) {
+          if (![400, 404, 422].includes(Number(error.status))) throw error;
+          errors.push({
+            predicate,
+            facility: lookupFacility || 'ALL',
+            includeFields,
+            status: error.status,
+            message: error.message,
+          });
+        }
+      }
+    }
+  }
+  return { transactions: [], lookupMethod: '', errors };
+};
+
+export const getGateTransactionByNumber = async (transactionNumber, credentials = {}, facility = '') => {
+  const cleanNumber = String(transactionNumber || '').trim();
+  const result = await fetchFirstGateTransactionsMatch([
+    `nbr=${cleanNumber}`,
+    `nbr = ${cleanNumber}`,
+  ], credentials, facility);
+  return result.transactions;
 };
 
 export const getGateTransactionsByContainer = async (containerNumber, credentials = {}, facility = '') => {
@@ -780,19 +816,14 @@ export const getGateTransactionsByContainer = async (containerNumber, credential
   // Road Service gate transactions are the digital EIR data. Port Houston's
   // examples query by ctrId without facility, which also avoids missing BCT/BPT
   // transactions when a load location was typed differently by dispatch.
-  let sortedTransactions = await getGateTransactionsByContainerQuery(cleanContainer, credentials, '');
-  if (!sortedTransactions.length) {
-    sortedTransactions = await getGateTransactionsByContainerQuery(cleanContainer, credentials, '', true);
-  }
-  const normalizedFacility = getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase();
-  let lookupMethod = 'ctrId-all-facilities';
-  if (!sortedTransactions.length && normalizedFacility) {
-    sortedTransactions = await getGateTransactionsByContainerQuery(cleanContainer, credentials, normalizedFacility);
-    if (!sortedTransactions.length) {
-      sortedTransactions = await getGateTransactionsByContainerQuery(cleanContainer, credentials, normalizedFacility, true);
-    }
-    lookupMethod = `ctrId-${normalizedFacility}`;
-  }
+  const lookupResult = await fetchFirstGateTransactionsMatch([
+    `ctrId=${cleanContainer}`,
+    `ctrId = ${cleanContainer}`,
+    `unitId=${cleanContainer}`,
+    `unitId = ${cleanContainer}`,
+  ], credentials, facility);
+  const sortedTransactions = lookupResult.transactions;
+  const lookupMethod = lookupResult.lookupMethod || 'ctrId/unitId';
 
   return {
     transactions: sortedTransactions,
@@ -804,7 +835,7 @@ export const getGateTransactionsByContainer = async (containerNumber, credential
     ) || sortedTransactions.find((item) => IN_GATE_SUBTYPES.includes(item.subType)) || null,
     lookupMethod,
     requestedContainerNumber: cleanContainer,
-    errors: [],
+    errors: lookupResult.errors || [],
     raw: sortedTransactions.map((item) => item.raw),
   };
 };
