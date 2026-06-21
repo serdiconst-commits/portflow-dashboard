@@ -755,6 +755,19 @@ const fetchGateTransactionsByPredicate = async (predicate, credentials = {}, fac
   return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
 };
 
+const fetchLegacyGateTransactionsByContainer = async (containerNumber, credentials = {}, facility = '') => {
+  // Keep the original Road Service request shape first because this was the
+  // known working path for OUT EIR before the broader fallback work.
+  const response = await portHoustonFetch('/road/gatetransactions', {
+    operator: 'POHA',
+    facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
+    predicate: `ctrId = ${containerNumber}`,
+    fields: GATE_TRANSACTION_FIELDS,
+  }, credentials);
+
+  return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+};
+
 const fetchFirstGateTransactionsMatch = async (predicates = [], credentials = {}, facility = '') => {
   const facilities = [
     '',
@@ -814,9 +827,14 @@ export const getGateTransactionsByContainer = async (containerNumber, credential
   }
 
   // Road Service gate transactions are the digital EIR data. Port Houston's
-  // examples query by ctrId without facility, which also avoids missing BCT/BPT
-  // transactions when a load location was typed differently by dispatch.
-  const lookupResult = await fetchFirstGateTransactionsMatch([
+  // Legacy query first restores the exact request shape that previously found
+  // OUT EIR rows. Then use broader fallbacks for BCT/BPT and strict predicates.
+  const legacyTransactions = await fetchLegacyGateTransactionsByContainer(cleanContainer, credentials, facility);
+  const lookupResult = legacyTransactions.length ? {
+    transactions: legacyTransactions,
+    lookupMethod: 'ctrId legacy',
+    errors: [],
+  } : await fetchFirstGateTransactionsMatch([
     `ctrId=${cleanContainer}`,
     `ctrId = ${cleanContainer}`,
     `unitId=${cleanContainer}`,
