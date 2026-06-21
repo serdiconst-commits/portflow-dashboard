@@ -113,6 +113,12 @@ const getCompanyPayload = (company = {}) => ({
 
 const companyProfileSelect =
   'id, name, email, logoPath, invoiceName, invoiceAddress, settlementCompanyName, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson';
+
+const parseNumericField = (value, fallback = 0) => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+  const parsed = Number.parseFloat(String(value ?? '').replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -3521,7 +3527,8 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           settlement = ?,
           notes = ?,
           customerExtraChargesJson = ?,
-          lastFreeDay = ?
+          lastFreeDay = ?,
+          miles = ?
          WHERE id = ? AND companyId = ?`,
         [
           l.loadDate || '',
@@ -3563,6 +3570,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           l.notes || '',
           typeof l.customerExtraChargesJson === 'string' ? l.customerExtraChargesJson : JSON.stringify(l.customerExtraCharges || []),
           body.lastFreeDay || '',
+          parseNumericField(l.miles),
           loadId,
           companyId,
         ],
@@ -3997,8 +4005,9 @@ dropDateTime,
               customerExtraChargesJson,
               companyId,
               lastFreeDay,
-              carrierId
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              carrierId,
+              miles
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               generatedLoadId,
               l.loadDate || new Date().toISOString().slice(0, 10),
@@ -4040,7 +4049,8 @@ dropDateTime,
               typeof l.customerExtraChargesJson === 'string' ? l.customerExtraChargesJson : JSON.stringify(l.customerExtraCharges || []),
               companyId,
               l.lastFreeDay || '',
-              l.carrierId || ''
+              l.carrierId || '',
+              parseNumericField(l.miles)
             ],
             function (err) {
               if (err) {

@@ -345,6 +345,60 @@ const getGoogleMapsLink = (address) => {
 const getGoogleMapsCoordinateLink = (latitude, longitude) =>
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
 
+const formatMiles = (value) => {
+  const miles = Number.parseFloat(String(value ?? '').replace(/[^0-9.-]/g, ''));
+  if (!Number.isFinite(miles) || miles <= 0) return '—';
+  return `${miles.toFixed(1)} mi`;
+};
+
+const getRouteMileStops = (load = {}) =>
+  [load.pickup, load.delivery, load.returnLocation]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+
+const calculateDrivingMiles = async (load = {}) => {
+  const stops = getRouteMileStops(load);
+  if (stops.length < 2) {
+    throw new Error('Pickup and delivery are required to calculate miles.');
+  }
+  if (!window.google?.maps?.DistanceMatrixService) {
+    throw new Error('Google Maps is still loading. Try again in a moment.');
+  }
+
+  const service = new window.google.maps.DistanceMatrixService();
+  let totalMeters = 0;
+
+  for (let index = 0; index < stops.length - 1; index += 1) {
+    const origin = stops[index];
+    const destination = stops[index + 1];
+    const result = await new Promise((resolve, reject) => {
+      service.getDistanceMatrix(
+        {
+          origins: [origin],
+          destinations: [destination],
+          travelMode: window.google.maps.TravelMode.DRIVING,
+          unitSystem: window.google.maps.UnitSystem.IMPERIAL,
+        },
+        (response, status) => {
+          if (status !== 'OK') {
+            reject(new Error(`Google Maps distance failed: ${status}`));
+            return;
+          }
+          const element = response?.rows?.[0]?.elements?.[0];
+          if (!element || element.status !== 'OK' || !element.distance?.value) {
+            reject(new Error(`No route found from ${shortLocation(origin)} to ${shortLocation(destination)}.`));
+            return;
+          }
+          resolve(element.distance.value);
+        }
+      );
+    });
+    totalMeters += result;
+  }
+
+  return Math.round((totalMeters / 1609.344) * 10) / 10;
+};
+
 const formatRelativeTime = (value) => {
   if (!value) return 'No update yet';
 
@@ -759,6 +813,7 @@ const getMissingDriverDocuments = (load) => {
     shipLine: '',
     rate: '',
     driverRate: '',
+    miles: '',
     status: 'Dispatched',
     availabilityStatus: 'Not Available',
     paperwork: 'Pending',
@@ -1228,6 +1283,8 @@ const [portHoustonChecksByLoad, setPortHoustonChecksByLoad] = useState({});
 const [portHoustonCheckingLoadId, setPortHoustonCheckingLoadId] = useState('');
 const [smartPortLookupLoading, setSmartPortLookupLoading] = useState(false);
 const [smartPortLookupStatus, setSmartPortLookupStatus] = useState('');
+const [mileageEstimating, setMileageEstimating] = useState('');
+const [mileageEstimateStatus, setMileageEstimateStatus] = useState('');
 const [portHoustonSettingsForm, setPortHoustonSettingsForm] = useState(
   buildPortHoustonCredentialForm(savedCompany || {})
 );
@@ -2556,6 +2613,30 @@ useEffect(() => {
   script.dataset.portflowGoogleMaps = 'true';
   document.head.appendChild(script);
 }, [GOOGLE_MAPS_API_KEY]);
+
+useEffect(() => {
+  if (!showForm) return undefined;
+  if (Number.parseFloat(String(newLoad.miles || '').replace(/[^0-9.-]/g, '')) > 0) return undefined;
+  if (!newLoad.pickup || !newLoad.delivery) return undefined;
+
+  const timeout = setTimeout(() => {
+    estimateLoadMiles('new');
+  }, 900);
+
+  return () => clearTimeout(timeout);
+}, [showForm, newLoad.pickup, newLoad.delivery, newLoad.returnLocation]);
+
+useEffect(() => {
+  if (!isEditing) return undefined;
+  if (Number.parseFloat(String(editingLoad?.miles || '').replace(/[^0-9.-]/g, '')) > 0) return undefined;
+  if (!editingLoad?.pickup || !editingLoad?.delivery) return undefined;
+
+  const timeout = setTimeout(() => {
+    estimateLoadMiles('edit');
+  }, 900);
+
+  return () => clearTimeout(timeout);
+}, [isEditing, editingLoad?.pickup, editingLoad?.delivery, editingLoad?.returnLocation]);
 
 useEffect(() => {
   pickupAutocompleteRef.current = null;
@@ -4247,6 +4328,37 @@ if (name === 'driver' && prev.status === 'Dropped') {
     });
   };
 
+  const estimateLoadMiles = async (mode = 'new') => {
+    const isEdit = mode === 'edit';
+    const loadForEstimate = isEdit ? editingLoad : newLoad;
+    setMileageEstimating(mode);
+    setMileageEstimateStatus('Calculating route miles...');
+
+    try {
+      const miles = await calculateDrivingMiles(loadForEstimate);
+      const milesValue = String(miles.toFixed(1));
+      if (isEdit) {
+        setEditingLoad((prev) => ({ ...prev, miles: milesValue }));
+      } else {
+        setNewLoad((prev) => ({ ...prev, miles: milesValue }));
+      }
+      setMileageEstimateStatus(`Estimated ${formatMiles(miles)} from pickup, delivery, and return.`);
+      return milesValue;
+    } catch (error) {
+      setMileageEstimateStatus(error.message || 'Unable to calculate miles.');
+      return '';
+    } finally {
+      setMileageEstimating('');
+    }
+  };
+
+  const getLoadMilesForSave = async (load, mode = 'new') => {
+    if (Number.parseFloat(String(load?.miles ?? '').replace(/[^0-9.-]/g, '')) > 0) {
+      return load.miles;
+    }
+    return estimateLoadMiles(mode);
+  };
+
   const findDuplicateContainerLoad = (containerNumber, currentLoadId = '') => {
     const normalizedContainer = String(containerNumber || '').trim().toUpperCase();
     if (!normalizedContainer) return null;
@@ -4292,6 +4404,7 @@ const handleAddLoad = async (e) => {
     await saveLocationIfNotExists(newLoad.pickup, 'pickup');
     await saveLocationIfNotExists(newLoad.delivery, 'delivery');
     await saveLocationIfNotExists(newLoad.returnLocation, 'return');
+    const savedMiles = await getLoadMilesForSave(newLoad, 'new');
 
     const loadToAdd = {
       ...newLoad,
@@ -4316,6 +4429,7 @@ const handleAddLoad = async (e) => {
       sealNumber: newLoad.sealNumber || '',
       containerNumber: newLoad.containerNumber || '',
     bookingNumber: newLoad.bookingNumber || '',
+      miles: savedMiles || newLoad.miles || '',
       eta: newLoad.eta || '',
       availabilityStatus: newLoad.availabilityStatus || 'Not Available',
       documents: [],
@@ -4410,9 +4524,11 @@ const handleUpdateLoad = async (e) => {
   try {
 
     /* EDITLOAD FUNTION */
+const savedMiles = await getLoadMilesForSave(updatedLoad, 'edit');
 
 const payload = {
   ...updatedLoad,
+  miles: savedMiles || updatedLoad.miles || '',
   driver: normalizeDriverForStorage(updatedLoad.driver),
   truck: updatedLoad.driver ? getDriverTruck(updatedLoad.driver) : '',
   droppedBy: normalizeDriverForStorage(updatedLoad.droppedBy),
@@ -6224,6 +6340,7 @@ const handleChangeUserRole = async (userId, newRole) => {
       Customer: '',
       Container: '',
       Reference: label,
+      Miles: '',
       Source: '',
       Description: '',
       Amount: formatMoney(amount || 0),
@@ -6238,6 +6355,7 @@ const handleChangeUserRole = async (userId, newRole) => {
       Customer: line.customer || '',
       Container: line.containerNumber || '',
       Reference: line.referenceNumber || '',
+      Miles: formatMiles(line.miles),
       Source: line.source || 'auto',
       Description: line.description || '',
       Amount: formatMoney(line.payAmount || 0),
@@ -6252,6 +6370,7 @@ const handleChangeUserRole = async (userId, newRole) => {
       Customer: '',
       Container: '',
       Reference: '',
+      Miles: '',
       Source: item.addedBy || '',
       Description: item.description || '',
       Amount: formatMoney(item.amount || 0),
@@ -6266,6 +6385,7 @@ const handleChangeUserRole = async (userId, newRole) => {
       Customer: '',
       Container: '',
       Reference: '',
+      Miles: '',
       Source: item.addedBy || '',
       Description: item.description || '',
       Amount: formatMoney(item.amount || 0),
@@ -6281,6 +6401,7 @@ const handleChangeUserRole = async (userId, newRole) => {
       Customer: '',
       Container: '',
       Reference: '',
+      Miles: '',
       Source: '',
       Description: '',
       Amount: '',
@@ -6333,6 +6454,7 @@ const handleChangeUserRole = async (userId, newRole) => {
             <td>${escapeHtml(line.customer || '-')}</td>
             <td>${escapeHtml(line.containerNumber || '-')}</td>
             <td>${escapeHtml(line.referenceNumber || '-')}</td>
+            <td>${escapeHtml(formatMiles(line.miles))}</td>
             <td>${escapeHtml(line.source || 'auto')}</td>
             <td>${escapeHtml(formatMoney(line.payAmount || 0))}</td>
           </tr>
@@ -6421,11 +6543,12 @@ const handleChangeUserRole = async (userId, newRole) => {
                 <th>Customer</th>
                 <th>Container</th>
                 <th>Reference</th>
+                <th>Miles</th>
                 <th>Source</th>
                 <th>Pay</th>
               </tr>
             </thead>
-            <tbody>${loadsHtml || '<tr><td colspan="7">No loads in this statement</td></tr>'}</tbody>
+            <tbody>${loadsHtml || '<tr><td colspan="8">No loads in this statement</td></tr>'}</tbody>
           </table>
 
           <h2>Deductions / Reimbursements</h2>
@@ -10291,6 +10414,32 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   emptyText: 'No return locations found.',
 })}
 
+<div className="form-group">
+  <label>Route Miles</label>
+  <div className="inline-action-row">
+    <input
+      type="number"
+      name="miles"
+      min="0"
+      step="0.1"
+      placeholder="Auto miles"
+      value={newLoad.miles || ''}
+      onChange={handleInputChange}
+    />
+    <button
+      type="button"
+      className="secondary-btn compact-btn"
+      onClick={() => estimateLoadMiles('new')}
+      disabled={mileageEstimating === 'new'}
+    >
+      {mileageEstimating === 'new' ? 'Calculating...' : 'Estimate'}
+    </button>
+  </div>
+  {mileageEstimateStatus && mileageEstimating !== 'edit' && (
+    <p className="documents-empty">{mileageEstimateStatus}</p>
+  )}
+</div>
+
 <label>LFD</label>
 <input
   type="date"
@@ -11034,6 +11183,29 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 />
 
                       <input type="text" name="returnLocation" placeholder="Return Location" value={editingLoad.returnLocation} onChange={handleEditInputChange} />
+                      <label>Route Miles</label>
+                      <div className="inline-action-row">
+                        <input
+                          type="number"
+                          name="miles"
+                          min="0"
+                          step="0.1"
+                          placeholder="Auto miles"
+                          value={editingLoad.miles || ''}
+                          onChange={handleEditInputChange}
+                        />
+                        <button
+                          type="button"
+                          className="secondary-btn compact-btn"
+                          onClick={() => estimateLoadMiles('edit')}
+                          disabled={mileageEstimating === 'edit'}
+                        >
+                          {mileageEstimating === 'edit' ? 'Calculating...' : 'Estimate'}
+                        </button>
+                      </div>
+                      {mileageEstimateStatus && mileageEstimating !== 'new' && (
+                        <p className="documents-empty">{mileageEstimateStatus}</p>
+                      )}
                       <input type="text" name="bookingNumber" placeholder="Booking Number" value={editingLoad.bookingNumber || ''} onChange={handleEditInputChange} />
                       <input type="text" name="chassisNumber" placeholder="Chassis Number" value={editingLoad.chassisNumber} onChange={handleEditInputChange} />
                       <input type="text" name="sealNumber" placeholder="Seal Number" value={editingLoad.sealNumber} onChange={handleEditInputChange} />
@@ -11276,6 +11448,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedLoad.appointmentTime)}</strong></div>
                         <div className="detail-box"><span>ETA</span><strong>{formatAppointmentTime(selectedLoad.eta)}</strong></div>
                         <div className="detail-box"><span>Return Location</span><strong>{selectedLoad.returnLocation}</strong></div>
+                        <div className="detail-box"><span>Route Miles</span><strong>{formatMiles(selectedLoad.miles)}</strong></div>
                         <div className="detail-box">
   <span>Drop Type</span>
   <strong>{selectedLoad.dropType || '—'}</strong>
@@ -12256,6 +12429,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     <th>Load</th>
                     <th>Customer</th>
                     <th>Container</th>
+                    <th>Miles</th>
                     <th>Source</th>
                     <th>Pay</th>
                   </tr>
@@ -12263,7 +12437,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <tbody>
                   {(activeBackendSettlement.statement.loads || []).length === 0 ? (
                     <tr>
-                      <td colSpan="6" className="settlement-empty-cell">No database settlement loads yet.</td>
+                      <td colSpan="7" className="settlement-empty-cell">No database settlement loads yet.</td>
                     </tr>
                   ) : (
                     activeBackendSettlement.statement.loads.map((line) => (
@@ -12284,6 +12458,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             line.containerNumber || '-'
                           )}
                         </td>
+                        <td>{formatMiles(line.miles)}</td>
                         <td>{line.source || 'auto'}</td>
                         <td>{formatMoney(line.payAmount)}</td>
                       </tr>
@@ -13707,6 +13882,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="detail-box"><span>Pickup</span><strong>{selectedAccountingLoad.pickup || '—'}</strong></div>
                 <div className="detail-box"><span>Delivery</span><strong>{getDeliveryDisplay(selectedAccountingLoad.delivery) || '—'}</strong></div>
                 <div className="detail-box"><span>Return Location</span><strong>{selectedAccountingLoad.returnLocation || '—'}</strong></div>
+                <div className="detail-box"><span>Route Miles</span><strong>{formatMiles(selectedAccountingLoad.miles)}</strong></div>
                 <div className="detail-box"><span>Drop Location</span><strong>{selectedAccountingLoad.dropLocation || '—'}</strong></div>
                 <div className="detail-box"><span>Dropped By</span><strong>{getDroppedByDriverValue(selectedAccountingLoad) ? getDriverLabel(getDroppedByDriverValue(selectedAccountingLoad)) : '—'}</strong></div>
                 <div className="detail-box"><span>Drop Date/Time</span><strong>{formatDateTime(selectedAccountingLoad.dropDateTime)}</strong></div>
@@ -14426,6 +14602,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <div className="detail-box">
                 <span>Truck</span>
                 <strong>{settlementReviewLoad.truck || '-'}</strong>
+              </div>
+              <div className="detail-box">
+                <span>Route Miles</span>
+                <strong>{formatMiles(settlementReviewLoad.miles)}</strong>
               </div>
               <div className="detail-box">
                 <span>Driver Pay</span>

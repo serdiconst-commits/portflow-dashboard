@@ -81,6 +81,7 @@ const buildStatement = ({ settlement, driver, loads, deductions, auditLogs }) =>
     customer: row.customer || '',
     containerNumber: row.containerNumber || '',
     referenceNumber: row.referenceNumber || row.bookingNumber || '',
+    miles: parseMoney(row.miles),
     movesCount: Number(row.movesCount || 1),
     payAmount: roundMoney(row.payAmount),
     source: row.source || 'auto',
@@ -169,7 +170,8 @@ async function getSettlementParts(db, companyId, settlementId) {
        l.customer,
        l.containerNumber,
        l.referenceNumber,
-       l.bookingNumber
+       l.bookingNumber,
+       l.miles
      FROM settlement_loads sl
      LEFT JOIN loads l ON l.id = sl.loadId
      WHERE sl.settlementId = ?
