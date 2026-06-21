@@ -4466,6 +4466,9 @@ const getPortHoustonSummary = (result) => {
     eirNote: result?.eir?.note || '',
     hasPortDocuments: Boolean(result?.eir?.hasPortDocuments),
     portTransactionNumbers: result?.eir?.transactionNumbers || [],
+    gateTransactionCount: result?.gateTransactions?.transactions?.length || 0,
+    gateLookupMethod: result?.gateTransactions?.lookupMethod || '',
+    gateLookupReason: result?.gateTransactions?.reason || result?.gateTransactions?.error || '',
     checkedBy: result?.checkedBy || '',
     checkedAt: result?.checkedAt || '',
   };
@@ -11371,6 +11374,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                 </div>
                                 <div className="detail-box"><span>OUT EIR</span><strong>{summary.outEir?.url ? <a href={summary.outEir.url} target="_blank" rel="noreferrer">Open</a> : 'Not available'}</strong></div>
                                 <div className="detail-box"><span>IN EIR</span><strong>{summary.inEir?.url ? <a href={summary.inEir.url} target="_blank" rel="noreferrer">Open</a> : 'Not available'}</strong></div>
+                                <div className="detail-box">
+                                  <span>Gate Transactions</span>
+                                  <strong>
+                                    {summary.gateTransactionCount
+                                      ? `${summary.gateTransactionCount} found${summary.gateLookupMethod ? ` (${summary.gateLookupMethod})` : ''}`
+                                      : summary.gateLookupReason || 'None returned'}
+                                  </strong>
+                                </div>
                                 <div className="detail-box port-check-note">
                                   <span>EIR Status</span>
                                   <strong>

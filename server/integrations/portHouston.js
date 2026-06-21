@@ -428,11 +428,22 @@ const unwrapRecords = (response) => {
   if (Array.isArray(response?.data?.content)) return response.data.content;
   if (Array.isArray(response?.data?.items)) return response.data.items;
   if (Array.isArray(response?.data?.results)) return response.data.results;
+  if (Array.isArray(response?.data?.records)) return response.data.records;
+  if (Array.isArray(response?.data?.data)) return response.data.data;
   if (Array.isArray(response?.records)) return response.records;
   if (Array.isArray(response?.content)) return response.content;
   if (Array.isArray(response?.items)) return response.items;
   if (Array.isArray(response?.results)) return response.results;
   if (Array.isArray(response?.units)) return response.units;
+  const nestedRecordArray = Object.values(response || {}).find((value) =>
+    Array.isArray(value) &&
+    value.some((item) =>
+      item &&
+      typeof item === 'object' &&
+      ['nbr', 'gkey', 'ctrId', 'unitId', 'subType', 'eventTypeId'].some((key) => key in item)
+    )
+  );
+  if (nestedRecordArray) return nestedRecordArray;
   return response ? [response] : [];
 };
 
@@ -710,10 +721,10 @@ export const getGateHistory = async (containerNumber, credentials = {}, facility
 
 export const getGateTransactionByNumber = async (transactionNumber, credentials = {}, facility = '') => {
   const cleanNumber = String(transactionNumber || '').trim();
-  const fetchByNumber = async (lookupFacility = '') => {
+  const fetchByNumber = async (lookupFacility = '', spacedPredicate = false) => {
     const query = {
       operator: 'POHA',
-      predicate: `nbr=${cleanNumber}`,
+      predicate: spacedPredicate ? `nbr = ${cleanNumber}` : `nbr=${cleanNumber}`,
       fields: GATE_TRANSACTION_FIELDS,
       size: 100,
     };
@@ -724,18 +735,24 @@ export const getGateTransactionByNumber = async (transactionNumber, credentials 
   };
 
   let transactions = await fetchByNumber('');
+  if (!transactions.length) {
+    transactions = await fetchByNumber('', true);
+  }
   const normalizedFacility = getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase();
   if (!transactions.length && normalizedFacility) {
     transactions = await fetchByNumber(normalizedFacility);
+    if (!transactions.length) {
+      transactions = await fetchByNumber(normalizedFacility, true);
+    }
   }
 
   return transactions;
 };
 
-const getGateTransactionsByContainerQuery = async (containerNumber, credentials = {}, facility = '') => {
+const getGateTransactionsByContainerQuery = async (containerNumber, credentials = {}, facility = '', spacedPredicate = false) => {
   const query = {
     operator: 'POHA',
-    predicate: `ctrId=${containerNumber}`,
+    predicate: spacedPredicate ? `ctrId = ${containerNumber}` : `ctrId=${containerNumber}`,
     fields: GATE_TRANSACTION_FIELDS,
     size: 100,
   };
@@ -764,10 +781,16 @@ export const getGateTransactionsByContainer = async (containerNumber, credential
   // examples query by ctrId without facility, which also avoids missing BCT/BPT
   // transactions when a load location was typed differently by dispatch.
   let sortedTransactions = await getGateTransactionsByContainerQuery(cleanContainer, credentials, '');
+  if (!sortedTransactions.length) {
+    sortedTransactions = await getGateTransactionsByContainerQuery(cleanContainer, credentials, '', true);
+  }
   const normalizedFacility = getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase();
   let lookupMethod = 'ctrId-all-facilities';
   if (!sortedTransactions.length && normalizedFacility) {
     sortedTransactions = await getGateTransactionsByContainerQuery(cleanContainer, credentials, normalizedFacility);
+    if (!sortedTransactions.length) {
+      sortedTransactions = await getGateTransactionsByContainerQuery(cleanContainer, credentials, normalizedFacility, true);
+    }
     lookupMethod = `ctrId-${normalizedFacility}`;
   }
 
