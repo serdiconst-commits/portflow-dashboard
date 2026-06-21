@@ -2473,6 +2473,7 @@ const [settlementCalculatorInputs, setSettlementCalculatorInputs] = useState({
   detentionHourlyRate: '',
 });
 const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
+const [mileageReportYear, setMileageReportYear] = useState(() => getTodayDate().slice(0, 4));
 const [fuelTransactions, setFuelTransactions] = useState([]);
 const [fuelSummary, setFuelSummary] = useState({
   totalFuelSpend: 0,
@@ -4137,6 +4138,52 @@ const activeOperationsLoads = (loadsData || []).filter((load) => !isCompletedLoa
 const completedAccountingLoads = (loadsData || [])
   .filter((load) => isCompletedLoad(load))
   .sort((a, b) => String(b.loadDate || '').localeCompare(String(a.loadDate || '')));
+const getNumericMiles = (value) => {
+  const miles = Number.parseFloat(String(value ?? '').replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(miles) && miles > 0 ? miles : 0;
+};
+const getMileageReportDate = (load = {}) =>
+  getLocalDatePortion(load.appointmentTime) ||
+  getLocalDatePortion(load.loadDate) ||
+  getLocalDatePortion(load.completedAt) ||
+  '';
+const mileageReportYears = [
+  getTodayDate().slice(0, 4),
+  ...completedAccountingLoads
+    .map((load) => getMileageReportDate(load).slice(0, 4))
+    .filter(Boolean),
+]
+  .filter((year, index, years) => years.indexOf(year) === index)
+  .sort((a, b) => b.localeCompare(a));
+const mileageReportLoads = completedAccountingLoads.filter((load) =>
+  getMileageReportDate(load).startsWith(String(mileageReportYear || ''))
+);
+const mileageReportRows = Object.values(
+  mileageReportLoads.reduce((groups, load) => {
+    const driverId = normalizeDriverForStorage(load.driver) || 'UNASSIGNED';
+    const driverName = driverId === 'UNASSIGNED' ? 'Unassigned' : getDriverLabel(driverId);
+    const miles = getNumericMiles(load.miles);
+    groups[driverId] = groups[driverId] || {
+      driverId,
+      driverName,
+      loadCount: 0,
+      totalMiles: 0,
+      missingMiles: 0,
+    };
+    groups[driverId].loadCount += 1;
+    groups[driverId].totalMiles += miles;
+    if (!miles) groups[driverId].missingMiles += 1;
+    return groups;
+  }, {})
+).sort((a, b) => b.totalMiles - a.totalMiles || a.driverName.localeCompare(b.driverName));
+const mileageReportTotals = mileageReportRows.reduce(
+  (totals, row) => ({
+    loadCount: totals.loadCount + row.loadCount,
+    totalMiles: totals.totalMiles + row.totalMiles,
+    missingMiles: totals.missingMiles + row.missingMiles,
+  }),
+  { loadCount: 0, totalMiles: 0, missingMiles: 0 }
+);
 const normalizedAccountingSearchTerm = String(accountingSearchTerm || '').trim().toLowerCase();
 const filteredAccountingLoads = normalizedAccountingSearchTerm
   ? completedAccountingLoads.filter((load) => {
@@ -6651,6 +6698,48 @@ const handleCreateAccountingInvoice = async (load) => {
     });
   }
 };
+
+const exportMileageReportCsv = () => {
+  const rows = [
+    {
+      Year: mileageReportYear,
+      Driver: 'TOTAL',
+      'Completed Loads': mileageReportTotals.loadCount,
+      'Total Miles': mileageReportTotals.totalMiles.toFixed(1),
+      'Loads Missing Miles': mileageReportTotals.missingMiles,
+    },
+    ...mileageReportRows.map((row) => ({
+      Year: mileageReportYear,
+      Driver: row.driverName,
+      'Completed Loads': row.loadCount,
+      'Total Miles': row.totalMiles.toFixed(1),
+      'Loads Missing Miles': row.missingMiles,
+    })),
+  ];
+  const headers = Object.keys(rows[0] || {
+    Year: '',
+    Driver: '',
+    'Completed Loads': '',
+    'Total Miles': '',
+    'Loads Missing Miles': '',
+  });
+  const csv = [
+    headers.join(','),
+    ...rows.map((row) =>
+      headers.map((header) => `"${String(row[header] ?? '').replace(/"/g, '""')}"`).join(',')
+    ),
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `driver-mileage-report-${mileageReportYear || 'year'}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
 const handleInvoiceStatusChange = async (invoiceId, newStatus) => {
   try {
     const res = await fetch(`${API_BASE}/api/invoices/${invoiceId}/status`, {
@@ -13550,6 +13639,72 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <span>Saved Invoices</span>
               <strong>{savedInvoices.length}</strong>
             </div>
+          </div>
+
+          <div className="accounting-fuel-panel">
+            <div className="panel-header">
+              <div>
+                <h3>Yearly Driver Mileage</h3>
+                <span>Completed loads by appointment year</span>
+              </div>
+              <div className="details-actions">
+                <select
+                  value={mileageReportYear}
+                  onChange={(e) => setMileageReportYear(e.target.value)}
+                >
+                  {mileageReportYears.map((year) => (
+                    <option key={year} value={year}>{year}</option>
+                  ))}
+                </select>
+                <button type="button" className="secondary-btn compact-btn" onClick={exportMileageReportCsv}>
+                  Export CSV
+                </button>
+              </div>
+            </div>
+
+            <div className="accounting-summary-strip">
+              <div>
+                <span>Total Miles</span>
+                <strong>{formatMiles(mileageReportTotals.totalMiles)}</strong>
+              </div>
+              <div>
+                <span>Completed Loads</span>
+                <strong>{mileageReportTotals.loadCount}</strong>
+              </div>
+              <div>
+                <span>Missing Miles</span>
+                <strong>{mileageReportTotals.missingMiles}</strong>
+              </div>
+            </div>
+
+            {mileageReportRows.length > 0 ? (
+              <div className="table-wrap accounting-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Driver</th>
+                      <th>Completed Loads</th>
+                      <th>Total Miles</th>
+                      <th>Missing Miles</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mileageReportRows.map((row) => (
+                      <tr key={row.driverId}>
+                        <td>{row.driverName}</td>
+                        <td>{row.loadCount}</td>
+                        <td>{formatMiles(row.totalMiles)}</td>
+                        <td>{row.missingMiles}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <p>No completed loads with dates for {mileageReportYear || 'this year'} yet.</p>
+              </div>
+            )}
           </div>
 
           <div className="accounting-search-bar">
