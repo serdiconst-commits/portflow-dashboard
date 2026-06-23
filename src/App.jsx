@@ -455,31 +455,40 @@ const getLocationOptionLabel = (location = {}) => {
   return address || location.name || 'Unnamed location';
 };
 
+const getAuthStorageKey = (key) => (isDriverApp ? `driver:${key}` : key);
+
 const getAuthStorage = () => {
   if (typeof window === 'undefined') return null;
   try {
-    return window.sessionStorage;
+    return isDriverApp ? window.localStorage : window.sessionStorage;
   } catch {
     return null;
   }
 };
 
-const getAuthStorageItem = (key) => getAuthStorage()?.getItem(key) || '';
+const getAuthStorageItem = (key) => {
+  const storage = getAuthStorage();
+  if (!storage) return '';
+  const storageKey = getAuthStorageKey(key);
+  return storage.getItem(storageKey) || (isDriverApp ? window.localStorage?.getItem(key) : '') || '';
+};
 const setAuthStorageItem = (key, value) => {
   const storage = getAuthStorage();
-  if (storage) storage.setItem(key, value);
+  if (storage) storage.setItem(getAuthStorageKey(key), value);
 };
 const removeAuthStorageItem = (key) => {
   const storage = getAuthStorage();
-  if (storage) storage.removeItem(key);
+  if (storage) storage.removeItem(getAuthStorageKey(key));
 };
 const clearAuthSession = () => {
   ['authToken', 'currentUser', 'company'].forEach((key) => {
     removeAuthStorageItem(key);
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // Ignore legacy storage cleanup failures.
+    if (isDriverApp) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // Ignore legacy storage cleanup failures.
+      }
     }
   });
 };
