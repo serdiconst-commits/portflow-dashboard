@@ -7446,8 +7446,15 @@ const handleLogout = () => {
   setAuthToken('');
   setCurrentUser(null);
   setCompany(null);
-  setShowPublicLanding(!isDriverApp);
-  window.location.replace(isDriverApp ? '/driver' : '/');
+  setSelectedLoad(null);
+  setSelectedAccountingLoadId('');
+  setIsEditing(false);
+  setLoginError('');
+  setLoginPassword('');
+  setAuthMode('login');
+  setActiveView(isDriverApp ? 'driver' : 'dispatch');
+  setShowPublicLanding(false);
+  window.location.replace(isDriverApp ? '/driver' : '/login');
 };
 
 const handlePrintInvoice = () => {
