@@ -11177,197 +11177,181 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
                   {isEditing ? (
                     <form id="load-edit-form" className="load-form" onSubmit={handleUpdateLoad}>
-                      <select
-                        name="customer"
-                        value={editingLoad?.customer || ''}
-                        onChange={handleEditInputChange}
-                      >
-                        <option value="">Select Customer</option>
-                        {customers.map((customer) => (
-                          <option key={customer.id} value={customer.name}>
-                            {customer.name}
-                          </option>
-                        ))}
-                      </select>
-                      
-                      <input
-  type="text"
-  name="referenceNumber"
-  placeholder="Broker Reference #"
-  value={editingLoad?.referenceNumber || ''}
-  onChange={handleEditInputChange}
-/>
-<div className="form-group">
-
-  <input
-  type="text"
-  name="poNumber"
-  placeholder="PO#"
-  value={editingLoad?.poNumber || ''}
-  onChange={handleEditInputChange}
-/>
-
-<input
-  type="text"
-  name="pickupNumber"
-  placeholder="Pick Up #"
-  value={editingLoad?.pickupNumber || ''}
-  onChange={handleEditInputChange}
-/>
-
-<select
-  name="deliveryType"
-  value={editingLoad?.deliveryType || ''}
-  onChange={handleEditInputChange}
->
-  <option value="">Select Delivery Type</option>
-  <option value="local">Local Delivery</option>
-  <option value="highway">Highway Delivery</option>
-</select>
-
-<input
-  type="text"
-  name="reservationNumber"
-  placeholder="Reservation #"
-  value={editingLoad.reservationNumber || ''}
-  onChange={handleEditInputChange}
-/>
-<input type="text" name="containerNumber" placeholder="Container Number" value={editingLoad.containerNumber} onChange={handleEditInputChange} />
-<label className="checkbox-row">
-  <input
-    type="checkbox"
-    name="streetTurn"
-    checked={Boolean(editingLoad.streetTurn)}
-    onChange={(e) =>
-      setEditingLoad((prev) => ({
-        ...prev,
-        streetTurn: e.target.checked,
-      }))
-    }
-  />
-  <span>Street Turn / reuse container</span>
-</label>
-<input type="text" name="containerSize" placeholder="Container Size" value={editingLoad.containerSize} onChange={handleEditInputChange} />
-<select
-  name="shipLine"
-  value={editingLoad.shipLine || ''}
-  onChange={handleEditInputChange}
->
-  <option value="">Select Ship Line</option>
-  {shipLineOptions.map((line) => (
-    <option key={line} value={line}>
-      {line}
-    </option>
-  ))}
-</select>
-<input
-  type="text"
-  name="returnNumber"
-  placeholder="Return #"
-  value={editingLoad.returnNumber || ''}
-  onChange={handleEditInputChange}
-/>
-
-</div>
-<select
-  name="dropType"
-  value={editingLoad.dropType || ''}
-  onChange={handleEditInputChange}
->
-  <option value="">Select Drop Type</option>
-  <option value="Customer">Customer</option>
-  <option value="Yard">Yard / Pre-pull</option>
-</select>
-
-<input
-  type="text"
-  name="dropLocation"
-  placeholder="Drop Location"
-  value={editingLoad.dropLocation || ''}
-  onChange={handleEditInputChange}
-/>
-
-<select
-  name="droppedBy"
-  value={editingLoad.droppedBy || ''}
-  onChange={handleEditInputChange}
->
-  <option value="">Select Dropped By</option>
-  {driversList.map((d) => (
-    <option key={d.id} value={d.id}>
-      {d.id} - {d.name}
-    </option>
-  ))}
-</select>
-
-<input
-  type="datetime-local"
-  name="dropDateTime"
-  value={editingLoad.dropDateTime || ''}
-  onChange={handleEditInputChange}
-/>
-
-                      <input type="date" name="loadDate" value={editingLoad?.loadDate || ''} onChange={handleEditInputChange} />
-
-                      <select name="driver" value={editingLoad?.driver || ''} onChange={handleEditInputChange}>
-                        <option value="">Select Driver</option>
-                        {driversList.map((d) => (
-                          <option key={d.id} value={d.id}>
-                           {d.id} - {d.name}
-                          </option>
-                        ))}
-                      </select>
-
-                      <input type="text" name="truck" placeholder="Truck" value={editingLoad.truck} onChange={handleEditInputChange} readOnly />
-                      <input type="text" name="pickup" placeholder="Pickup" value={editingLoad.pickup} onChange={handleEditInputChange} />
-                      <input type="text" name="delivery" placeholder="Delivery" value={editingLoad.delivery} onChange={handleEditInputChange} />
-                      <label>Appointment Time</label>
-                      <input
-  type="datetime-local"
-  name="appointmentTime"
-  value={normalizeDateTimeInputValue(editingLoad?.appointmentTime)}
-  onChange={handleEditInputChange}
-/>
-
-                      <label>ETA</label>
-                      <input
-  type="datetime-local"
-  name="eta"
-  value={normalizeDateTimeInputValue(editingLoad?.eta)}
-  onChange={handleEditInputChange}
-/>
-
-                      <input type="text" name="returnLocation" placeholder="Return Location" value={editingLoad.returnLocation} onChange={handleEditInputChange} />
-                      <label>Route Miles</label>
-                      <div className="inline-action-row">
-                        <input
-                          type="number"
-                          name="miles"
-                          min="0"
-                          step="0.1"
-                          placeholder="Auto miles"
-                          value={editingLoad.miles || ''}
-                          onChange={handleEditInputChange}
-                        />
-                        <button
-                          type="button"
-                          className="secondary-btn compact-btn"
-                          onClick={() => estimateLoadMiles('edit')}
-                          disabled={mileageEstimating === 'edit'}
-                        >
-                          {mileageEstimating === 'edit' ? 'Calculating...' : 'Estimate'}
-                        </button>
+                      <div className="edit-load-group">
+                        <div className="edit-load-group-header">
+                          <h4>Customer & References</h4>
+                          <span>Reference, PO, pickup, reservation, seal, and return numbers</span>
+                        </div>
+                        <div className="edit-load-grid">
+                          <select name="customer" value={editingLoad?.customer || ''} onChange={handleEditInputChange}>
+                            <option value="">Select Customer</option>
+                            {customers.map((customer) => (
+                              <option key={customer.id} value={customer.name}>
+                                {customer.name}
+                              </option>
+                            ))}
+                          </select>
+                          <input type="text" name="referenceNumber" placeholder="Broker Reference #" value={editingLoad?.referenceNumber || ''} onChange={handleEditInputChange} />
+                          <input type="text" name="poNumber" placeholder="PO #" value={editingLoad?.poNumber || ''} onChange={handleEditInputChange} />
+                          <input type="text" name="pickupNumber" placeholder="Pick Up #" value={editingLoad?.pickupNumber || ''} onChange={handleEditInputChange} />
+                          <input type="text" name="reservationNumber" placeholder="Reservation #" value={editingLoad.reservationNumber || ''} onChange={handleEditInputChange} />
+                          <input type="text" name="sealNumber" placeholder="Seal #" value={editingLoad.sealNumber} onChange={handleEditInputChange} />
+                          <input type="text" name="returnNumber" placeholder="Return #" value={editingLoad.returnNumber || ''} onChange={handleEditInputChange} />
+                          <input type="text" name="bookingNumber" placeholder="Booking Number" value={editingLoad.bookingNumber || ''} onChange={handleEditInputChange} />
+                        </div>
                       </div>
-                      {mileageEstimateStatus && mileageEstimating !== 'new' && (
-                        <p className="documents-empty">{mileageEstimateStatus}</p>
-                      )}
-                      <input type="text" name="bookingNumber" placeholder="Booking Number" value={editingLoad.bookingNumber || ''} onChange={handleEditInputChange} />
-                      <input type="text" name="chassisNumber" placeholder="Chassis Number" value={editingLoad.chassisNumber} onChange={handleEditInputChange} />
-                      <input type="text" name="sealNumber" placeholder="Seal Number" value={editingLoad.sealNumber} onChange={handleEditInputChange} />
-                      <label>Load Rate</label>
-                      <input type="text" name="rate" placeholder="Load Rate" value={editingLoad.rate} onChange={handleEditInputChange} />
-                      <label>Driver Rate</label>
-                      <input type="text" name="driverRate" placeholder="Driver Rate" value={editingLoad.driverRate} onChange={handleEditInputChange} />
+
+                      <div className="edit-load-group">
+                        <div className="edit-load-group-header">
+                          <h4>Equipment</h4>
+                          <span>Container, size, ship line, and chassis</span>
+                        </div>
+                        <div className="edit-load-grid">
+                          <input type="text" name="containerNumber" placeholder="Container Number" value={editingLoad.containerNumber} onChange={handleEditInputChange} />
+                          <input type="text" name="containerSize" placeholder="Container Size" value={editingLoad.containerSize} onChange={handleEditInputChange} />
+                          <select name="shipLine" value={editingLoad.shipLine || ''} onChange={handleEditInputChange}>
+                            <option value="">Select Ship Line</option>
+                            {shipLineOptions.map((line) => (
+                              <option key={line} value={line}>
+                                {line}
+                              </option>
+                            ))}
+                          </select>
+                          <input type="text" name="chassisNumber" placeholder="Chassis Number" value={editingLoad.chassisNumber} onChange={handleEditInputChange} />
+                          <label className="checkbox-row edit-load-wide">
+                            <input
+                              type="checkbox"
+                              name="streetTurn"
+                              checked={Boolean(editingLoad.streetTurn)}
+                              onChange={(e) =>
+                                setEditingLoad((prev) => ({
+                                  ...prev,
+                                  streetTurn: e.target.checked,
+                                }))
+                              }
+                            />
+                            <span>Street Turn / reuse container</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="edit-load-group">
+                        <div className="edit-load-group-header">
+                          <h4>Locations</h4>
+                          <span>Pickup, delivery, return, and route miles</span>
+                        </div>
+                        <div className="edit-load-grid">
+                          <input type="text" name="pickup" placeholder="Pickup" value={editingLoad.pickup} onChange={handleEditInputChange} />
+                          <input type="text" name="delivery" placeholder="Delivery" value={editingLoad.delivery} onChange={handleEditInputChange} />
+                          <input type="text" name="returnLocation" placeholder="Return Location" value={editingLoad.returnLocation} onChange={handleEditInputChange} />
+                          <select name="deliveryType" value={editingLoad?.deliveryType || ''} onChange={handleEditInputChange}>
+                            <option value="">Select Delivery Type</option>
+                            <option value="local">Local Delivery</option>
+                            <option value="highway">Highway Delivery</option>
+                          </select>
+                          <label className="edit-load-field edit-load-wide">
+                            <span>Route Miles</span>
+                            <div className="inline-action-row">
+                              <input
+                                type="number"
+                                name="miles"
+                                min="0"
+                                step="0.1"
+                                placeholder="Auto miles"
+                                value={editingLoad.miles || ''}
+                                onChange={handleEditInputChange}
+                              />
+                              <button
+                                type="button"
+                                className="secondary-btn compact-btn"
+                                onClick={() => estimateLoadMiles('edit')}
+                                disabled={mileageEstimating === 'edit'}
+                              >
+                                {mileageEstimating === 'edit' ? 'Calculating...' : 'Estimate'}
+                              </button>
+                            </div>
+                          </label>
+                          {mileageEstimateStatus && mileageEstimating !== 'new' && (
+                            <p className="documents-empty edit-load-wide">{mileageEstimateStatus}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="edit-load-group">
+                        <div className="edit-load-group-header">
+                          <h4>Schedule</h4>
+                          <span>Load date, appointment, LFD, and ETA</span>
+                        </div>
+                        <div className="edit-load-grid">
+                          <label className="edit-load-field">
+                            <span>Load Date</span>
+                            <input type="date" name="loadDate" value={editingLoad?.loadDate || ''} onChange={handleEditInputChange} />
+                          </label>
+                          <label className="edit-load-field">
+                            <span>Appointment Time</span>
+                            <input type="datetime-local" name="appointmentTime" value={normalizeDateTimeInputValue(editingLoad?.appointmentTime)} onChange={handleEditInputChange} />
+                          </label>
+                          <label className="edit-load-field">
+                            <span>LFD</span>
+                            <input type="date" name="lastFreeDay" value={editingLoad.lastFreeDay || ''} onChange={handleEditInputChange} />
+                          </label>
+                          <label className="edit-load-field">
+                            <span>ETA</span>
+                            <input type="datetime-local" name="eta" value={normalizeDateTimeInputValue(editingLoad?.eta)} onChange={handleEditInputChange} />
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="edit-load-group">
+                        <div className="edit-load-group-header">
+                          <h4>Drop Details</h4>
+                          <span>Drop type, location, driver, and drop time</span>
+                        </div>
+                        <div className="edit-load-grid">
+                          <select name="dropType" value={editingLoad.dropType || ''} onChange={handleEditInputChange}>
+                            <option value="">Select Drop Type</option>
+                            <option value="Customer">Customer</option>
+                            <option value="Yard">Yard / Pre-pull</option>
+                          </select>
+                          <input type="text" name="dropLocation" placeholder="Drop Location" value={editingLoad.dropLocation || ''} onChange={handleEditInputChange} />
+                          <select name="droppedBy" value={editingLoad.droppedBy || ''} onChange={handleEditInputChange}>
+                            <option value="">Select Dropped By</option>
+                            {driversList.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.id} - {d.name}
+                              </option>
+                            ))}
+                          </select>
+                          <label className="edit-load-field">
+                            <span>Drop Date/Time</span>
+                            <input type="datetime-local" name="dropDateTime" value={editingLoad.dropDateTime || ''} onChange={handleEditInputChange} />
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="edit-load-group">
+                        <div className="edit-load-group-header">
+                          <h4>Driver, Status & Money</h4>
+                          <span>Assignment, availability, rates, and notes</span>
+                        </div>
+                        <div className="edit-load-grid">
+                          <select name="driver" value={editingLoad?.driver || ''} onChange={handleEditInputChange}>
+                            <option value="">Select Driver</option>
+                            {driversList.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.id} - {d.name}
+                              </option>
+                            ))}
+                          </select>
+                          <input type="text" name="truck" placeholder="Truck" value={editingLoad.truck} onChange={handleEditInputChange} readOnly />
+                          <label className="edit-load-field">
+                            <span>Load Rate</span>
+                            <input type="text" name="rate" placeholder="Load Rate" value={editingLoad.rate} onChange={handleEditInputChange} />
+                          </label>
+                          <label className="edit-load-field">
+                            <span>Driver Rate</span>
+                            <input type="text" name="driverRate" placeholder="Driver Rate" value={editingLoad.driverRate} onChange={handleEditInputChange} />
+                          </label>
 
                       <select name="status" value={editingLoad.status} onChange={handleEditInputChange}>
                        <option value="Dispatched">Dispatched</option>
@@ -11376,32 +11360,19 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 <option value="Delivered">Delivered</option>
                       </select>
 
-                      <label>Availability</label>
-<select
-  name="availabilityStatus"
-  value={editingLoad?.availabilityStatus || 'Available'}
-  onChange={handleEditInputChange}
->
-  <option value="Available">Available</option>
-  <option value="Not Available">Not Available</option>
-</select>
+                          <select name="availabilityStatus" value={editingLoad?.availabilityStatus || 'Available'} onChange={handleEditInputChange}>
+                            <option value="Available">Available</option>
+                            <option value="Not Available">Not Available</option>
+                          </select>
 
                       
-                      <label>Detention</label>
-                      <input type="text" name="detention" placeholder="Detention" value={editingLoad.detention} onChange={handleEditInputChange} />
-                      <input type="text" name="lumper" placeholder="Lumper" value={editingLoad.lumper} onChange={handleEditInputChange} />
-                      <input type="text" name="fuelAdvance" placeholder="Fuel Advance" value={editingLoad.fuelAdvance} onChange={handleEditInputChange} />
-                      <input type="text" name="settlement" value={editingLoad.settlement} readOnly placeholder="Auto Settlement" />
-
-                      <textarea name="notes" placeholder="Dispatcher Notes" value={editingLoad.notes} onChange={handleEditInputChange} rows="4" />
-
-                      <label>LFD</label>
-<input
-  type="date"
-  name="lastFreeDay"
-  value={editingLoad.lastFreeDay || ''}
-  onChange={handleEditInputChange}
-/>
+                          <input type="text" name="detention" placeholder="Customer Detention" value={editingLoad.detention} onChange={handleEditInputChange} />
+                          <input type="text" name="lumper" placeholder="Lumper" value={editingLoad.lumper} onChange={handleEditInputChange} />
+                          <input type="text" name="fuelAdvance" placeholder="Fuel Advance" value={editingLoad.fuelAdvance} onChange={handleEditInputChange} />
+                          <input type="text" name="settlement" value={editingLoad.settlement} readOnly placeholder="Auto Settlement" />
+                          <textarea className="edit-load-wide" name="notes" placeholder="Dispatcher Notes" value={editingLoad.notes} onChange={handleEditInputChange} rows="4" />
+                        </div>
+                      </div>
 
                     </form>
                   ) : (
