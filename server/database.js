@@ -579,6 +579,12 @@ db.run(`ALTER TABLE loads ADD COLUMN lastFreeDay TEXT`, (err) => {
   }
 });
 
+db.run(`ALTER TABLE loads ADD COLUMN billingStatus TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding billingStatus column:', err.message);
+  }
+});
+
 db.run(`ALTER TABLE loads ADD COLUMN carrierId TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding carrierId column:', err.message);

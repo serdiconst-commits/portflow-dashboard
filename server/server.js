@@ -3528,7 +3528,8 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           notes = ?,
           customerExtraChargesJson = ?,
           lastFreeDay = ?,
-          miles = ?
+          miles = ?,
+          billingStatus = ?
          WHERE id = ? AND companyId = ?`,
         [
           l.loadDate || '',
@@ -3571,6 +3572,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           typeof l.customerExtraChargesJson === 'string' ? l.customerExtraChargesJson : JSON.stringify(l.customerExtraCharges || []),
           body.lastFreeDay || '',
           parseNumericField(l.miles),
+          l.billingStatus || existingLoad.billingStatus || '',
           loadId,
           companyId,
         ],
@@ -4006,8 +4008,9 @@ dropDateTime,
               companyId,
               lastFreeDay,
               carrierId,
-              miles
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              miles,
+              billingStatus
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               generatedLoadId,
               l.loadDate || new Date().toISOString().slice(0, 10),
@@ -4050,7 +4053,8 @@ dropDateTime,
               companyId,
               l.lastFreeDay || '',
               l.carrierId || '',
-              parseNumericField(l.miles)
+              parseNumericField(l.miles),
+              l.billingStatus || ''
             ],
             function (err) {
               if (err) {
@@ -4798,6 +4802,74 @@ app.put('/api/loads/:id/container-number', authenticate, (req, res) => {
     );
     });
   });
+});
+
+app.put('/api/loads/:id/billing-status', authenticate, (req, res) => {
+  const loadId = String(req.params.id || '').trim();
+  const companyId = req.company.companyId;
+  const billingStatus = String(req.body?.billingStatus || '').trim();
+
+  if (req.user?.role === 'driver') {
+    return res.status(403).json({ error: 'Drivers cannot change billing status.' });
+  }
+
+  const allowedStatuses = ['', 'Ready To Bill'];
+  if (!allowedStatuses.includes(billingStatus)) {
+    return res.status(400).json({ error: 'Invalid billing status.' });
+  }
+
+  db.get(
+    `SELECT id, containerNumber, billingStatus FROM loads WHERE id = ? AND companyId = ?`,
+    [loadId, companyId],
+    (findErr, oldLoad) => {
+      if (findErr) {
+        console.error('Error reading load billing status:', findErr.message);
+        return res.status(500).json({ error: 'Failed to update billing status.' });
+      }
+
+      if (!oldLoad) {
+        return res.status(404).json({ error: 'Load not found.' });
+      }
+
+      db.run(
+        `UPDATE loads SET billingStatus = ? WHERE id = ? AND companyId = ?`,
+        [billingStatus, loadId, companyId],
+        function updateBillingStatus(err) {
+          if (err) {
+            console.error('Error updating billing status:', err.message);
+            return res.status(500).json({ error: 'Failed to update billing status.' });
+          }
+
+          writeAuditLog(req, {
+            action: 'BILLING_STATUS_CHANGE',
+            entityType: 'LOAD',
+            entityId: loadId,
+            entityLabel: oldLoad.containerNumber || loadId,
+            oldValue: { billingStatus: oldLoad.billingStatus || '' },
+            newValue: { billingStatus },
+            changedFields: {
+              billingStatus: {
+                oldValue: oldLoad.billingStatus || '',
+                newValue: billingStatus,
+              },
+            },
+          });
+
+          db.get(
+            `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
+            [loadId, companyId],
+            (readErr, updatedLoad) => {
+              if (readErr) {
+                console.error('Error reading updated billing load:', readErr.message);
+                return res.status(500).json({ error: 'Billing status updated, but failed to read load.' });
+              }
+              res.json(updatedLoad);
+            }
+          );
+        }
+      );
+    }
+  );
 });
 
 app.put('/api/loads/:id/status', authenticate, (req, res) => {

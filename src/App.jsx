@@ -122,10 +122,10 @@ const roleCanAccessView = (role, view) => {
   if (normalizedRole === 'driver') return view === 'driver';
   if (normalizedRole === 'payroll') return ['settlements', 'invoices', 'accounting', 'settings'].includes(view);
   if (normalizedRole === 'manager') {
-    return ['dispatch', 'drivers', 'customers', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
+    return ['dispatch', 'completed', 'drivers', 'customers', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
   }
   if (normalizedRole === 'dispatcher') {
-    return ['dispatch', 'drivers', 'customers', 'settings'].includes(view);
+    return ['dispatch', 'completed', 'drivers', 'customers', 'settings'].includes(view);
   }
   return view === 'dispatch';
 };
@@ -2482,6 +2482,8 @@ const [settlementCalculatorInputs, setSettlementCalculatorInputs] = useState({
   detentionHourlyRate: '',
 });
 const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
+const [completedLoadDateFilter, setCompletedLoadDateFilter] = useState('today');
+const [completedLoadCustomDate, setCompletedLoadCustomDate] = useState(getTodayDate());
 const [mileageReportYear, setMileageReportYear] = useState(() => getTodayDate().slice(0, 4));
 const [fuelTransactions, setFuelTransactions] = useState([]);
 const [fuelSummary, setFuelSummary] = useState({
@@ -4141,12 +4143,37 @@ useEffect(() => {
       fuelAdvance: getSettlementPayValue(load, 'fuelAdvance'),
     });
 
-  const paperworkAlerts = loadsData.filter((load) => load.paperwork);
+const paperworkAlerts = loadsData.filter((load) => load.paperwork);
 
 const activeOperationsLoads = (loadsData || []).filter((load) => !isCompletedLoad(load));
+const isLoadReadyForAccounting = (load) =>
+  String(load?.billingStatus || '').trim().toLowerCase() === 'ready to bill' ||
+  savedInvoices.some((invoice) => invoice.loadId === load?.id);
+const getRelativeDateString = (offsetDays = 0) => getDateStringWithOffsetInAppTimeZone(offsetDays);
+const getLoadAppointmentDate = (load) => {
+  const rawAppointment = String(load?.appointmentTime || '').trim();
+  if (!rawAppointment) return '';
+  const localDate = getLocalDatePortion(rawAppointment);
+  if (localDate) return localDate;
+
+  const date = new Date(rawAppointment);
+  return Number.isNaN(date.getTime()) ? '' : getDateStringInAppTimeZone(date);
+};
+const completedReviewLoads = (loadsData || [])
+  .filter((load) => isCompletedLoad(load) && !isLoadReadyForAccounting(load))
+  .sort((a, b) => String(b.appointmentTime || b.loadDate || '').localeCompare(String(a.appointmentTime || a.loadDate || '')));
 const completedAccountingLoads = (loadsData || [])
-  .filter((load) => isCompletedLoad(load))
+  .filter((load) => isCompletedLoad(load) && isLoadReadyForAccounting(load))
   .sort((a, b) => String(b.loadDate || '').localeCompare(String(a.loadDate || '')));
+const getCompletedLoadFilterDate = () => {
+  if (completedLoadDateFilter === 'yesterday') return getRelativeDateString(-1);
+  if (completedLoadDateFilter === 'custom') return completedLoadCustomDate;
+  return getRelativeDateString(0);
+};
+const filteredCompletedReviewLoads = completedReviewLoads.filter((load) => {
+  const targetDate = getCompletedLoadFilterDate();
+  return targetDate ? getLoadAppointmentDate(load) === targetDate : true;
+});
 const getNumericMiles = (value) => {
   const miles = Number.parseFloat(String(value ?? '').replace(/[^0-9.-]/g, ''));
   return Number.isFinite(miles) && miles > 0 ? miles : 0;
@@ -4219,21 +4246,11 @@ const selectedAccountingInvoice = selectedAccountingLoad
   : null;
 const hasLastFreeDay = (load) => Boolean(String(load.lfd || load.lastFreeDay || '').trim());
 const hasAppointment = (load) => Boolean(String(load.appointmentTime || '').trim());
-const getRelativeDateString = (offsetDays = 0) => getDateStringWithOffsetInAppTimeZone(offsetDays);
 const getAppointmentFilterDate = () => {
   if (appointmentDateFilter === 'yesterday') return getRelativeDateString(-1);
   if (appointmentDateFilter === 'tomorrow') return getRelativeDateString(1);
   if (appointmentDateFilter === 'custom') return customAppointmentDate;
   return getRelativeDateString(0);
-};
-const getLoadAppointmentDate = (load) => {
-  const rawAppointment = String(load?.appointmentTime || '').trim();
-  if (!rawAppointment) return '';
-  const localDate = getLocalDatePortion(rawAppointment);
-  if (localDate) return localDate;
-
-  const date = new Date(rawAppointment);
-  return Number.isNaN(date.getTime()) ? '' : getDateStringInAppTimeZone(date);
 };
 const matchesAppointmentDateFilter = (load) => {
   const targetDate = getAppointmentFilterDate();
@@ -5743,6 +5760,38 @@ const handleRestoreCompletedLoad = async (loadToRestore) => {
   } catch (error) {
     console.error('Failed to restore completed load:', error);
     alert(`Failed to restore load: ${error.message}`);
+  }
+};
+
+const handleSendCompletedLoadToAccounting = async (loadToBill) => {
+  if (!loadToBill?.id) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${encodeURIComponent(loadToBill.id)}/billing-status`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ billingStatus: 'Ready To Bill' }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to send load to accounting');
+    }
+
+    setLoadsData((prevLoads) =>
+      prevLoads.map((load) => (load.id === data.id ? { ...load, ...data } : load))
+    );
+    setSelectedLoad((prev) => (prev?.id === data.id ? { ...prev, ...data } : prev));
+    setAccountingSearchTerm('');
+    setSelectedAccountingLoadId(data.id);
+    setActiveView('accounting');
+  } catch (error) {
+    console.error('Failed to send completed load to accounting:', error);
+    alert(`Failed to send to accounting: ${error.message}`);
   }
 };
 
@@ -9816,6 +9865,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               Dispatch Board
             </button>
             )}
+            {roleCanAccessView(currentUser?.role, 'completed') && (
+            <button
+              className={activeView === 'completed' ? 'toggle-btn active' : 'toggle-btn'}
+              onClick={() => setActiveView('completed')}
+            >
+              Completed Loads
+            </button>
+            )}
             {roleCanAccessView(currentUser?.role, 'settlements') && (
             <button
               className={activeView === 'settlements' ? 'toggle-btn active' : 'toggle-btn'}
@@ -13617,6 +13674,120 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </section>
   </div>
 )}
+      {activeView === 'completed' && (
+        <section className="panel accounting-panel">
+          <div className="panel-header">
+            <div>
+              <h3>Completed Loads</h3>
+              <span>{filteredCompletedReviewLoads.length} loads waiting for dispatch review</span>
+            </div>
+            <div className="details-actions">
+              <span className="status-pill active">Review before billing</span>
+            </div>
+          </div>
+
+          <div className="accounting-summary-strip">
+            <div>
+              <span>Waiting Review</span>
+              <strong>{completedReviewLoads.length}</strong>
+            </div>
+            <div>
+              <span>Shown</span>
+              <strong>{filteredCompletedReviewLoads.length}</strong>
+            </div>
+            <div>
+              <span>Ready In Accounting</span>
+              <strong>{completedAccountingLoads.length}</strong>
+            </div>
+          </div>
+
+          <div className="accounting-search-bar">
+            <select
+              value={completedLoadDateFilter}
+              onChange={(e) => setCompletedLoadDateFilter(e.target.value)}
+              className="filter-select"
+            >
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="custom">Custom</option>
+            </select>
+            {completedLoadDateFilter === 'custom' && (
+              <input
+                type="date"
+                value={completedLoadCustomDate}
+                onChange={(e) => setCompletedLoadCustomDate(e.target.value)}
+              />
+            )}
+            <span>Appointment date: {getCompletedLoadFilterDate() || 'Any'}</span>
+          </div>
+
+          {filteredCompletedReviewLoads.length > 0 ? (
+            <div className="table-wrap accounting-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Appointment</th>
+                    <th>Customer</th>
+                    <th>Container</th>
+                    <th>Reference #</th>
+                    <th>Driver</th>
+                    <th>Delivery</th>
+                    <th>Paperwork</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCompletedReviewLoads.map((load) => (
+                    <tr key={load.id}>
+                      <td>{load.appointmentTime ? formatAppointmentTime(load.appointmentTime) : load.loadDate || '-'}</td>
+                      <td>{load.customer || '-'}</td>
+                      <td>{load.containerNumber || '-'}</td>
+                      <td>{load.referenceNumber || '-'}</td>
+                      <td>{load.driver ? getDriverLabel(load.driver) : 'Not Assigned'}</td>
+                      <td>{load.deliveryLocationName || load.deliveryLocation || load.deliveryAddress || '-'}</td>
+                      <td>
+                        <span className={`sheet-paperwork ${String(load.paperwork || '').toLowerCase()}`}>
+                          {load.paperwork || getPaperworkStatusFromDocuments(load.documents || []) || 'Pending'}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="accounting-row-actions">
+                          <button
+                            type="button"
+                            className="secondary-btn compact-btn"
+                            onClick={() => {
+                              setSelectedLoad(load);
+                              setEditingLoad(load);
+                              setActiveView('dispatch');
+                            }}
+                          >
+                            Review
+                          </button>
+                          <button
+                            type="button"
+                            className="primary-btn compact-btn"
+                            onClick={() => handleSendCompletedLoadToAccounting(load)}
+                          >
+                            Send to Accounting
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <p>
+                {completedReviewLoads.length > 0
+                  ? 'No completed loads match this appointment date.'
+                  : 'No completed loads waiting for review.'}
+              </p>
+            </div>
+          )}
+        </section>
+      )}
       {activeView === 'accounting' && (
         <section className="panel accounting-panel">
           <div className="panel-header">
