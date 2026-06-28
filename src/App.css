@@ -2058,6 +2058,22 @@ td {
   border-radius: 10px;
   font-size: 14px;
   background: white;
+  color: #111827;
+  -webkit-text-fill-color: #111827;
+  caret-color: #111827;
+  color-scheme: light;
+}
+
+.load-form input::placeholder,
+.load-form textarea::placeholder {
+  color: #64748b;
+  -webkit-text-fill-color: #64748b;
+  opacity: 1;
+}
+
+.load-form select option {
+  color: #111827;
+  background: #ffffff;
 }
 
 .load-form textarea {
