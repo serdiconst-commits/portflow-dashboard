@@ -430,6 +430,7 @@ db.run(`
   appointmentTime TEXT,
   eta TEXT,
   returnLocation TEXT,
+  nextMoveType TEXT,
   dropType TEXT,
 dropLocation TEXT,
 droppedBy TEXT,
@@ -559,6 +560,11 @@ db.run(`ALTER TABLE loads ADD COLUMN customerExtraChargesJson TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN deliveryType TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding deliveryType column:', err.message);
+  }
+});
+db.run(`ALTER TABLE loads ADD COLUMN nextMoveType TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding nextMoveType column:', err.message);
   }
 });
 db.run(`ALTER TABLE loads ADD COLUMN streetTurn TEXT`, (err) => {

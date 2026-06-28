@@ -351,10 +351,20 @@ const formatMiles = (value) => {
   return `${miles.toFixed(1)} mi`;
 };
 
-const getRouteMileStops = (load = {}) =>
-  [load.pickup, load.delivery, load.returnLocation]
+const getRouteMileStops = (load = {}) => {
+  const nextMoveType = String(load.nextMoveType || '').trim().toLowerCase();
+  const destination = nextMoveType === 'return'
+    ? load.returnLocation || load.delivery
+    : load.delivery;
+
+  return [
+    load.pickup,
+    destination,
+    nextMoveType === 'return' ? '' : load.returnLocation,
+  ]
     .map((item) => String(item || '').trim())
     .filter(Boolean);
+};
 
 const calculateDrivingMiles = async (load = {}) => {
   const stops = getRouteMileStops(load);
@@ -811,6 +821,7 @@ const getMissingDriverDocuments = (load) => {
     reservationNumber: '',
     returnNumber: '',
     returnLocation: '',
+    nextMoveType: '',
     lastFreeDay: '',
     containerNumber: '',
     bookingNumber: '',
@@ -1197,6 +1208,7 @@ const buildDropDetailsDraft = (load = {}) => ({
   droppedBy: normalizeDriverForStorage(load.droppedBy) || normalizeDriverForStorage(load.driver) || '',
   dropDateTime: normalizeDateTimeInputValue(load.dropDateTime || ''),
   nextDriver: normalizeDriverForStorage(load.driver) || '',
+  nextMoveType: load.nextMoveType || 'Delivery',
 });
 const [dropDetailsDraft, setDropDetailsDraft] = useState(buildDropDetailsDraft());
 const [dispatchColumnOrder, setDispatchColumnOrder] = useState(() => {
@@ -5554,6 +5566,7 @@ const handleSaveDropDetails = async () => {
     availabilityStatus: '',
     dropType: dropDetailsDraft.dropType || selectedLoad.dropType || '',
     dropLocation: dropDetailsDraft.dropLocation || '',
+    nextMoveType: dropDetailsDraft.nextMoveType || selectedLoad.nextMoveType || 'Delivery',
     droppedBy:
       normalizeDriverForStorage(dropDetailsDraft.droppedBy) ||
       normalizeDriverForStorage(selectedLoad.driver),
@@ -5611,6 +5624,7 @@ const handleReopenDroppedLoad = async () => {
     ...selectedLoad,
     dropType: dropDetailsDraft.dropType || selectedLoad.dropType,
     dropLocation: dropDetailsDraft.dropLocation || selectedLoad.dropLocation,
+    nextMoveType: dropDetailsDraft.nextMoveType || selectedLoad.nextMoveType || 'Delivery',
   };
   const droppedPickup = getDroppedLoadPickup(dropLoadForPickup);
   if (!String(droppedPickup || '').trim()) {
@@ -5625,6 +5639,7 @@ const handleReopenDroppedLoad = async () => {
     driver: nextDriver,
     truck: getDriverTruck(nextDriver),
     pickup: droppedPickup,
+    nextMoveType: dropDetailsDraft.nextMoveType || selectedLoad.nextMoveType || 'Delivery',
     dropType: dropDetailsDraft.dropType || selectedLoad.dropType || '',
     dropLocation: dropDetailsDraft.dropLocation || selectedLoad.dropLocation || '',
     droppedBy:
@@ -7598,6 +7613,16 @@ const getSavedLocationDisplay = (value = '', options = []) => {
 
 const getDeliveryDisplay = (value = '') =>
   getSavedLocationDisplay(value, deliveryLocations);
+
+const getLoadNextMoveType = (load = {}) => {
+  const value = String(load.nextMoveType || '').trim().toLowerCase();
+  return value === 'return' ? 'Return' : 'Delivery';
+};
+
+const getDriverDestination = (load = {}) =>
+  getLoadNextMoveType(load) === 'Return'
+    ? load.returnLocation || load.delivery || ''
+    : load.delivery || '';
            
   const handleSaveNewPickupLocation = async () => {
   try {
@@ -8893,6 +8918,8 @@ const DriverLoadCard = ({ load }) => {
   const uploadStatus = driverUploadStatusByLoad[load.id];
   const missingDocuments = getMissingDriverDocuments(load);
   const paperworkComplete = hasRequiredDriverDocuments(load);
+  const driverDestination = getDriverDestination(load);
+  const driverDestinationLabel = getLoadNextMoveType(load) === 'Return' ? 'Return Destination' : 'Delivery';
 
   return (
     <article className="driver-load-card">
@@ -8918,10 +8945,12 @@ const DriverLoadCard = ({ load }) => {
           )}
         </div>
         <div className="driver-info-item wide">
-          <span>Delivery</span>
-          {load.delivery ? (
-            <a href={getGoogleMapsLink(load.delivery)} target="_blank" rel="noopener noreferrer">
-              {getDeliveryDisplay(load.delivery)}
+          <span>{driverDestinationLabel}</span>
+          {driverDestination ? (
+            <a href={getGoogleMapsLink(driverDestination)} target="_blank" rel="noopener noreferrer">
+              {getLoadNextMoveType(load) === 'Return'
+                ? driverDestination
+                : getDeliveryDisplay(driverDestination)}
             </a>
           ) : (
             <strong>-</strong>
@@ -11320,6 +11349,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <option value="Customer">Customer</option>
                             <option value="Yard">Yard / Pre-pull</option>
                           </select>
+                          <select name="nextMoveType" value={editingLoad.nextMoveType || 'Delivery'} onChange={handleEditInputChange}>
+                            <option value="Delivery">Next Move: Delivery</option>
+                            <option value="Return">Next Move: Return</option>
+                          </select>
                           <input type="text" name="dropLocation" placeholder="Drop Location" value={editingLoad.dropLocation || ''} onChange={handleEditInputChange} />
                           <select name="droppedBy" value={editingLoad.droppedBy || ''} onChange={handleEditInputChange}>
                             <option value="">Select Dropped By</option>
@@ -11456,6 +11489,21 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                               </select>
                             </label>
                             <label>
+                              <span>Next Move</span>
+                              <select
+                                value={dropDetailsDraft.nextMoveType || 'Delivery'}
+                                onChange={(e) =>
+                                  setDropDetailsDraft((prev) => ({
+                                    ...prev,
+                                    nextMoveType: e.target.value,
+                                  }))
+                                }
+                              >
+                                <option value="Delivery">Delivery</option>
+                                <option value="Return">Return</option>
+                              </select>
+                            </label>
+                            <label>
                               <span>Drop Location</span>
                               <select
                                 value={dropDetailsDraft.dropLocation || ''}
@@ -11585,6 +11633,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="detail-box">
   <span>Drop Type</span>
   <strong>{selectedLoad.dropType || '—'}</strong>
+</div>
+
+<div className="detail-box">
+  <span>Next Move</span>
+  <strong>{getLoadNextMoveType(selectedLoad)}</strong>
 </div>
 
 <div className="detail-box">
