@@ -4272,6 +4272,7 @@ const getAppointmentFilterDate = () => {
   return getRelativeDateString(0);
 };
 const getAvailableAppointmentFilterDate = () => {
+  if (availableAppointmentDateFilter === 'all') return '';
   if (availableAppointmentDateFilter === 'tomorrow') return getRelativeDateString(1);
   if (availableAppointmentDateFilter === 'custom') return availableCustomAppointmentDate;
   return getRelativeDateString(0);
@@ -10841,6 +10842,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onChange={(e) => setAvailableAppointmentDateFilter(e.target.value)}
                 className="filter-select"
               >
+                <option value="all">All Loads</option>
                 <option value="today">Today</option>
                 <option value="tomorrow">Tomorrow</option>
                 <option value="custom">Custom</option>
