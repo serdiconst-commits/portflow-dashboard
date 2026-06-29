@@ -1065,6 +1065,9 @@ const [dashboardFilter, setDashboardFilter] = useState('all');
 const [appointmentDateFilter, setAppointmentDateFilter] = useState('today');
 const [appointmentDeliveryTypeFilter, setAppointmentDeliveryTypeFilter] = useState('all');
 const [customAppointmentDate, setCustomAppointmentDate] = useState(getTodayDate());
+const [availableAppointmentDateFilter, setAvailableAppointmentDateFilter] = useState('today');
+const [availableDeliveryTypeFilter, setAvailableDeliveryTypeFilter] = useState('all');
+const [availableCustomAppointmentDate, setAvailableCustomAppointmentDate] = useState(getTodayDate());
 const [driverMobileTab, setDriverMobileTab] = useState('active');
 const [driverTrackingEnabled, setDriverTrackingEnabled] = useState(false);
 const [driverTrackingStatus, setDriverTrackingStatus] = useState('Location sharing is off.');
@@ -4268,8 +4271,18 @@ const getAppointmentFilterDate = () => {
   if (appointmentDateFilter === 'custom') return customAppointmentDate;
   return getRelativeDateString(0);
 };
+const getAvailableAppointmentFilterDate = () => {
+  if (availableAppointmentDateFilter === 'tomorrow') return getRelativeDateString(1);
+  if (availableAppointmentDateFilter === 'custom') return availableCustomAppointmentDate;
+  return getRelativeDateString(0);
+};
 const matchesAppointmentDateFilter = (load) => {
   const targetDate = getAppointmentFilterDate();
+  if (!targetDate) return hasAppointment(load);
+  return getLoadAppointmentDate(load) === targetDate;
+};
+const matchesAvailableAppointmentDateFilter = (load) => {
+  const targetDate = getAvailableAppointmentFilterDate();
   if (!targetDate) return hasAppointment(load);
   return getLoadAppointmentDate(load) === targetDate;
 };
@@ -4284,6 +4297,9 @@ const getDeliveryTypeLabel = (value = '') => {
 const matchesAppointmentDeliveryTypeFilter = (load) =>
   appointmentDeliveryTypeFilter === 'all' ||
   getDeliveryTypeKey(load) === appointmentDeliveryTypeFilter;
+const matchesAvailableDeliveryTypeFilter = (load) =>
+  availableDeliveryTypeFilter === 'all' ||
+  getDeliveryTypeKey(load) === availableDeliveryTypeFilter;
 const hasAssignedDriver = (load) => {
   const rawDriver = String(load?.driver || '').trim();
   return Boolean(rawDriver && !/^(-+\s*)?(no driver|assign later|select driver|not assigned)$/i.test(rawDriver));
@@ -8325,7 +8341,10 @@ const baseFilteredLoadsData =
       )
     : dashboardFilter === 'available'
     ? activeOperationsLoads.filter(
-        (load) => getAvailabilityStatusKey(load) === 'available'
+        (load) =>
+          getAvailabilityStatusKey(load) === 'available' &&
+          matchesAvailableAppointmentDateFilter(load) &&
+          matchesAvailableDeliveryTypeFilter(load)
       )
     : dashboardFilter === 'not-available'
     ? activeOperationsLoads.filter(
@@ -10805,6 +10824,41 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   type="date"
                   value={customAppointmentDate}
                   onChange={(e) => setCustomAppointmentDate(e.target.value)}
+                  className="filter-select"
+                />
+              )}
+            </section>
+          )}
+
+          {dashboardFilter === 'available' && (
+            <section className="appointment-filter-panel">
+              <div>
+                <span>Available By Appointment</span>
+                <strong>{filteredLoadsData.length} loads</strong>
+              </div>
+              <select
+                value={availableAppointmentDateFilter}
+                onChange={(e) => setAvailableAppointmentDateFilter(e.target.value)}
+                className="filter-select"
+              >
+                <option value="today">Today</option>
+                <option value="tomorrow">Tomorrow</option>
+                <option value="custom">Custom</option>
+              </select>
+              <select
+                value={availableDeliveryTypeFilter}
+                onChange={(e) => setAvailableDeliveryTypeFilter(e.target.value)}
+                className="filter-select"
+              >
+                <option value="all">All Delivery Types</option>
+                <option value="local">Local Delivery</option>
+                <option value="highway">Highway Delivery</option>
+              </select>
+              {availableAppointmentDateFilter === 'custom' && (
+                <input
+                  type="date"
+                  value={availableCustomAppointmentDate}
+                  onChange={(e) => setAvailableCustomAppointmentDate(e.target.value)}
                   className="filter-select"
                 />
               )}
