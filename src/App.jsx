@@ -4253,6 +4253,10 @@ const selectedAccountingLoad =
   selectedAccountingLoadId
     ? filteredAccountingLoads.find((load) => load.id === selectedAccountingLoadId) || null
     : null;
+const completedExtraChargeLoad =
+  accountingExtraChargesOpenLoadId
+    ? completedReviewLoads.find((load) => load.id === accountingExtraChargesOpenLoadId) || null
+    : null;
 const selectedAccountingInvoice = selectedAccountingLoad
   ? savedInvoices.find((invoice) => invoice.loadId === selectedAccountingLoad.id) || null
   : null;
@@ -5780,6 +5784,10 @@ const handleRestoreCompletedLoad = async (loadToRestore) => {
 
 const handleSendCompletedLoadToAccounting = async (loadToBill) => {
   if (!loadToBill?.id) return;
+  if (accountingExtraChargesOpenLoadId === loadToBill.id) {
+    alert('Please save or close customer extra charges before sending this load to Accounting.');
+    return;
+  }
 
   try {
     const res = await fetch(`${API_BASE}/api/loads/${encodeURIComponent(loadToBill.id)}/billing-status`, {
@@ -6982,6 +6990,7 @@ const handleSaveAccountingExtraCharges = async (load) => {
     setLoadsData((prev) =>
       prev.map((item) => (item.id === normalizedLoad.id ? normalizedLoad : item))
     );
+    setSelectedLoad((prev) => (prev?.id === normalizedLoad.id ? normalizedLoad : prev));
     setSelectedAccountingLoadId(normalizedLoad.id);
     setAccountingExtraChargeDrafts((prev) => {
       const next = { ...prev };
@@ -13764,6 +13773,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     <th>Driver</th>
                     <th>Delivery</th>
                     <th>Paperwork</th>
+                    <th>Extras</th>
+                    <th>Bill Total</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -13781,8 +13792,17 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           {load.paperwork || getPaperworkStatusFromDocuments(load.documents || []) || 'Pending'}
                         </span>
                       </td>
+                      <td>{formatMoney(getCustomerExtraChargesTotal(load))}</td>
+                      <td>{formatMoney(getCustomerBillAmount(load))}</td>
                       <td>
                         <div className="accounting-row-actions">
+                          <button
+                            type="button"
+                            className="secondary-btn compact-btn"
+                            onClick={() => openAccountingExtraChargesEditor(load, parseCustomerExtraCharges(load).length === 0)}
+                          >
+                            {parseCustomerExtraCharges(load).length > 0 ? 'Edit Charges' : 'Add Charges'}
+                          </button>
                           <button
                             type="button"
                             className="secondary-btn compact-btn"
@@ -13815,6 +13835,133 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   ? 'No completed loads match this appointment date.'
                   : 'No completed loads waiting for review.'}
               </p>
+            </div>
+          )}
+
+          {completedExtraChargeLoad && (
+            <div className="invoice-box accounting-extra-charges-box">
+              <div className="documents-header">
+                <h4>Customer Extra Charges</h4>
+                <span>{completedExtraChargeLoad.containerNumber || completedExtraChargeLoad.id}</span>
+              </div>
+
+              <div className="table-wrap accounting-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Description</th>
+                      <th>Amount</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {getAccountingExtraChargeDraft(completedExtraChargeLoad).map((charge, index) => (
+                      <tr key={charge.id || index}>
+                        <td>
+                          <select
+                            className="filter-select"
+                            value={charge.type || 'Other'}
+                            onChange={(e) =>
+                              handleAccountingExtraChargeChange(completedExtraChargeLoad, index, 'type', e.target.value)
+                            }
+                          >
+                            {customerExtraChargeTypes.map((type) => (
+                              <option key={type} value={type}>{type}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={charge.description || ''}
+                            placeholder="Reason or note"
+                            onChange={(e) =>
+                              handleAccountingExtraChargeChange(completedExtraChargeLoad, index, 'description', e.target.value)
+                            }
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={charge.amount ?? ''}
+                            placeholder="$0.00"
+                            onChange={(e) =>
+                              handleAccountingExtraChargeChange(completedExtraChargeLoad, index, 'amount', e.target.value)
+                            }
+                          />
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="danger-btn compact-btn"
+                            onClick={() => handleRemoveAccountingExtraCharge(completedExtraChargeLoad, index)}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="accounting-payment-summary">
+                <div>
+                  <span>Extras Total</span>
+                  <strong>
+                    {formatMoney(
+                      getAccountingExtraChargeDraft(completedExtraChargeLoad).reduce(
+                        (sum, charge) => sum + parseMoney(charge.amount),
+                        0
+                      )
+                    )}
+                  </strong>
+                </div>
+                <div>
+                  <span>Bill Total After Extras</span>
+                  <strong>
+                    {formatMoney(
+                      parseMoney(completedExtraChargeLoad.rate) +
+                      parseMoney(completedExtraChargeLoad.detention) +
+                      getAccountingExtraChargeDraft(completedExtraChargeLoad).reduce(
+                        (sum, charge) => sum + parseMoney(charge.amount),
+                        0
+                      )
+                    )}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="details-actions">
+                <button
+                  type="button"
+                  className="secondary-btn compact-btn"
+                  onClick={() => handleAddAccountingExtraCharge(completedExtraChargeLoad)}
+                >
+                  Add Another
+                </button>
+                <button
+                  type="button"
+                  className="primary-btn compact-btn"
+                  onClick={() => handleSaveAccountingExtraCharges(completedExtraChargeLoad)}
+                >
+                  Save Extra Charges
+                </button>
+                <button
+                  type="button"
+                  className="secondary-btn compact-btn"
+                  onClick={() => closeAccountingExtraChargesEditor(completedExtraChargeLoad)}
+                >
+                  Close
+                </button>
+              </div>
+              {accountingExtraChargeStatus && (
+                <p className={accountingExtraChargeStatus.includes('Failed') ? 'settings-status error' : 'settings-status success'}>
+                  {accountingExtraChargeStatus}
+                </p>
+              )}
             </div>
           )}
         </section>
