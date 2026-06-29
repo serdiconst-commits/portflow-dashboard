@@ -84,7 +84,49 @@ export default function createInvoiceRoutes(db) {
         }
 
         if (existingInvoice) {
-          return res.status(200).json(existingInvoice);
+          db.run(
+            `UPDATE invoices
+             SET customerId = ?,
+                 customerName = ?,
+                 referenceNumber = ?,
+                 amount = ?,
+                 notes = ?
+             WHERE id = ? AND companyId = ?`,
+            [
+              customerId,
+              customerName,
+              referenceNumber,
+              amount,
+              notes,
+              existingInvoice.id,
+              companyId,
+            ],
+            function updateExistingInvoice(updateErr) {
+              if (updateErr) {
+                console.error('Error updating existing invoice amount:', updateErr.message);
+                return res.status(500).json({
+                  error: 'Failed to update existing invoice',
+                  details: updateErr.message,
+                });
+              }
+
+              db.get(
+                `SELECT * FROM invoices WHERE id = ? AND companyId = ?`,
+                [existingInvoice.id, companyId],
+                (fetchErr, row) => {
+                  if (fetchErr) {
+                    console.error('Error fetching updated invoice:', fetchErr.message);
+                    return res.status(500).json({
+                      error: 'Invoice updated but failed to fetch invoice',
+                      details: fetchErr.message,
+                    });
+                  }
+                  return res.status(200).json(row);
+                }
+              );
+            }
+          );
+          return;
         }
 
         db.get(

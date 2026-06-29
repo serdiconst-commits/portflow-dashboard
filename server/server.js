@@ -4151,12 +4151,6 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
             .sort()
             .forEach((key) => orderedDocs.push(...docsByCategory[key]));
 
-          if (!orderedDocs.length) {
-            return res.status(404).json({
-              error: 'No packet documents found for this load',
-            });
-          }
-
           const packetCompany = await new Promise((resolve) => {
             db.get(
               `SELECT ${companyProfileSelect} FROM companies WHERE id = ?`,
@@ -4313,58 +4307,72 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
               maximumFractionDigits: 2,
             })}`;
           };
+          const parseCustomerExtraCharges = (load = {}) => {
+            try {
+              const parsed = JSON.parse(load.customerExtraChargesJson || '[]');
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          };
 
           const linehaulAmount = parseMoney(loadRow.rate);
           const detentionAmount = parseMoney(loadRow.detention);
-          const invoiceTotalAmount = linehaulAmount + detentionAmount;
+          const extraCharges = parseCustomerExtraCharges(loadRow)
+            .map((charge) => ({
+              type: String(charge.type || 'Extra Charge').trim() || 'Extra Charge',
+              description: String(charge.description || '').trim(),
+              amount: parseMoney(charge.amount),
+            }))
+            .filter((charge) => charge.description || charge.amount);
+          const extraChargesTotal = extraCharges.reduce((sum, charge) => sum + charge.amount, 0);
+          const invoiceTotalAmount = linehaulAmount + detentionAmount + extraChargesTotal;
+          const chargeRows = [
+            { description: 'Linehaul / Load Rate', amount: linehaulAmount },
+            ...(detentionAmount > 0 ? [{ description: 'Detention', amount: detentionAmount }] : []),
+            ...extraCharges.map((charge) => ({
+              description: `${charge.type}${charge.description ? ` - ${charge.description}` : ''}`,
+              amount: charge.amount,
+            })),
+          ];
 
-          invoicePage.drawText('Linehaul / Load Rate', {
-            x: 50,
-            y: 440,
-            size: 12,
-          });
-
-          invoicePage.drawText(formatMoney(linehaulAmount), {
-            x: 450,
-            y: 440,
-            size: 12,
-          });
-
-          if (detentionAmount > 0) {
-            invoicePage.drawText('Detention', {
+          let chargeY = 440;
+          chargeRows.forEach((row) => {
+            invoicePage.drawText(String(row.description).slice(0, 58), {
               x: 50,
-              y: 420,
+              y: chargeY,
               size: 12,
             });
 
-            invoicePage.drawText(formatMoney(detentionAmount), {
+            invoicePage.drawText(formatMoney(row.amount), {
               x: 450,
-              y: 420,
+              y: chargeY,
               size: 12,
             });
-          }
+            chargeY -= 20;
+          });
 
           invoicePage.drawLine({
-            start: { x: 50, y: detentionAmount > 0 ? 400 : 420 },
-            end: { x: 560, y: detentionAmount > 0 ? 400 : 420 },
+            start: { x: 50, y: chargeY + 6 },
+            end: { x: 560, y: chargeY + 6 },
             thickness: 1,
           });
 
           invoicePage.drawText('Total:', {
             x: 350,
-            y: detentionAmount > 0 ? 380 : 400,
+            y: chargeY - 14,
             size: 14,
           });
 
           invoicePage.drawText(formatMoney(invoiceTotalAmount), {
             x: 450,
-            y: detentionAmount > 0 ? 380 : 400,
+            y: chargeY - 14,
             size: 14,
           });
 
           invoicePage.drawText(`Notes: ${loadRow.notes || 'No additional notes.'}`, {
             x: 50,
-            y: 360,
+            y: Math.max(80, chargeY - 42),
             size: 12,
           });
           const invoiceBytes = await invoicePdf.save();

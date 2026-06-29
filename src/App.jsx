@@ -7495,11 +7495,28 @@ const handlePrintInvoice = () => {
   const invoiceCompanyName = company?.invoiceName || company?.name || 'Company';
   const invoiceCompanyAddress = company?.invoiceAddress || '';
   const invoiceLogoSrc = getCompanyLogoSrc();
-
-  const formattedRate = `$${Number(selectedInvoiceLoad.rate || 0).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  const invoiceExtraCharges = parseCustomerExtraCharges(selectedInvoiceLoad);
+  const invoiceChargeRows = [
+    { description: 'Linehaul / Load Rate', amount: parseMoney(selectedInvoiceLoad.rate) },
+    ...(parseMoney(selectedInvoiceLoad.detention) > 0
+      ? [{ description: 'Detention', amount: parseMoney(selectedInvoiceLoad.detention) }]
+      : []),
+    ...invoiceExtraCharges.map((charge) => ({
+      description: `${charge.type || 'Extra Charge'}${charge.description ? ` - ${charge.description}` : ''}`,
+      amount: parseMoney(charge.amount),
+    })),
+  ];
+  const invoiceChargesHtml = invoiceChargeRows
+    .map(
+      (charge) => `
+        <tr>
+          <td>${charge.description}</td>
+          <td>${formatMoney(charge.amount)}</td>
+        </tr>
+      `
+    )
+    .join('');
+  const formattedInvoiceTotal = formatMoney(getCustomerBillAmount(selectedInvoiceLoad));
 
   const printWindow = window.open('', '_blank', 'width=1100,height=800');
   if (!printWindow) return;
@@ -7519,6 +7536,9 @@ const handlePrintInvoice = () => {
           .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
           .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 16px; }
           .line { margin-bottom: 8px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+          th, td { text-align: left; padding: 10px; border-bottom: 1px solid #e5e7eb; }
+          th:last-child, td:last-child { text-align: right; }
           .total { font-size: 20px; font-weight: bold; margin-top: 12px; }
         </style>
       </head>
@@ -7561,7 +7581,18 @@ const handlePrintInvoice = () => {
 
         <div class="section card">
           <h3>Charges</h3>
-          <div class="total">Amount Due: ${formattedRate}</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invoiceChargesHtml}
+            </tbody>
+          </table>
+          <div class="total">Amount Due: ${formattedInvoiceTotal}</div>
         </div>
       </body>
     </html>
@@ -15013,6 +15044,15 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <td>{formatMoney(parseMoney(selectedInvoiceLoad.detention))}</td>
                       </tr>
                     )}
+                    {parseCustomerExtraCharges(selectedInvoiceLoad).map((charge, index) => (
+                      <tr key={charge.id || index}>
+                        <td>
+                          {charge.type || 'Extra Charge'}
+                          {charge.description ? ` - ${charge.description}` : ''}
+                        </td>
+                        <td>{formatMoney(parseMoney(charge.amount))}</td>
+                      </tr>
+                    ))}
                     <tr className="invoice-total-row">
                       <td>Total Invoice</td>
                       <td>{formatMoney(getCustomerBillAmount(selectedInvoiceLoad))}</td>
