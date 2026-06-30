@@ -1521,7 +1521,7 @@ button {
   right: 14px;
   bottom: 14px;
   z-index: 46;
-  width: min(640px, calc(100vw - 28px));
+  width: min(940px, calc(100vw - 28px));
   max-width: 100%;
   overflow-y: auto;
   border: 1px solid #dbe4f0;
@@ -1946,23 +1946,32 @@ button {
 
 .details-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  margin-bottom: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .detail-box {
   background: #f9fafb;
-  border-radius: 12px;
-  padding: 14px;
+  border-radius: 10px;
+  padding: 10px 12px;
   border: 1px solid #e5e7eb;
 }
 
 .detail-box span {
   display: block;
-  font-size: 13px;
+  font-size: 11px;
   color: #6b7280;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.detail-box strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.25;
+  word-break: break-word;
 }
 
 .settlement-box,
