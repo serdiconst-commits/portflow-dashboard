@@ -2498,6 +2498,7 @@ const [settlementCalculatorInputs, setSettlementCalculatorInputs] = useState({
   detentionHourlyRate: '',
 });
 const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
+const [accountingRevenueView, setAccountingRevenueView] = useState('weekly');
 const [completedLoadDateFilter, setCompletedLoadDateFilter] = useState('today');
 const [completedLoadCustomDate, setCompletedLoadCustomDate] = useState(getTodayDate());
 const [mileageReportYear, setMileageReportYear] = useState(() => getTodayDate().slice(0, 4));
@@ -4235,6 +4236,82 @@ const mileageReportTotals = mileageReportRows.reduce(
     missingMiles: totals.missingMiles + row.missingMiles,
   }),
   { loadCount: 0, totalMiles: 0, missingMiles: 0 }
+);
+const getAccountingInvoiceForLoad = (load) =>
+  savedInvoices.find((invoice) => String(invoice.loadId) === String(load?.id)) || null;
+const getAccountingLoadBillAmount = (load) => getCustomerBillAmount(load);
+const getAccountingLoadPaidAmount = (load) => {
+  const invoice = getAccountingInvoiceForLoad(load);
+  return invoice ? parseMoney(invoice.paidAmount) : 0;
+};
+const getAccountingLoadOpenAmount = (load) =>
+  Math.max(0, getAccountingLoadBillAmount(load) - getAccountingLoadPaidAmount(load));
+const getAccountingWeekInfo = (load) => {
+  const sourceDate =
+    getLocalDatePortion(load?.appointmentTime) ||
+    getLocalDatePortion(load?.loadDate) ||
+    getLocalDatePortion(load?.completedAt) ||
+    '';
+  if (!sourceDate) {
+    return { key: 'no-date', label: 'No appointment date', sortValue: 0 };
+  }
+  const date = new Date(`${sourceDate}T12:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return { key: 'no-date', label: 'No appointment date', sortValue: 0 };
+  }
+  const weekStart = getStartOfWeek(date);
+  const weekEnd = getEndOfWeek(date);
+  return {
+    key: getDateStringInAppTimeZone(weekStart),
+    label: `${getDateStringInAppTimeZone(weekStart)} to ${getDateStringInAppTimeZone(weekEnd)}`,
+    sortValue: weekStart.getTime(),
+  };
+};
+const accountingRevenueRows = Object.values(
+  completedAccountingLoads.reduce((groups, load) => {
+    const week = getAccountingWeekInfo(load);
+    groups[week.key] = groups[week.key] || {
+      key: week.key,
+      label: week.label,
+      sortValue: week.sortValue,
+      loadCount: 0,
+      revenue: 0,
+      paid: 0,
+      owed: 0,
+    };
+    groups[week.key].loadCount += 1;
+    groups[week.key].revenue += getAccountingLoadBillAmount(load);
+    groups[week.key].paid += getAccountingLoadPaidAmount(load);
+    groups[week.key].owed += getAccountingLoadOpenAmount(load);
+    return groups;
+  }, {})
+).sort((a, b) => b.sortValue - a.sortValue || a.label.localeCompare(b.label));
+const accountingReceivableRows = Object.values(
+  completedAccountingLoads.reduce((groups, load) => {
+    const brokerName = String(load.brokerName || load.broker || load.customer || 'Unknown Customer').trim();
+    const key = brokerName.toLowerCase();
+    groups[key] = groups[key] || {
+      key,
+      brokerName,
+      loadCount: 0,
+      revenue: 0,
+      paid: 0,
+      owed: 0,
+    };
+    groups[key].loadCount += 1;
+    groups[key].revenue += getAccountingLoadBillAmount(load);
+    groups[key].paid += getAccountingLoadPaidAmount(load);
+    groups[key].owed += getAccountingLoadOpenAmount(load);
+    return groups;
+  }, {})
+).sort((a, b) => b.owed - a.owed || b.revenue - a.revenue || a.brokerName.localeCompare(b.brokerName));
+const accountingRevenueTotals = completedAccountingLoads.reduce(
+  (totals, load) => ({
+    revenue: totals.revenue + getAccountingLoadBillAmount(load),
+    paid: totals.paid + getAccountingLoadPaidAmount(load),
+    owed: totals.owed + getAccountingLoadOpenAmount(load),
+  }),
+  { revenue: 0, paid: 0, owed: 0 }
 );
 const normalizedAccountingSearchTerm = String(accountingSearchTerm || '').trim().toLowerCase();
 const filteredAccountingLoads = normalizedAccountingSearchTerm
@@ -14090,6 +14167,108 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <span>Saved Invoices</span>
               <strong>{savedInvoices.length}</strong>
             </div>
+          </div>
+
+          <div className="accounting-fuel-panel">
+            <div className="panel-header">
+              <div>
+                <h3>Revenue Control</h3>
+                <span>Weekly revenue and broker balances from completed accounting loads</span>
+              </div>
+              <div className="details-actions">
+                <button
+                  type="button"
+                  className={accountingRevenueView === 'weekly' ? 'primary-btn compact-btn' : 'secondary-btn compact-btn'}
+                  onClick={() => setAccountingRevenueView('weekly')}
+                >
+                  Weekly Revenue
+                </button>
+                <button
+                  type="button"
+                  className={accountingRevenueView === 'receivables' ? 'primary-btn compact-btn' : 'secondary-btn compact-btn'}
+                  onClick={() => setAccountingRevenueView('receivables')}
+                >
+                  Broker Owed
+                </button>
+              </div>
+            </div>
+
+            <div className="accounting-summary-strip">
+              <div>
+                <span>Total Revenue</span>
+                <strong>{formatMoney(accountingRevenueTotals.revenue)}</strong>
+              </div>
+              <div>
+                <span>Already Paid</span>
+                <strong>{formatMoney(accountingRevenueTotals.paid)}</strong>
+              </div>
+              <div>
+                <span>Open Balance</span>
+                <strong>{formatMoney(accountingRevenueTotals.owed)}</strong>
+              </div>
+            </div>
+
+            {accountingRevenueView === 'weekly' ? (
+              accountingRevenueRows.length > 0 ? (
+                <div className="table-wrap accounting-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Week</th>
+                        <th>Loads</th>
+                        <th>Revenue</th>
+                        <th>Paid</th>
+                        <th>Open Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {accountingRevenueRows.map((row) => (
+                        <tr key={row.key}>
+                          <td>{row.label}</td>
+                          <td>{row.loadCount}</td>
+                          <td>{formatMoney(row.revenue)}</td>
+                          <td>{formatMoney(row.paid)}</td>
+                          <td>{formatMoney(row.owed)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <p>No completed accounting loads for weekly revenue yet.</p>
+                </div>
+              )
+            ) : accountingReceivableRows.length > 0 ? (
+              <div className="table-wrap accounting-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Broker / Customer</th>
+                      <th>Loads</th>
+                      <th>Total Revenue</th>
+                      <th>Already Paid</th>
+                      <th>Owes Us</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {accountingReceivableRows.map((row) => (
+                      <tr key={row.key}>
+                        <td>{row.brokerName}</td>
+                        <td>{row.loadCount}</td>
+                        <td>{formatMoney(row.revenue)}</td>
+                        <td>{formatMoney(row.paid)}</td>
+                        <td>{formatMoney(row.owed)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <p>No broker receivable balances yet.</p>
+              </div>
+            )}
           </div>
 
           <div className="accounting-fuel-panel">
