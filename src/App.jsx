@@ -1125,6 +1125,7 @@ const defaultDispatchLoadColumnOrder = [
   'pickup',
   'delivery',
   'appointmentTime',
+  'lastFreeDay',
   'driver',
   'eta',
   'status',
@@ -8504,6 +8505,10 @@ const dispatchLoadColumnsByKey = {
     label: 'Appointment',
     render: (load) => formatAppointmentTime(load.appointmentTime),
   },
+  lastFreeDay: {
+    label: 'LFD',
+    render: (load) => load.lastFreeDay || load.lfd || '-',
+  },
   driver: {
     label: 'Driver',
     render: (load) => (load.driver ? getDriverLabel(load.driver) : 'Not Assigned'),
@@ -11723,6 +11728,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="detail-box"><span>Pick Up Location</span><strong>{selectedLoad.pickup}</strong></div>
                         <div className="detail-box"><span>Delivery Location</span><strong>{getDeliveryDisplay(selectedLoad.delivery) || '—'}</strong></div>
                         <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedLoad.appointmentTime)}</strong></div>
+                        <div className="detail-box"><span>LFD</span><strong>{selectedLoad.lastFreeDay || selectedLoad.lfd || 'â€”'}</strong></div>
                         <div className="detail-box"><span>ETA</span><strong>{formatAppointmentTime(selectedLoad.eta)}</strong></div>
                         <div className="detail-box"><span>Return Location</span><strong>{selectedLoad.returnLocation}</strong></div>
                         <div className="detail-box"><span>Route Miles</span><strong>{formatMiles(selectedLoad.miles)}</strong></div>
@@ -14469,6 +14475,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="detail-box"><span>Status</span><strong>{getLoadQuickStatus(selectedAccountingLoad) || 'Completed'}</strong></div>
                 <div className="detail-box"><span>Load Date</span><strong>{selectedAccountingLoad.loadDate || '—'}</strong></div>
                 <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedAccountingLoad.appointmentTime)}</strong></div>
+                <div className="detail-box"><span>LFD</span><strong>{selectedAccountingLoad.lastFreeDay || selectedAccountingLoad.lfd || '—'}</strong></div>
                 <div className="detail-box"><span>Customer</span><strong>{selectedAccountingLoad.customer || '—'}</strong></div>
                 <div className="detail-box"><span>Broker</span><strong>{selectedAccountingLoad.brokerName || selectedAccountingLoad.broker || '—'}</strong></div>
                 <div className="detail-box"><span>Reference #</span><strong>{selectedAccountingLoad.referenceNumber || '—'}</strong></div>
