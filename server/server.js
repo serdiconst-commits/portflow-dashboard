@@ -857,7 +857,7 @@ const hasRequiredCompletionDocuments = (documents = []) => {
   const uploaded = new Set(
     documents.map((doc) => String(doc.category || doc.type || '').trim().toUpperCase())
   );
-  return ['POD', 'IN EIR', 'OUT EIR'].every((category) => uploaded.has(category));
+  return ['POD'].every((category) => uploaded.has(category));
 };
 
 const sensitiveAuditFields = new Set(['password', 'passwordHash', 'token', 'jwt', 'secret']);
@@ -5003,7 +5003,7 @@ app.put('/api/loads/:id/status', authenticate, (req, res) => {
 
         if (!hasRequiredCompletionDocuments(documents)) {
           return res.status(400).json({
-            error: 'POD, IN EIR, and OUT EIR are required before completing this load.',
+            error: 'POD is required before completing this load.',
           });
         }
 

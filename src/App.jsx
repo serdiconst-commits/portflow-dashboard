@@ -1068,6 +1068,8 @@ const [customAppointmentDate, setCustomAppointmentDate] = useState(getTodayDate(
 const [availableAppointmentDateFilter, setAvailableAppointmentDateFilter] = useState('today');
 const [availableDeliveryTypeFilter, setAvailableDeliveryTypeFilter] = useState('all');
 const [availableCustomAppointmentDate, setAvailableCustomAppointmentDate] = useState(getTodayDate());
+const [lfdDateFilter, setLfdDateFilter] = useState('all');
+const [lfdCustomDate, setLfdCustomDate] = useState(getTodayDate());
 const [driverMobileTab, setDriverMobileTab] = useState('active');
 const [driverTrackingEnabled, setDriverTrackingEnabled] = useState(false);
 const [driverTrackingStatus, setDriverTrackingStatus] = useState('Location sharing is off.');
@@ -2501,6 +2503,7 @@ const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
 const [accountingRevenueView, setAccountingRevenueView] = useState('weekly');
 const [completedLoadDateFilter, setCompletedLoadDateFilter] = useState('today');
 const [completedLoadCustomDate, setCompletedLoadCustomDate] = useState(getTodayDate());
+const [completedLoadSearchTerm, setCompletedLoadSearchTerm] = useState('');
 const [mileageReportYear, setMileageReportYear] = useState(() => getTodayDate().slice(0, 4));
 const [fuelTransactions, setFuelTransactions] = useState([]);
 const [fuelSummary, setFuelSummary] = useState({
@@ -4183,13 +4186,27 @@ const completedAccountingLoads = (loadsData || [])
   .filter((load) => isCompletedLoad(load) && isLoadReadyForAccounting(load))
   .sort((a, b) => String(b.loadDate || '').localeCompare(String(a.loadDate || '')));
 const getCompletedLoadFilterDate = () => {
+  if (completedLoadDateFilter === 'all') return '';
   if (completedLoadDateFilter === 'yesterday') return getRelativeDateString(-1);
+  if (completedLoadDateFilter === 'tomorrow') return getRelativeDateString(1);
   if (completedLoadDateFilter === 'custom') return completedLoadCustomDate;
   return getRelativeDateString(0);
 };
+const normalizedCompletedLoadSearchTerm = String(completedLoadSearchTerm || '').trim().toLowerCase();
 const filteredCompletedReviewLoads = completedReviewLoads.filter((load) => {
   const targetDate = getCompletedLoadFilterDate();
-  return targetDate ? getLoadAppointmentDate(load) === targetDate : true;
+  const matchesDate = targetDate ? getLoadAppointmentDate(load) === targetDate : true;
+  if (!matchesDate) return false;
+  if (!normalizedCompletedLoadSearchTerm) return true;
+
+  const customer = String(load.customer || '').toLowerCase();
+  const container = String(load.containerNumber || '').toLowerCase();
+  const reference = String(load.referenceNumber || '').toLowerCase();
+  return (
+    customer.includes(normalizedCompletedLoadSearchTerm) ||
+    container.includes(normalizedCompletedLoadSearchTerm) ||
+    reference.includes(normalizedCompletedLoadSearchTerm)
+  );
 });
 const getNumericMiles = (value) => {
   const miles = Number.parseFloat(String(value ?? '').replace(/[^0-9.-]/g, ''));
@@ -4355,6 +4372,21 @@ const getAvailableAppointmentFilterDate = () => {
   if (availableAppointmentDateFilter === 'custom') return availableCustomAppointmentDate;
   return getRelativeDateString(0);
 };
+const getLfdFilterDate = () => {
+  if (lfdDateFilter === 'all') return '';
+  if (lfdDateFilter === 'tomorrow') return getRelativeDateString(1);
+  if (lfdDateFilter === 'custom') return lfdCustomDate;
+  return getRelativeDateString(0);
+};
+const getLoadLfdDate = (load) => {
+  const rawLfd = String(load?.lastFreeDay || load?.lfd || '').trim();
+  if (!rawLfd) return '';
+  const localDate = getLocalDatePortion(rawLfd);
+  if (localDate) return localDate;
+
+  const parsedDate = new Date(rawLfd);
+  return Number.isNaN(parsedDate.getTime()) ? '' : getDateStringInAppTimeZone(parsedDate);
+};
 const matchesAppointmentDateFilter = (load) => {
   const targetDate = getAppointmentFilterDate();
   if (!targetDate) return hasAppointment(load);
@@ -4364,6 +4396,11 @@ const matchesAvailableAppointmentDateFilter = (load) => {
   const targetDate = getAvailableAppointmentFilterDate();
   if (!targetDate) return hasAppointment(load);
   return getLoadAppointmentDate(load) === targetDate;
+};
+const matchesLfdDateFilter = (load) => {
+  const targetDate = getLfdFilterDate();
+  if (!targetDate) return hasLastFreeDay(load);
+  return getLoadLfdDate(load) === targetDate;
 };
 const getDeliveryTypeKey = (load = {}) =>
   String(load.deliveryType || '').trim().toLowerCase();
@@ -8410,7 +8447,7 @@ return (
 
 const baseFilteredLoadsData =
   dashboardFilter === 'lfd'
-    ? activeOperationsLoads.filter((load) => hasLastFreeDay(load))
+    ? activeOperationsLoads.filter((load) => hasLastFreeDay(load) && matchesLfdDateFilter(load))
     : dashboardFilter === 'appointments'
     ? activeOperationsLoads.filter(
         (load) =>
@@ -9198,7 +9235,7 @@ const DriverLoadCard = ({ load }) => {
         <div className="driver-paperwork-header">
           <div>
             <span>Paperwork</span>
-            <strong>{paperworkComplete ? 'Ready to complete' : `Missing ${missingDocuments.join(', ')}`}</strong>
+            <strong>{paperworkComplete ? 'Ready to complete' : 'POD required to complete'}</strong>
           </div>
           <span className={paperworkComplete ? 'status-pill active' : 'status-pill inactive'}>
             {paperworkComplete ? 'Done' : 'Needed'}
@@ -11040,6 +11077,28 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <option value="Pending">Pending</option>
                   <option value="Submitted">Submitted</option>
                 </select>
+                {dashboardFilter === 'lfd' && (
+                  <>
+                    <select
+                      value={lfdDateFilter}
+                      onChange={(e) => setLfdDateFilter(e.target.value)}
+                      className="filter-select"
+                    >
+                      <option value="all">All LFD</option>
+                      <option value="today">Today</option>
+                      <option value="tomorrow">Tomorrow</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                    {lfdDateFilter === 'custom' && (
+                      <input
+                        type="date"
+                        value={lfdCustomDate}
+                        onChange={(e) => setLfdCustomDate(e.target.value)}
+                        className="filter-select"
+                      />
+                    )}
+                  </>
+                )}
               </div>
               <div className="dispatch-sheet-wrap">
                 {filteredLoadsData.length > 0 ? (
@@ -13917,8 +13976,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               onChange={(e) => setCompletedLoadDateFilter(e.target.value)}
               className="filter-select"
             >
+              <option value="all">All Completed</option>
               <option value="today">Today</option>
               <option value="yesterday">Yesterday</option>
+              <option value="tomorrow">Tomorrow</option>
               <option value="custom">Custom</option>
             </select>
             {completedLoadDateFilter === 'custom' && (
@@ -13928,6 +13989,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onChange={(e) => setCompletedLoadCustomDate(e.target.value)}
               />
             )}
+            <input
+              type="text"
+              value={completedLoadSearchTerm}
+              onChange={(e) => setCompletedLoadSearchTerm(e.target.value)}
+              className="search-input"
+              placeholder="Search completed by container, reference, or customer"
+            />
             <span>Appointment date: {getCompletedLoadFilterDate() || 'Any'}</span>
           </div>
 
