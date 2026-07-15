@@ -4702,15 +4702,21 @@ const res = await fetch(`${API_BASE}/api/loads`, {
     alert(`Failed to create load: ${error.message}`);
   }
 };
-const handleEditClick = () => {
-  setEditingLoad({
+const handleEditClick = (event) => {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+
+  if (!selectedLoad) return;
+
+  const loadForEdit = {
     ...emptyLoad,
     ...selectedLoad,
-    driver: normalizeDriverForStorage(selectedLoad?.driver),
-    documents: selectedLoad?.documents || [],
-    paperwork: selectedLoad?.paperwork || getPaperworkStatusFromDocuments(selectedLoad?.documents || []),
-  });
+    driver: normalizeDriverForStorage(selectedLoad.driver),
+    documents: selectedLoad.documents || [],
+    paperwork: selectedLoad.paperwork || getPaperworkStatusFromDocuments(selectedLoad.documents || []),
+  };
 
+  setEditingLoad(loadForEdit);
   setIsEditing(true);
   setShowForm(false);
 
@@ -4778,6 +4784,12 @@ const handleDuplicateLoad = (load) => {
 
 const handleUpdateLoad = async (e) => {
   e.preventDefault();
+
+  if (!editingLoad?.id) {
+    alert('Unable to edit this load. Please select the load again and try Edit Load one more time.');
+    setIsEditing(false);
+    return;
+  }
 
   const updatedLoad = {
     ...editingLoad,
@@ -10100,13 +10112,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
      )}
     {userRole === 'driver' && (
   <div style={{ marginTop: '10px' }}>
-   <select
+  <select
   name="driver"
-  value={editingLoad.driver || ''}
+  value={editingLoad?.driver || ''}
   onChange={(e) => {
     const value = e.target.value;
 
     setEditingLoad((prev) => ({
+      ...(prev || emptyLoad),
       ...prev,
       driver: value,
       truck: value ? getDriverTruck(value) : '',
@@ -11520,7 +11533,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     </div>
                   </div>
 
-                  {isEditing ? (
+                  {isEditing && editingLoad ? (
                     <form id="load-edit-form" className="load-form" onSubmit={handleUpdateLoad}>
                       <div className="edit-load-group">
                         <div className="edit-load-group-header">
