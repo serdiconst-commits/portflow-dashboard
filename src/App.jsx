@@ -2504,6 +2504,7 @@ const [accountingRevenueView, setAccountingRevenueView] = useState('weekly');
 const [completedLoadDateFilter, setCompletedLoadDateFilter] = useState('today');
 const [completedLoadCustomDate, setCompletedLoadCustomDate] = useState(getTodayDate());
 const [completedLoadSearchTerm, setCompletedLoadSearchTerm] = useState('');
+const [selectedCompletedReviewLoadId, setSelectedCompletedReviewLoadId] = useState('');
 const [mileageReportYear, setMileageReportYear] = useState(() => getTodayDate().slice(0, 4));
 const [fuelTransactions, setFuelTransactions] = useState([]);
 const [fuelSummary, setFuelSummary] = useState({
@@ -4208,6 +4209,9 @@ const filteredCompletedReviewLoads = completedReviewLoads.filter((load) => {
     reference.includes(normalizedCompletedLoadSearchTerm)
   );
 });
+const selectedCompletedReviewLoad = selectedCompletedReviewLoadId
+  ? completedReviewLoads.find((load) => load.id === selectedCompletedReviewLoadId) || null
+  : null;
 const getNumericMiles = (value) => {
   const miles = Number.parseFloat(String(value ?? '').replace(/[^0-9.-]/g, ''));
   return Number.isFinite(miles) && miles > 0 ? miles : 0;
@@ -4712,6 +4716,9 @@ const handleDuplicateLoad = (load) => {
   if (!load) return;
 
   const driver = normalizeDriverForStorage(load.driver);
+  const duplicateNote = `Duplicated from load ${load.id || 'unknown'} on ${new Date().toLocaleString()}.`;
+  const existingNotes = String(load.notes || '').trim();
+
   setNewLoad({
     ...emptyLoad,
     ...load,
@@ -4735,6 +4742,7 @@ const handleDuplicateLoad = (load) => {
     completedAt: '',
     customerExtraCharges: [],
     customerExtraChargesJson: '[]',
+    notes: existingNotes ? `${duplicateNote}\n\n${existingNotes}` : duplicateNote,
     streetTurn: false,
     dropType: '',
     dropLocation: '',
@@ -4747,6 +4755,13 @@ const handleDuplicateLoad = (load) => {
   setSelectedLoad(null);
   setIsEditing(false);
   setShowForm(true);
+
+  window.setTimeout(() => {
+    document.getElementById('add-load-form-panel')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }, 50);
 };
 
 const handleUpdateLoad = async (e) => {
@@ -5982,6 +5997,7 @@ const handleSendCompletedLoadToAccounting = async (loadToBill) => {
       prevLoads.map((load) => (load.id === data.id ? { ...load, ...data } : load))
     );
     setSelectedLoad((prev) => (prev?.id === data.id ? { ...prev, ...data } : prev));
+    setSelectedCompletedReviewLoadId((prev) => (prev === data.id ? '' : prev));
     setAccountingSearchTerm('');
     setSelectedAccountingLoadId(data.id);
     setActiveView('accounting');
@@ -10218,7 +10234,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       {activeView === 'dispatch' && (
         <>
           {showForm && (
-            <section className="panel add-load-panel">
+            <section id="add-load-form-panel" className="panel add-load-panel">
               <div className="panel-header">
                 <h3>Add New Load</h3>
               </div>
@@ -14089,9 +14105,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             type="button"
                             className="secondary-btn compact-btn"
                             onClick={() => {
-                              setSelectedLoad(load);
-                              setEditingLoad(load);
-                              setActiveView('dispatch');
+                              setSelectedCompletedReviewLoadId(load.id);
+                              window.setTimeout(() => {
+                                document.getElementById('completed-load-review-panel')?.scrollIntoView({
+                                  behavior: 'smooth',
+                                  block: 'start',
+                                });
+                              }, 50);
                             }}
                           >
                             Review
@@ -14117,6 +14137,80 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   ? 'No completed loads match this appointment date.'
                   : 'No completed loads waiting for review.'}
               </p>
+            </div>
+          )}
+
+          {selectedCompletedReviewLoad && (
+            <div id="completed-load-review-panel" className="invoice-box accounting-extra-charges-box">
+              <div className="documents-header">
+                <h4>Review Completed Load</h4>
+                <div className="documents-toolbar">
+                  <span>{selectedCompletedReviewLoad.containerNumber || selectedCompletedReviewLoad.id}</span>
+                  <button
+                    type="button"
+                    className="secondary-btn compact-btn"
+                    onClick={() => openAccountingExtraChargesEditor(selectedCompletedReviewLoad, parseCustomerExtraCharges(selectedCompletedReviewLoad).length === 0)}
+                  >
+                    {parseCustomerExtraCharges(selectedCompletedReviewLoad).length > 0 ? 'Edit Charges' : 'Add Charges'}
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-btn compact-btn"
+                    onClick={() => handleSendCompletedLoadToAccounting(selectedCompletedReviewLoad)}
+                  >
+                    Send to Accounting
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn compact-btn"
+                    onClick={() => setSelectedCompletedReviewLoadId('')}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <div className="details-grid accounting-details-grid">
+                <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedCompletedReviewLoad.appointmentTime) || selectedCompletedReviewLoad.loadDate || '-'}</strong></div>
+                <div className="detail-box"><span>Customer</span><strong>{selectedCompletedReviewLoad.customer || '-'}</strong></div>
+                <div className="detail-box"><span>Container</span><strong>{selectedCompletedReviewLoad.containerNumber || '-'}</strong></div>
+                <div className="detail-box"><span>Reference #</span><strong>{selectedCompletedReviewLoad.referenceNumber || '-'}</strong></div>
+                <div className="detail-box"><span>Driver</span><strong>{selectedCompletedReviewLoad.driver ? getDriverLabel(selectedCompletedReviewLoad.driver) : 'Not Assigned'}</strong></div>
+                <div className="detail-box"><span>Pickup</span><strong>{selectedCompletedReviewLoad.pickup || '-'}</strong></div>
+                <div className="detail-box"><span>Delivery</span><strong>{getDeliveryDisplay(selectedCompletedReviewLoad.delivery) || selectedCompletedReviewLoad.delivery || '-'}</strong></div>
+                <div className="detail-box"><span>Return</span><strong>{selectedCompletedReviewLoad.returnLocation || '-'}</strong></div>
+                <div className="detail-box"><span>Customer Extras</span><strong>{formatMoney(getCustomerExtraChargesTotal(selectedCompletedReviewLoad))}</strong></div>
+                <div className="detail-box"><span>Bill Total</span><strong>{formatMoney(getCustomerBillAmount(selectedCompletedReviewLoad))}</strong></div>
+              </div>
+
+              <div className="documents-box accounting-documents-box">
+                <div className="documents-header">
+                  <h4>Documents</h4>
+                  <span>{(selectedCompletedReviewLoad.documents || []).length} files</span>
+                </div>
+                {selectedCompletedReviewLoad.documents?.length ? (
+                  <div className="documents-list">
+                    {selectedCompletedReviewLoad.documents.map((doc) => (
+                      <div key={doc.id} className="document-card">
+                        <div className="document-info">
+                          <strong>{doc.name || doc.fileName || 'Document'}</strong>
+                          <div className="document-meta">
+                            <span className="document-badge">{doc.category || doc.type || 'Document'}</span>
+                            <span>{formatDateTime(doc.uploadedAt)}</span>
+                          </div>
+                        </div>
+                        <div className="document-actions">
+                          <button type="button" className="secondary-btn compact-btn" onClick={() => handleOpenDocument(doc)}>
+                            Open
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="documents-empty">No documents uploaded for this completed load.</p>
+                )}
+              </div>
             </div>
           )}
 
