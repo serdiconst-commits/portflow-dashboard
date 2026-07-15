@@ -4704,12 +4704,24 @@ const res = await fetch(`${API_BASE}/api/loads`, {
 };
 const handleEditClick = () => {
   setEditingLoad({
+    ...emptyLoad,
     ...selectedLoad,
     driver: normalizeDriverForStorage(selectedLoad?.driver),
+    documents: selectedLoad?.documents || [],
+    paperwork: selectedLoad?.paperwork || getPaperworkStatusFromDocuments(selectedLoad?.documents || []),
   });
 
   setIsEditing(true);
   setShowForm(false);
+
+  window.setTimeout(() => {
+    const drawer = document.querySelector('.load-details-drawer.open');
+    if (drawer) drawer.scrollTop = 0;
+    document.getElementById('load-edit-form')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }, 50);
 };
 
 const handleDuplicateLoad = (load) => {
@@ -11462,7 +11474,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               {selectedLoad ? (
                 <>
                   <div className="panel-header">
-                    <h3>Load Details</h3>
+                    <h3>{isEditing ? 'Edit Load' : 'Load Details'}</h3>
                     <div className="details-actions">
                       <span>{selectedLoad.id}</span>
                       <button
@@ -11510,6 +11522,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
                   {isEditing ? (
                     <form id="load-edit-form" className="load-form" onSubmit={handleUpdateLoad}>
+                      <div className="edit-load-group">
+                        <div className="edit-load-group-header">
+                          <h4>Editing {editingLoad?.containerNumber || editingLoad?.referenceNumber || editingLoad?.id || 'Load'}</h4>
+                          <span>Make changes below, then click Save Changes at the top.</span>
+                        </div>
+                      </div>
                       <div className="edit-load-group">
                         <div className="edit-load-group-header">
                           <h4>Customer & References</h4>
