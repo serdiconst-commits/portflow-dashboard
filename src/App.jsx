@@ -4708,6 +4708,47 @@ const handleEditClick = () => {
   setShowForm(false);
 };
 
+const handleDuplicateLoad = (load) => {
+  if (!load) return;
+
+  const driver = normalizeDriverForStorage(load.driver);
+  setNewLoad({
+    ...emptyLoad,
+    ...load,
+    id: '',
+    containerNumber: '',
+    driver,
+    truck: driver ? getDriverTruck(driver) : '',
+    loadDate: getTodayDate(),
+    status: 'Dispatched',
+    availabilityStatus: 'Not Available',
+    availabilityCheckedAt: '',
+    availabilitySummary: null,
+    portHoustonAvailability: null,
+    portHoustonCheck: null,
+    portHoustonGateTransactions: [],
+    portHoustonGateHistory: [],
+    paperwork: 'Pending',
+    documents: [],
+    pod: '',
+    billingStatus: '',
+    completedAt: '',
+    customerExtraCharges: [],
+    customerExtraChargesJson: '[]',
+    streetTurn: false,
+    dropType: '',
+    dropLocation: '',
+    droppedBy: '',
+    dropDateTime: '',
+    nextMoveType: '',
+  });
+
+  setSelectedPresetName('');
+  setSelectedLoad(null);
+  setIsEditing(false);
+  setShowForm(true);
+};
+
 const handleUpdateLoad = async (e) => {
   e.preventDefault();
 
@@ -11432,7 +11473,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           </button>
                         </>
                       ) : (
-                        <button className="secondary-btn" onClick={handleEditClick}>Edit Load</button>
+                        <>
+                          <button type="button" className="secondary-btn" onClick={handleEditClick}>Edit Load</button>
+                          <button type="button" className="secondary-btn" onClick={() => handleDuplicateLoad(selectedLoad)}>Duplicate Load</button>
+                        </>
                       )}
                       <button className="danger-btn" onClick={handleDeleteLoad}>Delete Load</button>
                       <button
