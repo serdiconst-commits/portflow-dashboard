@@ -14207,6 +14207,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </button>
                   <button
                     type="button"
+                    className="customer-pdf-btn compact-btn"
+                    onClick={() => handleGenerateCustomerPdf(selectedCompletedReviewLoad)}
+                  >
+                    Customer PDF
+                  </button>
+                  <button
+                    type="button"
                     className="primary-btn compact-btn"
                     onClick={() => handleSendCompletedLoadToAccounting(selectedCompletedReviewLoad)}
                   >
