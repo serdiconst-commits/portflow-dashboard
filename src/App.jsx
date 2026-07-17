@@ -2501,6 +2501,8 @@ const [settlementCalculatorInputs, setSettlementCalculatorInputs] = useState({
 });
 const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
 const [accountingRevenueView, setAccountingRevenueView] = useState('weekly');
+const [accountingDeliveryDateFilter, setAccountingDeliveryDateFilter] = useState('all');
+const [accountingDeliveryCustomDate, setAccountingDeliveryCustomDate] = useState(getTodayDate());
 const [completedLoadDateFilter, setCompletedLoadDateFilter] = useState('today');
 const [completedLoadCustomDate, setCompletedLoadCustomDate] = useState(getTodayDate());
 const [completedLoadSearchTerm, setCompletedLoadSearchTerm] = useState('');
@@ -4336,22 +4338,40 @@ const accountingRevenueTotals = completedAccountingLoads.reduce(
   { revenue: 0, paid: 0, owed: 0 }
 );
 const normalizedAccountingSearchTerm = String(accountingSearchTerm || '').trim().toLowerCase();
-const filteredAccountingLoads = normalizedAccountingSearchTerm
-  ? completedAccountingLoads.filter((load) => {
-      const customer = String(load.customer || '').toLowerCase();
-      const container = String(load.containerNumber || '').toLowerCase();
-      const reference = String(load.referenceNumber || '').toLowerCase();
-      const poNumber = String(load.poNumber || '').toLowerCase();
-      const pickupNumber = String(load.pickupNumber || '').toLowerCase();
-      return (
-        customer.includes(normalizedAccountingSearchTerm) ||
-        container.includes(normalizedAccountingSearchTerm) ||
-        reference.includes(normalizedAccountingSearchTerm) ||
-        poNumber.includes(normalizedAccountingSearchTerm) ||
-        pickupNumber.includes(normalizedAccountingSearchTerm)
-      );
-    })
-  : completedAccountingLoads;
+const getAccountingDeliveryDate = (load = {}) =>
+  getLocalDatePortion(load.completedAt) ||
+  getLoadAppointmentDate(load) ||
+  getLocalDatePortion(load.loadDate) ||
+  '';
+const getAccountingDeliveryFilterDate = () => {
+  if (accountingDeliveryDateFilter === 'all') return '';
+  if (accountingDeliveryDateFilter === 'yesterday') return getRelativeDateString(-1);
+  if (accountingDeliveryDateFilter === 'tomorrow') return getRelativeDateString(1);
+  if (accountingDeliveryDateFilter === 'custom') return accountingDeliveryCustomDate;
+  return getRelativeDateString(0);
+};
+const filteredAccountingLoads = completedAccountingLoads.filter((load) => {
+  const targetDeliveryDate = getAccountingDeliveryFilterDate();
+  const matchesDeliveryDate = targetDeliveryDate ? getAccountingDeliveryDate(load) === targetDeliveryDate : true;
+  if (!matchesDeliveryDate) return false;
+
+  if (normalizedAccountingSearchTerm) {
+    const customer = String(load.customer || '').toLowerCase();
+    const container = String(load.containerNumber || '').toLowerCase();
+    const reference = String(load.referenceNumber || '').toLowerCase();
+    const poNumber = String(load.poNumber || '').toLowerCase();
+    const pickupNumber = String(load.pickupNumber || '').toLowerCase();
+    return (
+      customer.includes(normalizedAccountingSearchTerm) ||
+      container.includes(normalizedAccountingSearchTerm) ||
+      reference.includes(normalizedAccountingSearchTerm) ||
+      poNumber.includes(normalizedAccountingSearchTerm) ||
+      pickupNumber.includes(normalizedAccountingSearchTerm)
+    );
+  }
+
+  return true;
+});
 const selectedAccountingLoad =
   selectedAccountingLoadId
     ? filteredAccountingLoads.find((load) => load.id === selectedAccountingLoadId) || null
@@ -14648,6 +14668,24 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           </div>
 
           <div className="accounting-search-bar">
+            <select
+              value={accountingDeliveryDateFilter}
+              onChange={(e) => setAccountingDeliveryDateFilter(e.target.value)}
+              className="filter-select"
+            >
+              <option value="all">All Delivery Dates</option>
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="tomorrow">Tomorrow</option>
+              <option value="custom">Custom</option>
+            </select>
+            {accountingDeliveryDateFilter === 'custom' && (
+              <input
+                type="date"
+                value={accountingDeliveryCustomDate}
+                onChange={(e) => setAccountingDeliveryCustomDate(e.target.value)}
+              />
+            )}
             <input
               type="text"
               value={accountingSearchTerm}
@@ -14663,7 +14701,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <table>
                 <thead>
                   <tr>
-                    <th>Date</th>
+                    <th>Delivery Date</th>
                     <th>Customer</th>
                     <th>Container</th>
                     <th>Reference #</th>
@@ -14680,9 +14718,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <tbody>
                   {filteredAccountingLoads.map((load) => {
                     const invoice = savedInvoices.find((item) => item.loadId === load.id);
+                    const deliveryDate = getAccountingDeliveryDate(load);
                     return (
                       <tr key={load.id} className={selectedAccountingLoad?.id === load.id ? 'selected-row' : ''}>
-                        <td>{load.loadDate || '—'}</td>
+                        <td>{deliveryDate || '—'}</td>
                         <td>{load.customer || '—'}</td>
                         <td>{load.containerNumber || '—'}</td>
                         <td>{load.referenceNumber || '—'}</td>
