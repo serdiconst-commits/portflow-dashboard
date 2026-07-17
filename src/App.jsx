@@ -2505,6 +2505,7 @@ const [completedLoadDateFilter, setCompletedLoadDateFilter] = useState('today');
 const [completedLoadCustomDate, setCompletedLoadCustomDate] = useState(getTodayDate());
 const [completedLoadSearchTerm, setCompletedLoadSearchTerm] = useState('');
 const [selectedCompletedReviewLoadId, setSelectedCompletedReviewLoadId] = useState('');
+const [selectedCompletedDocumentType, setSelectedCompletedDocumentType] = useState('POD');
 const [mileageReportYear, setMileageReportYear] = useState(() => getTodayDate().slice(0, 4));
 const [fuelTransactions, setFuelTransactions] = useState([]);
 const [fuelSummary, setFuelSummary] = useState({
@@ -6088,6 +6089,26 @@ const handleAccountingDocumentUpload = async (e) => {
   } catch (error) {
     console.error('Billing document upload error:', error);
     alert(`Failed to upload billing documents: ${error.message}`);
+  } finally {
+    e.target.value = '';
+  }
+};
+
+const handleCompletedReviewDocumentUpload = async (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length || !selectedCompletedReviewLoad) return;
+
+  try {
+    await uploadDocumentsForLoad(
+      selectedCompletedReviewLoad.id,
+      files,
+      selectedCompletedDocumentType || 'Other'
+    );
+    setSelectedCompletedReviewLoadId(selectedCompletedReviewLoad.id);
+    await fetchLoads();
+  } catch (error) {
+    console.error('Completed load document upload error:', error);
+    alert(`Failed to upload completed-load documents: ${error.message}`);
   } finally {
     e.target.value = '';
   }
@@ -14216,9 +14237,48 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
               <div className="documents-box accounting-documents-box">
                 <div className="documents-header">
-                  <h4>Documents</h4>
-                  <span>{(selectedCompletedReviewLoad.documents || []).length} files</span>
+                  <h4>Documents / Paperwork</h4>
+                  <div className="documents-toolbar">
+                    <span>{(selectedCompletedReviewLoad.documents || []).length} files</span>
+                    <select
+                      value={selectedCompletedDocumentType}
+                      onChange={(e) => setSelectedCompletedDocumentType(e.target.value)}
+                      className="document-type-select"
+                    >
+                      {documentTypes.map((docType) => (
+                        <option key={docType} value={docType}>
+                          {docType}
+                        </option>
+                      ))}
+                    </select>
+                    <label className="upload-btn">
+                      Upload Files
+                      <input
+                        type="file"
+                        multiple
+                        onChange={handleCompletedReviewDocumentUpload}
+                        hidden
+                      />
+                    </label>
+                  </div>
                 </div>
+
+                <div className="checklist-grid">
+                  {checklistDocumentTypes.map((docType) => {
+                    const isUploaded = getChecklistStatus(selectedCompletedReviewLoad, docType);
+                    const uploadedDoc = (selectedCompletedReviewLoad.documents || []).find(
+                      (doc) => (doc.category || doc.type || '').toLowerCase() === docType.toLowerCase()
+                    );
+
+                    return (
+                      <div key={docType} className={`checklist-card ${isUploaded ? 'uploaded' : 'missing'}`}>
+                        <span>{docType}</span>
+                        <strong>{isUploaded ? `Uploaded (${uploadedDoc?.name || uploadedDoc?.fileName || ''})` : 'Missing'}</strong>
+                      </div>
+                    );
+                  })}
+                </div>
+
                 {selectedCompletedReviewLoad.documents?.length ? (
                   <div className="documents-list">
                     {selectedCompletedReviewLoad.documents.map((doc) => (
@@ -14233,6 +14293,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="document-actions">
                           <button type="button" className="secondary-btn compact-btn" onClick={() => handleOpenDocument(doc)}>
                             Open
+                          </button>
+                          <button type="button" className="secondary-btn compact-btn" onClick={() => handleDownloadDocument(doc)}>
+                            Download
+                          </button>
+                          <button type="button" className="secondary-btn compact-btn" onClick={() => handleDeleteDocument(doc.id)}>
+                            Remove
                           </button>
                         </div>
                       </div>
