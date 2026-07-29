@@ -456,7 +456,9 @@ droppedBy TEXT,
   customerExtraChargesJson TEXT,
   companyId TEXT,
   lastFreeDay TEXT,
-  carrierId TEXT
+  carrierId TEXT,
+  isDriverReleased INTEGER DEFAULT 1,
+  driverReleasedAt TEXT
 )
 `);
 
@@ -595,6 +597,18 @@ db.run(`ALTER TABLE loads ADD COLUMN billingStatus TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN carrierId TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding carrierId column:', err.message);
+  }
+});
+
+db.run(`ALTER TABLE loads ADD COLUMN isDriverReleased INTEGER DEFAULT 1`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding isDriverReleased column:', err.message);
+  }
+});
+
+db.run(`ALTER TABLE loads ADD COLUMN driverReleasedAt TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding driverReleasedAt column:', err.message);
   }
 });
 

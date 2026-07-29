@@ -1198,6 +1198,7 @@ const buildPortHoustonCredentialForm = (source = {}) => {
 const [activeView, setActiveView] = useState(
   isDriverApp || savedUser?.role === 'driver' ? 'driver' : getDefaultViewForRole(savedUser?.role)
 );
+const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
 const [loadsData, setLoadsData] = useState([]);
 const availableLoads = loadsData.filter(
@@ -4021,6 +4022,44 @@ useEffect(() => {
     return createBackendSettlement();
   };
 
+  const handleSaveSettlementNote = async () => {
+    if (!activeSettlementDriverId || !settlementStartDate || !settlementEndDate) {
+      setSettlementBackendStatus('Choose a driver and settlement week before saving the payroll note.');
+      return;
+    }
+
+    let settlement = activeBackendSettlement;
+    if (!settlement?.id) {
+      settlement = await createBackendSettlement();
+      if (!settlement?.id) return;
+    }
+
+    setSettlementBackendLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/driver-settlements/${settlement.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ notes: settlementNote }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to save payroll note');
+      }
+
+      setActiveBackendSettlement(data);
+      setSettlementNote(data.notes || data.statement?.settlement?.notes || '');
+      setSettlementBackendStatus('Payroll note saved. It will appear on the settlement PDF.');
+    } catch (error) {
+      console.error('Failed to save payroll note:', error);
+      setSettlementBackendStatus(`Failed to save payroll note: ${error.message}`);
+    } finally {
+      setSettlementBackendLoading(false);
+    }
+  };
+
   const handleCompleteBackendSettlement = async () => {
     if (!activeBackendSettlement?.id) return;
 
@@ -5705,11 +5744,15 @@ const handleQuickDriverChange = async (e) => {
   if (!selectedLoad) return;
 
 const newDriver = normalizeDriverForStorage(e.target.value);
+const driverChanged =
+  normalizeDriverForStorage(selectedLoad.driver) !== newDriver;
 
 const updatedLoad = {
   ...selectedLoad,
   driver: newDriver,
   truck: newDriver ? getDriverTruck(newDriver) : '',
+  isDriverReleased: driverChanged ? 0 : selectedLoad.isDriverReleased,
+  driverReleasedAt: driverChanged ? '' : selectedLoad.driverReleasedAt || '',
   status: getStatusAfterDriverAssignment(newDriver, selectedLoad.status),
   pickup:
     selectedLoad.status === 'Dropped'
@@ -5738,6 +5781,39 @@ const updatedLoad = {
     await fetchSelectedLoadAuditLogs(updatedLoad.id);
   } catch (error) {
     console.error('Failed to update driver:', error);
+  }
+};
+
+const handleDriverReleaseChange = async (load, released) => {
+  if (!load?.id) return;
+  if (released && !normalizeDriverForStorage(load.driver)) {
+    alert('Assign a driver before releasing this load.');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${load.id}/driver-release`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ released }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to update driver visibility');
+    }
+
+    setLoadsData((prevLoads) =>
+      prevLoads.map((currentLoad) => (currentLoad.id === data.id ? data : currentLoad))
+    );
+    setSelectedLoad((currentLoad) => (currentLoad?.id === data.id ? data : currentLoad));
+    setEditingLoad((currentLoad) => (currentLoad?.id === data.id ? data : currentLoad));
+    await fetchSelectedLoadAuditLogs(data.id);
+  } catch (error) {
+    console.error('Failed to update driver visibility:', error);
+    alert(`Failed to update driver visibility: ${error.message}`);
   }
 };
 const handleQuickStatusChange = async (e) => {
@@ -6662,7 +6738,11 @@ const handleChangeUserRole = async (userId, newRole) => {
             <div class="box"><span>Base Driver Pay</span><strong>${settlementTotals.driverShare}</strong></div>
             <div class="box"><span>Final Take Home Pay</span><strong>${settlementTotals.finalPayCheck}</strong></div>
           </div>
-          ${settlementNote ? `<div class="note"><strong>Payroll Note</strong><br>${settlementNote}</div>` : ''}
+          ${
+            settlementNote
+              ? `<div class="note"><strong>Payroll Note</strong><br>${escapeSettlementHtml(settlementNote).replace(/\n/g, '<br>')}</div>`
+              : ''
+          }
           <h2>Custom Deductions</h2>
           <table>
             <thead>
@@ -8625,8 +8705,9 @@ const viewFilteredLoadsData =
     ? (loadsData || []).filter((load) => {
         const status = String(load.status || '').trim().toLowerCase();
         const matchesDriver = driverMatchesCurrentUser(load.driver, currentUser);
+        const isReleased = Number(load.isDriverReleased ?? 1) === 1;
 
-        return matchesDriver && !['delivered', 'dropped'].includes(status);
+        return matchesDriver && isReleased && !['delivered', 'dropped'].includes(status);
       })
     : baseFilteredLoadsData;
 
@@ -10135,6 +10216,89 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 }
   return (
   <div className="app-shell">
+    <button
+      type="button"
+      className="sidebar-mobile-toggle"
+      onClick={() => setIsSidebarOpen((open) => !open)}
+      aria-label="Open navigation"
+      aria-expanded={isSidebarOpen}
+    >
+      <span />
+      <span />
+      <span />
+    </button>
+    {isSidebarOpen && (
+      <button
+        type="button"
+        className="sidebar-backdrop"
+        aria-label="Close navigation"
+        onClick={() => setIsSidebarOpen(false)}
+      />
+    )}
+    <aside className={`app-sidebar ${isSidebarOpen ? 'open' : ''}`}>
+      <div className="sidebar-brand">
+        {getCompanyLogoSrc() ? (
+          <img src={getCompanyLogoSrc()} alt={`${company?.name || 'PortFlow'} logo`} />
+        ) : (
+          <span className="sidebar-brand-mark">P</span>
+        )}
+        <div>
+          <strong>PortFlow</strong>
+          <small>{company?.name || 'Transportation'}</small>
+        </div>
+      </div>
+
+      <nav className="sidebar-nav" aria-label="Main navigation">
+        {[
+          ['dispatch', 'Dispatch Board'],
+          ['completed', 'Completed Loads'],
+          ['settlements', 'Driver Settlements'],
+          ['customers', 'Customers'],
+          ['drivers', 'Drivers'],
+          ['invoices', 'Invoices'],
+          ['accounting', 'Accounting'],
+          ['settings', 'Settings'],
+          ...(canManageTenants ? [['tenants', 'Tenant Management']] : []),
+        ].map(([view, label]) =>
+          roleCanAccessView(currentUser?.role, view) ? (
+            <button
+              type="button"
+              key={view}
+              className={activeView === view ? 'active' : ''}
+              onClick={() => {
+                setActiveView(view);
+                setIsSidebarOpen(false);
+              }}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="4" y="4" width="6" height="6" rx="1" />
+                <rect x="14" y="4" width="6" height="6" rx="1" />
+                <rect x="4" y="14" width="6" height="6" rx="1" />
+                <rect x="14" y="14" width="6" height="6" rx="1" />
+              </svg>
+              <span>{label}</span>
+            </button>
+          ) : null
+        )}
+      </nav>
+
+      <div className="sidebar-footer">
+        <div className="sidebar-user">
+          <span>{String(currentUser?.name || currentUser?.email || 'U').slice(0, 1).toUpperCase()}</span>
+          <div>
+            <strong>{currentUser?.name || 'PortFlow User'}</strong>
+            <small>{currentUser?.role || 'Dispatcher'}</small>
+          </div>
+        </div>
+        <button type="button" className="sidebar-logout" onClick={handleLogout}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10" />
+          </svg>
+          Logout
+        </button>
+      </div>
+    </aside>
+    <div className="app-main-shell">
      {fullAccessRoles.has(getNormalizedRole(currentUser?.role)) && (
      <div className="view-toggle portal-toggle">
       <button type="button" className="toggle-btn" onClick={() => setUserRole('driver')}>
@@ -10173,99 +10337,25 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 )}
       <header className="topbar">
         <div className="brand-block">
-          {getCompanyLogoSrc() && (
-            <img
-              src={getCompanyLogoSrc()}
-              alt={`${company?.name || 'Company'} logo`}
-              className="company-logo"
-            />
-          )}
           <div>
-          <h1>{company?.name || 'PortFlow Dispatch'}</h1>
+          <h1>{({
+            dispatch: 'Dispatch Board',
+            completed: 'Completed Loads',
+            settlements: 'Driver Settlements',
+            customers: 'Customers',
+            drivers: 'Drivers',
+            invoices: 'Invoices',
+            accounting: 'Accounting',
+            settings: 'Settings',
+            tenants: 'Tenant Management',
+          })[activeView] || 'PortFlow'}</h1>
           {isDemoMode && <span className="demo-mode-badge">Demo Mode - sample data only</span>}
-          <p>Dispatch • Settlements • Paperwork • Load Tracking</p>
+          <p>{company?.name || 'Transportation Management System'}</p>
         </div>
 
         </div>
 
         <div className="topbar-actions">
-          <div className="view-toggle">
-            {roleCanAccessView(currentUser?.role, 'dispatch') && (
-            <button
-              className={activeView === 'dispatch' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('dispatch')}
-            >
-              Dispatch Board
-            </button>
-            )}
-            {roleCanAccessView(currentUser?.role, 'completed') && (
-            <button
-              className={activeView === 'completed' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('completed')}
-            >
-              Completed Loads
-            </button>
-            )}
-            {roleCanAccessView(currentUser?.role, 'settlements') && (
-            <button
-              className={activeView === 'settlements' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('settlements')}
-            >
-              Driver Settlements
-            </button>
-            )}
-            {roleCanAccessView(currentUser?.role, 'customers') && (
-            <button
-              className={activeView === 'customers' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('customers')}
-            >
-              Customers
-            </button>
-            )}
-{roleCanAccessView(currentUser?.role, 'drivers') && (
-<button
-              className={activeView === 'drivers' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('drivers')}
-            >
-              Drivers
-            </button>
-)}
-
-{roleCanAccessView(currentUser?.role, 'settings') && (
-<button
-  className={activeView === 'settings' ? 'toggle-btn active' : 'toggle-btn'}
-  onClick={() => setActiveView('settings')}
->
-  Settings
-</button>
-)}
-
-            {roleCanAccessView(currentUser?.role, 'invoices') && (
-            <button
-              className={activeView === 'invoices' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('invoices')}
-            >
-              Invoices
-            </button>
-            )}
-            {roleCanAccessView(currentUser?.role, 'accounting') && (
-            <button
-              className={activeView === 'accounting' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('accounting')}
-            >
-              Accounting
-            </button>
-            )}
-            {canManageTenants && (
-              <button
-                className={activeView === 'tenants' ? 'toggle-btn active' : 'toggle-btn'}
-                onClick={() => setActiveView('tenants')}
-              >
-                Tenant Management
-              </button>
-            )}
-          </div>
-
           {activeView === 'dispatch' && (
             <button
   className="primary-btn"
@@ -10284,9 +10374,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   {showForm ? 'Close Form' : '+ Add New Load'}
 </button>
           )}
-          <button type="button" className="secondary-btn" onClick={handleLogout}>
-            Logout
-          </button>
         </div>
       </header>
 
@@ -11218,6 +11305,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </>
                 )}
               </div>
+              <div className="driver-release-legend" role="note">
+                <span><i className="release-dot pending" /> Pending release (dispatch only)</span>
+                <span><i className="release-dot released">✓</i> Released (visible to driver)</span>
+                <p>Selecting a driver keeps the load with dispatch until the release checkmark is clicked.</p>
+              </div>
               <DispatchBoard
                 filteredLoadsData={filteredLoadsData}
                 orderedDispatchLoadColumns={orderedDispatchLoadColumns}
@@ -11228,6 +11320,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 selectedLoad={selectedLoad}
                 setSelectedLoad={setSelectedLoad}
                 setIsEditing={setIsEditing}
+                onDriverReleaseChange={handleDriverReleaseChange}
+                getDriverLabel={getDriverLabel}
               />
 
               <div className="legacy-load-list-hidden" aria-hidden="true">
@@ -11763,6 +11857,39 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </option>
   ))}
 </select>
+                        </div>
+
+                        <div className="quick-driver-box driver-release-box">
+                          <label>Driver App Visibility</label>
+                          <button
+                            type="button"
+                            className={`driver-release-action ${Number(selectedLoad.isDriverReleased ?? 1) === 1 ? 'released' : 'pending'}`}
+                            disabled={!normalizeDriverForStorage(selectedLoad.driver)}
+                            onClick={() =>
+                              handleDriverReleaseChange(
+                                selectedLoad,
+                                Number(selectedLoad.isDriverReleased ?? 1) !== 1
+                              )
+                            }
+                          >
+                            <span className="driver-release-action-icon" aria-hidden="true">
+                              {Number(selectedLoad.isDriverReleased ?? 1) === 1 ? '✓' : ''}
+                            </span>
+                            <span>
+                              <strong>
+                                {Number(selectedLoad.isDriverReleased ?? 1) === 1
+                                  ? 'Released to driver'
+                                  : 'Release to driver'}
+                              </strong>
+                              <small>
+                                {Number(selectedLoad.isDriverReleased ?? 1) === 1
+                                  ? 'This load is visible in the driver app.'
+                                  : normalizeDriverForStorage(selectedLoad.driver)
+                                    ? 'Pending release — dispatch can still make changes.'
+                                    : 'Assign a driver first.'}
+                              </small>
+                            </span>
+                          </button>
                         </div>
 
                         <div className="quick-driver-box">
@@ -12494,10 +12621,24 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <span>Payroll Note</span>
               <textarea
                 rows="3"
-                placeholder="Internal note for this driver's settlement"
+                placeholder="Note shown on this driver's settlement PDF"
                 value={settlementNote}
                 onChange={(e) => setSettlementNote(e.target.value)}
               />
+              <button
+                type="button"
+                className="primary-btn settlement-note-save"
+                onClick={handleSaveSettlementNote}
+                disabled={
+                  settlementBackendLoading ||
+                  !activeSettlementDriverId ||
+                  !settlementStartDate ||
+                  !settlementEndDate
+                }
+              >
+                Save Payroll Note
+              </button>
+              <small>Saved notes appear on the printed settlement PDF.</small>
             </label>
 
             <div className="settlement-entry-meta">
@@ -12937,6 +13078,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 </button>
               </div>
             </div>
+
+            {(activeBackendSettlement.notes || activeBackendSettlement.statement?.settlement?.notes) && (
+              <div className="settlement-note-preview">
+                <span>Payroll Note — included on PDF</span>
+                <p>{activeBackendSettlement.notes || activeBackendSettlement.statement?.settlement?.notes}</p>
+              </div>
+            )}
 
             <div className="table-wrap">
               <table>
@@ -15813,6 +15961,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </div>
   </div>
 )}
+    </div>
     </div>
   );
 }

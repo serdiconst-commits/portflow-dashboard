@@ -8,6 +8,8 @@ export default function DispatchTableView({
   selectedLoad,
   setSelectedLoad,
   setIsEditing,
+  onDriverReleaseChange,
+  getDriverLabel,
 }) {
   return (
     <div className="dispatch-sheet-wrap">
@@ -15,6 +17,9 @@ export default function DispatchTableView({
         <table className="dispatch-load-sheet">
           <thead>
             <tr>
+              <th className="release-column">
+                <span>Release</span>
+              </th>
               {orderedDispatchLoadColumns.map((column) => (
                 <th
                   key={column.key}
@@ -42,6 +47,37 @@ export default function DispatchTableView({
                   setIsEditing(false);
                 }}
               >
+                <td className="release-column">
+                  <button
+                    type="button"
+                    className={`driver-release-check ${Number(load.isDriverReleased ?? 1) === 1 ? 'released' : 'pending'}`}
+                    aria-label={
+                      Number(load.isDriverReleased ?? 1) === 1
+                        ? `Return ${load.id} to dispatch-only`
+                        : `Release ${load.id} to ${getDriverLabel?.(load.driver) || 'driver'}`
+                    }
+                    title={
+                      load.driver
+                        ? Number(load.isDriverReleased ?? 1) === 1
+                          ? 'Released to driver — click to return to dispatch-only'
+                          : 'Pending release — click to make visible to driver'
+                        : 'Assign a driver before release'
+                    }
+                    disabled={!load.driver}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDriverReleaseChange?.(load, Number(load.isDriverReleased ?? 1) !== 1);
+                    }}
+                  >
+                    {Number(load.isDriverReleased ?? 1) === 1 ? (
+                      <svg viewBox="0 0 20 20" aria-hidden="true">
+                        <path d="m5 10.5 3 3L15.5 6" />
+                      </svg>
+                    ) : (
+                      <span aria-hidden="true" />
+                    )}
+                  </button>
+                </td>
                 {orderedDispatchLoadColumns.map((column) => (
                   <td key={`${load.id}-${column.key}`}>{column.render(load)}</td>
                 ))}
