@@ -46,3 +46,5 @@ services:
         value: "22"
       - key: JWT_SECRET
         generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
