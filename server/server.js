@@ -3567,7 +3567,9 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           customerExtraChargesJson = ?,
           lastFreeDay = ?,
           miles = ?,
-          billingStatus = ?
+          billingStatus = ?,
+          isDriverReleased = ?,
+          driverReleasedAt = ?
          WHERE id = ? AND companyId = ?`,
         [
           l.loadDate || '',
@@ -3612,6 +3614,12 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           body.lastFreeDay || '',
           parseNumericField(l.miles),
           l.billingStatus || existingLoad.billingStatus || '',
+          String(normalizedDriver || '').trim().toLowerCase() !== String(existingLoad.driver || '').trim().toLowerCase()
+            ? 0
+            : isTruthy(l.isDriverReleased ?? existingLoad.isDriverReleased) ? 1 : 0,
+          String(normalizedDriver || '').trim().toLowerCase() !== String(existingLoad.driver || '').trim().toLowerCase()
+            ? ''
+            : l.driverReleasedAt || existingLoad.driverReleasedAt || '',
           loadId,
           companyId,
         ],
@@ -3672,7 +3680,8 @@ app.get('/api/loads', authenticate, (req, res) => {
     db.all(
       `SELECT * FROM loads
        WHERE companyId = ?
-       AND TRIM(LOWER(driver)) = TRIM(LOWER(?))`,
+       AND TRIM(LOWER(driver)) = TRIM(LOWER(?))
+       AND COALESCE(isDriverReleased, 1) = 1`,
       [companyId, driverId],
       (err, rows) => {
       if (err) {
@@ -3708,6 +3717,74 @@ app.get('/api/loads', authenticate, (req, res) => {
 
         res.json(loadsWithDocuments);
       });
+    }
+  );
+});
+
+app.put('/api/loads/:id/driver-release', authenticate, (req, res) => {
+  const companyId = req.company.companyId;
+  const loadId = String(req.params.id || '').trim();
+  const role = String(req.user?.role || '').trim().toLowerCase();
+  const allowedRoles = new Set(['owner', 'admin', 'manager', 'dispatcher', 'carrier']);
+
+  if (!allowedRoles.has(role)) {
+    return res.status(403).json({ error: 'Only dispatch staff can release loads to drivers.' });
+  }
+
+  db.get(
+    `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
+    [loadId, companyId],
+    (findErr, existingLoad) => {
+      if (findErr) return res.status(500).json({ error: findErr.message });
+      if (!existingLoad) return res.status(404).json({ error: 'Load not found' });
+
+      const released = isTruthy(req.body?.released);
+      if (released && !String(existingLoad.driver || '').trim()) {
+        return res.status(400).json({ error: 'Assign a driver before releasing this load.' });
+      }
+
+      const driverReleasedAt = released ? new Date().toISOString() : '';
+      db.run(
+        `UPDATE loads
+         SET isDriverReleased = ?, driverReleasedAt = ?
+         WHERE id = ? AND companyId = ?`,
+        [released ? 1 : 0, driverReleasedAt, loadId, companyId],
+        function updateRelease(err) {
+          if (err) return res.status(500).json({ error: err.message });
+
+          db.get(
+            `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
+            [loadId, companyId],
+            (readErr, updatedLoad) => {
+              if (readErr) return res.status(500).json({ error: readErr.message });
+
+              writeAuditLog(req, {
+                action: released ? 'RELEASE_TO_DRIVER' : 'RETURN_TO_DISPATCH',
+                entityType: 'LOAD',
+                entityId: loadId,
+                entityLabel: loadId,
+                oldValue: {
+                  isDriverReleased: existingLoad.isDriverReleased,
+                  driverReleasedAt: existingLoad.driverReleasedAt || '',
+                },
+                newValue: { isDriverReleased: released ? 1 : 0, driverReleasedAt },
+                changedFields: {
+                  isDriverReleased: {
+                    oldValue: existingLoad.isDriverReleased,
+                    newValue: released ? 1 : 0,
+                  },
+                  driverReleasedAt: {
+                    oldValue: existingLoad.driverReleasedAt || '',
+                    newValue: driverReleasedAt,
+                  },
+                },
+              });
+
+              res.json(updatedLoad);
+            }
+          );
+        }
+      );
     }
   );
 });
@@ -4049,8 +4126,10 @@ dropDateTime,
               lastFreeDay,
               carrierId,
               miles,
-              billingStatus
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              billingStatus,
+              isDriverReleased,
+              driverReleasedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               generatedLoadId,
               l.loadDate || new Date().toISOString().slice(0, 10),
@@ -4095,7 +4174,9 @@ dropDateTime,
               l.lastFreeDay || '',
               l.carrierId || '',
               parseNumericField(l.miles),
-              l.billingStatus || ''
+              l.billingStatus || '',
+              0,
+              ''
             ],
             function (err) {
               if (err) {
