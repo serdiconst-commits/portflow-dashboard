@@ -1,3 +1,29 @@
+:root {
+  --pf-status-dispatched-border: #f59e0b;
+  --pf-status-dispatched-bg: #fef3c7;
+  --pf-status-dispatched-text: #92400e;
+
+  --pf-status-in-transit-border: #3b82f6;
+  --pf-status-in-transit-bg: #dbeafe;
+  --pf-status-in-transit-text: #1d4ed8;
+
+  --pf-status-dropped-border: #6366f1;
+  --pf-status-dropped-bg: #e0e7ff;
+  --pf-status-dropped-text: #3730a3;
+
+  --pf-status-delivered-border: #0d9488;
+  --pf-status-delivered-bg: #ccfbf1;
+  --pf-status-delivered-text: #0f766e;
+
+  --pf-status-available-border: #22c55e;
+  --pf-status-available-bg: #dcfce7;
+  --pf-status-available-text: #166534;
+
+  --pf-status-not-available-border: #ef4444;
+  --pf-status-not-available-bg: #fee2e2;
+  --pf-status-not-available-text: #991b1b;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1458,18 +1484,31 @@ button {
 .summary-card {
   background: white;
   border-radius: 14px;
-  padding: 20px;
+  padding: 16px 20px;
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
-.summary-card span {
-  color: #6b7280;
-  font-size: 14px;
+.summary-card:hover {
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
 }
 
-.summary-card h2 {
-  margin: 8px 0 0;
-  font-size: 28px;
+.summary-card h3 {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.summary-card p {
+  margin: 6px 0 0;
+  font-size: 26px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
 }
 
 .dashboard-grid {
@@ -1826,40 +1865,45 @@ button {
 }
 
 .sheet-status.dispatched {
-  background: #fef3c7;
-  color: #92400e;
-  border-color: #fde68a;
+  background: var(--pf-status-dispatched-bg);
+  color: var(--pf-status-dispatched-text);
+  border-color: var(--pf-status-dispatched-border);
 }
 
 .sheet-status.available {
-  background: #dcfce7;
-  color: #166534;
-  border-color: #bbf7d0;
+  background: var(--pf-status-available-bg);
+  color: var(--pf-status-available-text);
+  border-color: var(--pf-status-available-border);
 }
 
 .sheet-status.not-available {
-  background: #fee2e2;
-  color: #991b1b;
-  border-color: #fecaca;
+  background: var(--pf-status-not-available-bg);
+  color: var(--pf-status-not-available-text);
+  border-color: var(--pf-status-not-available-border);
 }
 
 .sheet-status.in-transit {
-  background: #dbeafe;
-  color: #1d4ed8;
-  border-color: #bfdbfe;
+  background: var(--pf-status-in-transit-bg);
+  color: var(--pf-status-in-transit-text);
+  border-color: var(--pf-status-in-transit-border);
 }
 
 .sheet-status.dropped {
-  background: #e0e7ff;
-  color: #3730a3;
-  border-color: #c7d2fe;
+  background: var(--pf-status-dropped-bg);
+  color: var(--pf-status-dropped-text);
+  border-color: var(--pf-status-dropped-border);
 }
 
-.sheet-status.delivered,
+.sheet-status.delivered {
+  background: var(--pf-status-delivered-bg);
+  color: var(--pf-status-delivered-text);
+  border-color: var(--pf-status-delivered-border);
+}
+
 .sheet-paperwork.complete {
-  background: #dcfce7;
-  color: #166534;
-  border-color: #bbf7d0;
+  background: var(--pf-status-available-bg);
+  color: var(--pf-status-available-text);
+  border-color: var(--pf-status-available-border);
 }
 
 .sheet-paperwork.partial {
@@ -4131,23 +4175,27 @@ button:disabled {
   transform: translateY(-1px);
 }
 .card-available {
-  border-left: 5px solid #22c55e;
+  border-left: 5px solid var(--pf-status-available-border);
 }
 
 .card-not-available {
-  border-left: 5px solid #ef4444;
+  border-left: 5px solid var(--pf-status-not-available-border);
 }
 
 .card-in-transit {
-  border-left: 5px solid #eab308;
+  border-left: 5px solid var(--pf-status-in-transit-border);
 }
 
 .card-dispatched {
-  border-left: 5px solid #3b82f6;
+  border-left: 5px solid var(--pf-status-dispatched-border);
+}
+
+.card-dropped {
+  border-left: 5px solid var(--pf-status-dropped-border);
 }
 
 .card-delivered {
-  border-left: 5px solid #8b5cf6;
+  border-left: 5px solid var(--pf-status-delivered-border);
 }
 
 .card-lfd {

@@ -9,6 +9,8 @@ import {
 } from '@capgo/capacitor-document-scanner';
 // 'dispatcher' | 'driver'
 import './App.css';
+import DispatchBoard from './components/DispatchBoard/DispatchBoard.jsx';
+import StatusBadge from './components/DispatchBoard/StatusBadge.jsx';
 
 export default function App() {
 const rawApiBase = import.meta.env.VITE_API_BASE || '';
@@ -8755,14 +8757,7 @@ const dispatchLoadColumnsByKey = {
   },
   status: {
     label: 'Status',
-    render: (load) => {
-      const displayStatus = getLoadQuickStatus(load);
-      return (
-        <span className={`sheet-status ${String(displayStatus || '').toLowerCase().replace(/\s/g, '-')}`}>
-          {displayStatus || '-'}
-        </span>
-      );
-    },
+    render: (load) => <StatusBadge status={getLoadQuickStatus(load)} />,
   },
   referenceNumber: {
     label: 'Ref #',
@@ -11223,51 +11218,17 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </>
                 )}
               </div>
-              <div className="dispatch-sheet-wrap">
-                {filteredLoadsData.length > 0 ? (
-                  <table className="dispatch-load-sheet">
-                    <thead>
-                      <tr>
-                        {orderedDispatchLoadColumns.map((column) => (
-                          <th
-                            key={column.key}
-                            draggable
-                            className={draggedDispatchColumn === column.key ? 'dragging-column' : ''}
-                            onDragStart={(event) => handleDispatchColumnDragStart(event, column.key)}
-                            onDragEnd={() => setDraggedDispatchColumn('')}
-                            onDragOver={(event) => event.preventDefault()}
-                            onDrop={(event) => handleDispatchColumnDrop(event, column.key)}
-                            title="Drag to move this column"
-                          >
-                            <span className="column-drag-handle" aria-hidden="true">::</span>
-                            {column.label}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredLoadsData.map((load) => (
-                        <tr
-                          key={load.id}
-                          className={selectedLoad?.id === load.id ? 'selected' : ''}
-                          onClick={() => {
-                            setSelectedLoad(load);
-                            setIsEditing(false);
-                          }}
-                        >
-                          {orderedDispatchLoadColumns.map((column) => (
-                            <td key={`${load.id}-${column.key}`}>{column.render(load)}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="empty-state">
-                    <p>No loads found with those filters.</p>
-                  </div>
-                )}
-              </div>
+              <DispatchBoard
+                filteredLoadsData={filteredLoadsData}
+                orderedDispatchLoadColumns={orderedDispatchLoadColumns}
+                draggedDispatchColumn={draggedDispatchColumn}
+                handleDispatchColumnDragStart={handleDispatchColumnDragStart}
+                setDraggedDispatchColumn={setDraggedDispatchColumn}
+                handleDispatchColumnDrop={handleDispatchColumnDrop}
+                selectedLoad={selectedLoad}
+                setSelectedLoad={setSelectedLoad}
+                setIsEditing={setIsEditing}
+              />
 
               <div className="legacy-load-list-hidden" aria-hidden="true">
                 {filteredLoadsData.length > 0 ? (
