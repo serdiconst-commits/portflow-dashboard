@@ -1144,7 +1144,7 @@ const [dashboardFilter, setDashboardFilter] = useState('all');
 const [appointmentDateFilter, setAppointmentDateFilter] = useState('today');
 const [appointmentDeliveryTypeFilter, setAppointmentDeliveryTypeFilter] = useState('all');
 const [customAppointmentDate, setCustomAppointmentDate] = useState(getTodayDate());
-const [availableAppointmentDateFilter, setAvailableAppointmentDateFilter] = useState('today');
+const [availableAppointmentDateFilter, setAvailableAppointmentDateFilter] = useState('all');
 const [availableDeliveryTypeFilter, setAvailableDeliveryTypeFilter] = useState('all');
 const [availableCustomAppointmentDate, setAvailableCustomAppointmentDate] = useState(getTodayDate());
 const [lfdDateFilter, setLfdDateFilter] = useState('all');
@@ -4551,7 +4551,7 @@ const matchesAppointmentDateFilter = (load) => {
 };
 const matchesAvailableAppointmentDateFilter = (load) => {
   const targetDate = getAvailableAppointmentFilterDate();
-  if (!targetDate) return hasAppointment(load);
+  if (!targetDate) return true;
   return getLoadAppointmentDate(load) === targetDate;
 };
 const matchesLfdDateFilter = (load) => {
@@ -11623,7 +11623,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           {dashboardFilter === 'available' && (
             <section className="appointment-filter-panel">
               <div>
-                <span>Available By Appointment</span>
+                <span>Available Loads</span>
                 <strong>{filteredLoadsData.length} loads</strong>
               </div>
               <select
@@ -11631,7 +11631,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onChange={(e) => setAvailableAppointmentDateFilter(e.target.value)}
                 className="filter-select"
               >
-                <option value="all">All Loads</option>
+                <option value="all">All Available Loads</option>
                 <option value="today">Today</option>
                 <option value="tomorrow">Tomorrow</option>
                 <option value="custom">Custom</option>
