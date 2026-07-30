@@ -929,6 +929,18 @@ state: '',
 zip: '',
   };
 
+  const emptyConsigneeLocation = {
+    id: '',
+    customerId: '',
+    name: '',
+    type: 'delivery',
+    address: '',
+    city: '',
+    state: '',
+    zip: '',
+    notes: '',
+  };
+
 const getDemoData = () => {
   const today = getDateStringInAppTimeZone();
   const tomorrow = getDateStringWithOffsetInAppTimeZone(1);
@@ -1301,6 +1313,11 @@ const [customers, setCustomers] = useState([]);
 const [customerForm, setCustomerForm] = useState(emptyCustomer);
 const [showCustomerEditor, setShowCustomerEditor] = useState(false);
 const [editingCustomerId, setEditingCustomerId] = useState(null);
+const [consigneeLocationForm, setConsigneeLocationForm] = useState(emptyConsigneeLocation);
+const [editingConsigneeLocationId, setEditingConsigneeLocationId] = useState('');
+const [consigneeLocationTypeFilter, setConsigneeLocationTypeFilter] = useState('all');
+const [consigneeLocationSaving, setConsigneeLocationSaving] = useState(false);
+const [consigneeLocationStatus, setConsigneeLocationStatus] = useState('');
 const fileInputRef = useRef(null);
 const [previewDocument, setPreviewDocument] = useState(null);
 const [previewUrl, setPreviewUrl] = useState('');
@@ -6482,6 +6499,96 @@ const handleDeleteCustomer = async (customerId) => {
     alert(`Failed to delete customer: ${error.message}`);
   }
 };
+
+const resetConsigneeLocationForm = (type = 'delivery', customerId = '') => {
+  setConsigneeLocationForm({
+    ...emptyConsigneeLocation,
+    type,
+    customerId,
+  });
+  setEditingConsigneeLocationId('');
+  setConsigneeLocationStatus('');
+};
+
+const handleConsigneeLocationFormChange = (event) => {
+  const { name, value } = event.target;
+  setConsigneeLocationForm((prev) => ({ ...prev, [name]: value }));
+  setConsigneeLocationStatus('');
+};
+
+const handleEditConsigneeLocation = (location) => {
+  setEditingConsigneeLocationId(location.id);
+  setConsigneeLocationForm({
+    ...emptyConsigneeLocation,
+    ...location,
+    type: ['pickup', 'delivery', 'return'].includes(location.type)
+      ? location.type
+      : 'delivery',
+  });
+  setConsigneeLocationStatus('');
+};
+
+const handleSaveConsigneeLocation = async (event) => {
+  event.preventDefault();
+  const isEditingLocation = Boolean(editingConsigneeLocationId);
+  const payload = {
+    ...consigneeLocationForm,
+    name: String(consigneeLocationForm.name || '').trim(),
+    address: String(consigneeLocationForm.address || '').trim(),
+    city: String(consigneeLocationForm.city || '').trim(),
+    state: String(consigneeLocationForm.state || '').trim(),
+    zip: String(consigneeLocationForm.zip || '').trim(),
+    notes: String(consigneeLocationForm.notes || '').trim(),
+  };
+
+  setConsigneeLocationSaving(true);
+  setConsigneeLocationStatus('');
+  try {
+    const res = await fetch(
+      isEditingLocation
+        ? `${API_BASE}/api/locations/${encodeURIComponent(editingConsigneeLocationId)}`
+        : `${API_BASE}/api/locations`,
+      {
+        method: isEditingLocation ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save consignee location');
+    }
+
+    await fetchLocations();
+    setConsigneeLocationForm({
+      ...emptyConsigneeLocation,
+      type: payload.type,
+      customerId: payload.customerId,
+    });
+    setEditingConsigneeLocationId('');
+    setConsigneeLocationStatus(
+      isEditingLocation
+        ? 'Location updated. The change is available in Create Load.'
+        : 'Location added. It is now available in Create Load.'
+    );
+  } catch (error) {
+    console.error('Failed to save consignee location:', error);
+    setConsigneeLocationStatus(`Failed: ${error.message}`);
+  } finally {
+    setConsigneeLocationSaving(false);
+  }
+};
+
+const handleDeleteConsigneeLocation = async (locationId) => {
+  await handleDeleteLocation(locationId);
+  if (editingConsigneeLocationId === locationId) {
+    resetConsigneeLocationForm();
+  }
+};
+
 const handleSaveDriver = async (e) => {
   if (e) e.preventDefault();
 
@@ -8075,6 +8182,28 @@ const returnLocations = Array.isArray(locations)
         loc.type === 'warehouse'
     )
   : [];
+
+const customerNameById = useMemo(
+  () => new Map(customers.map((customer) => [customer.id, customer.name])),
+  [customers]
+);
+
+const managedConsigneeLocations = useMemo(() => {
+  const supportedTypes = new Set(['pickup', 'delivery', 'return']);
+  return locations
+    .filter((location) => supportedTypes.has(String(location.type || '').toLowerCase()))
+    .filter(
+      (location) =>
+        consigneeLocationTypeFilter === 'all' ||
+        String(location.type || '').toLowerCase() === consigneeLocationTypeFilter
+    )
+    .toSorted((a, b) => {
+      const customerCompare = String(customerNameById.get(a.customerId) || '').localeCompare(
+        String(customerNameById.get(b.customerId) || '')
+      );
+      return customerCompare || String(a.name || '').localeCompare(String(b.name || ''));
+    });
+}, [locations, consigneeLocationTypeFilter, customerNameById]);
 
 const normalizeLocationText = (value = '') =>
   String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -13750,6 +13879,20 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       <button className="secondary-btn" onClick={() => handleEditCustomer(customer)}>
                         Edit
                       </button>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => {
+                          resetConsigneeLocationForm('delivery', customer.id);
+                          window.requestAnimationFrame(() => {
+                            document
+                              .getElementById('consignee-locations-panel')
+                              ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          });
+                        }}
+                      >
+                        Add Location
+                      </button>
                       <button className="danger-btn" onClick={() => handleDeleteCustomer(customer.id)}>
                         Delete
                       </button>
@@ -13761,6 +13904,236 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <p>No customers saved yet.</p>
                 </div>
               )}
+            </div>
+          </section>
+
+          <section id="consignee-locations-panel" className="panel consignee-locations-panel">
+            <div className="panel-header consignee-locations-header">
+              <div>
+                <h3>Consignees & Locations</h3>
+                <p className="panel-subtitle">
+                  Manage pickup, delivery, and return locations here. Every saved location is
+                  automatically available when creating a load.
+                </p>
+              </div>
+              <div className="consignee-quick-actions" aria-label="Add consignee location">
+                {[
+                  ['pickup', 'New Pickup'],
+                  ['delivery', 'New Delivery'],
+                  ['return', 'New Return'],
+                ].map(([type, label]) => (
+                  <button
+                    key={type}
+                    type="button"
+                    className={`secondary-btn compact-btn ${consigneeLocationForm.type === type && !editingConsigneeLocationId ? 'active' : ''}`}
+                    onClick={() => resetConsigneeLocationForm(type)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="consignee-locations-layout">
+              <form className="consignee-location-form" onSubmit={handleSaveConsigneeLocation}>
+                <div className="consignee-form-heading">
+                  <div>
+                    <span className={`location-type-badge type-${consigneeLocationForm.type}`}>
+                      {consigneeLocationForm.type}
+                    </span>
+                    <h4>
+                      {editingConsigneeLocationId
+                        ? 'Edit Consignee Location'
+                        : `Add ${consigneeLocationForm.type} location`}
+                    </h4>
+                  </div>
+                  {editingConsigneeLocationId && (
+                    <button
+                      type="button"
+                      className="secondary-btn compact-btn"
+                      onClick={() => resetConsigneeLocationForm()}
+                    >
+                      Cancel Edit
+                    </button>
+                  )}
+                </div>
+
+                <label>
+                  <span>Customer</span>
+                  <select
+                    name="customerId"
+                    value={consigneeLocationForm.customerId}
+                    onChange={handleConsigneeLocationFormChange}
+                  >
+                    <option value="">General / All Customers</option>
+                    {customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <span>Location Type</span>
+                  <select
+                    name="type"
+                    value={consigneeLocationForm.type}
+                    onChange={handleConsigneeLocationFormChange}
+                  >
+                    <option value="pickup">Pickup</option>
+                    <option value="delivery">Delivery</option>
+                    <option value="return">Return</option>
+                  </select>
+                </label>
+
+                <label className="consignee-form-wide">
+                  <span>Consignee / Location Name</span>
+                  <input
+                    type="text"
+                    name="name"
+                    value={consigneeLocationForm.name}
+                    onChange={handleConsigneeLocationFormChange}
+                    placeholder="Example: ABC Warehouse"
+                    required
+                  />
+                </label>
+
+                <label className="consignee-form-wide">
+                  <span>Street Address</span>
+                  <input
+                    type="text"
+                    name="address"
+                    value={consigneeLocationForm.address}
+                    onChange={handleConsigneeLocationFormChange}
+                    placeholder="Street address"
+                    required
+                  />
+                </label>
+
+                <label>
+                  <span>City</span>
+                  <input
+                    type="text"
+                    name="city"
+                    value={consigneeLocationForm.city}
+                    onChange={handleConsigneeLocationFormChange}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>State</span>
+                  <input
+                    type="text"
+                    name="state"
+                    value={consigneeLocationForm.state}
+                    onChange={handleConsigneeLocationFormChange}
+                    maxLength="2"
+                    placeholder="TX"
+                    required
+                  />
+                </label>
+                <label>
+                  <span>ZIP</span>
+                  <input
+                    type="text"
+                    name="zip"
+                    value={consigneeLocationForm.zip}
+                    onChange={handleConsigneeLocationFormChange}
+                    placeholder="ZIP code"
+                  />
+                </label>
+                <label className="consignee-form-wide">
+                  <span>Location Notes</span>
+                  <textarea
+                    name="notes"
+                    value={consigneeLocationForm.notes}
+                    onChange={handleConsigneeLocationFormChange}
+                    rows="3"
+                    placeholder="Gate instructions, receiving hours, contact details..."
+                  />
+                </label>
+
+                <div className="consignee-form-actions">
+                  <button
+                    type="submit"
+                    className="primary-btn"
+                    disabled={consigneeLocationSaving}
+                  >
+                    {consigneeLocationSaving
+                      ? 'Saving...'
+                      : editingConsigneeLocationId
+                        ? 'Save Location Changes'
+                        : 'Add Location'}
+                  </button>
+                  {consigneeLocationStatus && (
+                    <span className={consigneeLocationStatus.startsWith('Failed') ? 'error' : ''}>
+                      {consigneeLocationStatus}
+                    </span>
+                  )}
+                </div>
+              </form>
+
+              <div className="consignee-location-library">
+                <div className="consignee-library-toolbar">
+                  <div>
+                    <h4>Saved Consignee Locations</h4>
+                    <span>{managedConsigneeLocations.length} shown</span>
+                  </div>
+                  <select
+                    value={consigneeLocationTypeFilter}
+                    onChange={(event) => setConsigneeLocationTypeFilter(event.target.value)}
+                    aria-label="Filter consignee locations by type"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="pickup">Pickup</option>
+                    <option value="delivery">Delivery</option>
+                    <option value="return">Return</option>
+                  </select>
+                </div>
+
+                {managedConsigneeLocations.length > 0 ? (
+                  <div className="consignee-location-list">
+                    {managedConsigneeLocations.map((location) => (
+                      <article key={location.id} className="consignee-location-card">
+                        <div className="consignee-location-card-main">
+                          <div>
+                            <span className={`location-type-badge type-${location.type}`}>
+                              {location.type}
+                            </span>
+                            <h5>{location.name || 'Unnamed location'}</h5>
+                          </div>
+                          <small>
+                            {customerNameById.get(location.customerId) || 'General / All Customers'}
+                          </small>
+                          <p>{formatLocationAddress(location)}</p>
+                          {location.notes && <p className="consignee-location-notes">{location.notes}</p>}
+                        </div>
+                        <div className="consignee-location-card-actions">
+                          <button
+                            type="button"
+                            className="secondary-btn compact-btn"
+                            onClick={() => handleEditConsigneeLocation(location)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="danger-btn compact-btn"
+                            onClick={() => handleDeleteConsigneeLocation(location.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <p>No consignee locations match this type yet.</p>
+                  </div>
+                )}
+              </div>
             </div>
           </section>
         </div>
