@@ -12,6 +12,70 @@ import './App.css';
 import DispatchBoard from './components/DispatchBoard/DispatchBoard.jsx';
 import StatusBadge from './components/DispatchBoard/StatusBadge.jsx';
 
+function LoadLocationEditor({
+  editorId,
+  title = 'Edit Load Locations',
+  draft,
+  pickupOptions = [],
+  deliveryOptions = [],
+  returnOptions = [],
+  saving = false,
+  status = '',
+  onChange,
+  onSave,
+  onCancel,
+}) {
+  const lists = [
+    ['pickup', `${editorId}-pickup-options`, 'Pickup Location', pickupOptions, true],
+    ['delivery', `${editorId}-delivery-options`, 'Delivery Location', deliveryOptions, true],
+    ['returnLocation', `${editorId}-return-options`, 'Return Location', returnOptions, false],
+  ];
+
+  return (
+    <section className="load-location-editor" aria-label={title}>
+      <div className="load-location-editor-header">
+        <div>
+          <h4>{title}</h4>
+          <p>Choose a saved location or type a full address.</p>
+        </div>
+        <button type="button" className="secondary-btn compact-btn" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+
+      <div className="load-location-editor-grid">
+        {lists.map(([field, listId, label, options, required]) => (
+          <label key={field}>
+            <span>{label}</span>
+            <input
+              type="text"
+              list={listId}
+              value={draft[field] || ''}
+              onChange={(event) => onChange(field, event.target.value)}
+              placeholder={`Enter ${label.toLowerCase()}`}
+              required={required}
+            />
+            <datalist id={listId}>
+              {options.map((option) => (
+                <option key={option.id || option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </datalist>
+          </label>
+        ))}
+      </div>
+
+      <div className="load-location-editor-actions">
+        <button type="button" className="primary-btn compact-btn" onClick={onSave} disabled={saving}>
+          {saving ? 'Saving Locations...' : 'Save Locations'}
+        </button>
+        {status && <span className={status.startsWith('Failed') ? 'error' : ''}>{status}</span>}
+      </div>
+    </section>
+  );
+}
+
 export default function App() {
 const rawApiBase = import.meta.env.VITE_API_BASE || '';
 const API_BASE = (() => {
@@ -84,6 +148,7 @@ const [driverForm, setDriverForm] = useState({
   truck: '',
   isActive: true,
 });
+const [editingDriverId, setEditingDriverId] = useState('');
 
 const emptyStaffForm = {
   name: '',
@@ -1243,6 +1308,15 @@ const [previewUrl, setPreviewUrl] = useState('');
 const [showForm, setShowForm] = useState(false);
 const [isEditing, setIsEditing] = useState(false);
 const [showLocationEditor, setShowLocationEditor] = useState(false);
+const [loadLocationEditor, setLoadLocationEditor] = useState({
+  loadId: '',
+  context: '',
+  pickup: '',
+  delivery: '',
+  returnLocation: '',
+  saving: false,
+  status: '',
+});
 
 const sigCanvas = useRef(null);
 const [signatures, setSignatures] = useState({});
@@ -6412,14 +6486,19 @@ const handleSaveDriver = async (e) => {
   if (e) e.preventDefault();
 
   try {
-    const res = await fetch(`${API_BASE}/api/drivers`, {
-      method: 'POST',
+    const res = await fetch(
+      editingDriverId
+        ? `${API_BASE}/api/drivers/${encodeURIComponent(editingDriverId)}`
+        : `${API_BASE}/api/drivers`,
+      {
+      method: editingDriverId ? 'PUT' : 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
       },
       body: JSON.stringify(driverForm),
-    });
+      }
+    );
 
     const data = await res.json();
 
@@ -6436,7 +6515,7 @@ const handleSaveDriver = async (e) => {
       });
     }
 
-    alert('Driver created successfully');
+    alert(editingDriverId ? 'Driver updated successfully' : 'Driver created successfully');
     await fetchDrivers();
     await fetchAllUsers();
 
@@ -6449,10 +6528,37 @@ const handleSaveDriver = async (e) => {
       truck: '',
       isActive: true,
     });
+    setEditingDriverId('');
   } catch (error) {
     console.error('Failed to save driver:', error);
     alert(`Failed to save driver: ${error.message}`);
   }
+};
+
+const handleEditDriver = (driver) => {
+  setEditingDriverId(driver.id);
+  setDriverForm({
+    id: driver.id || '',
+    name: driver.name || '',
+    email: driver.email || '',
+    password: '',
+    phone: driver.phone || '',
+    truck: driver.truck || '',
+    isActive: Boolean(driver.isActive),
+  });
+};
+
+const handleCancelDriverEdit = () => {
+  setEditingDriverId('');
+  setDriverForm({
+    id: '',
+    name: '',
+    email: '',
+    password: '',
+    phone: '',
+    truck: '',
+    isActive: true,
+  });
 };
 
 const handleSaveStaffUser = async (e) => {
@@ -8285,6 +8391,167 @@ const handleSaveNewDeliveryLocation = async () => {
     alert(error.message);
   }
 };
+
+const handleSaveNewReturnLocation = async () => {
+  try {
+    const payload = {
+      ...newReturnLocation,
+      customerId: newLoad.customerId || '',
+      type: 'return',
+    };
+    const res = await fetch(`${API_BASE}/api/locations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save return location');
+    }
+
+    const savedLocation = {
+      ...payload,
+      id: data.id,
+      companyId: company?.id || currentUser?.companyId || '',
+    };
+    const fullAddress = formatLocationAddress(savedLocation);
+    setLocations((prev) => [...prev.filter((location) => location.id !== savedLocation.id), savedLocation]);
+    setNewLoad((prev) => ({ ...prev, returnLocation: fullAddress }));
+    setNewReturnLocation({
+      name: '',
+      address: '',
+      city: '',
+      state: '',
+      zip: '',
+      type: 'return',
+      customerId: '',
+      notes: '',
+    });
+    setShowNewReturnForm(false);
+  } catch (error) {
+    console.error('Error saving return location:', error);
+    if (handleAuthError(error.message)) return;
+    alert(error.message);
+  }
+};
+
+const getLocationEditorOptions = (options = []) =>
+  options.map((location) => ({
+    id: location.id,
+    value: formatLocationAddress(location),
+    label: getLocationOptionLabel(location),
+  }));
+
+const openLoadLocationEditor = (load, context) => {
+  if (!load?.id) return;
+  setLoadLocationEditor({
+    loadId: load.id,
+    context,
+    pickup: load.pickup || '',
+    delivery: load.delivery || '',
+    returnLocation: load.returnLocation || '',
+    saving: false,
+    status: '',
+  });
+};
+
+const closeLoadLocationEditor = () => {
+  setLoadLocationEditor({
+    loadId: '',
+    context: '',
+    pickup: '',
+    delivery: '',
+    returnLocation: '',
+    saving: false,
+    status: '',
+  });
+};
+
+const handleLoadLocationEditorChange = (field, value) => {
+  setLoadLocationEditor((prev) => ({
+    ...prev,
+    [field]: value,
+    status: '',
+  }));
+};
+
+const handleSaveLoadLocations = async () => {
+  const pickup = String(loadLocationEditor.pickup || '').trim();
+  const delivery = String(loadLocationEditor.delivery || '').trim();
+  const returnLocation = String(loadLocationEditor.returnLocation || '').trim();
+
+  if (!pickup || !delivery) {
+    setLoadLocationEditor((prev) => ({
+      ...prev,
+      status: 'Failed: pickup and delivery are required.',
+    }));
+    return;
+  }
+
+  setLoadLocationEditor((prev) => ({ ...prev, saving: true, status: '' }));
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/loads/${encodeURIComponent(loadLocationEditor.loadId)}/locations`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ pickup, delivery, returnLocation }),
+      }
+    );
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save load locations');
+    }
+
+    const mergeUpdatedLoad = (load) =>
+      load.id === data.id ? { ...load, ...data, documents: load.documents || [] } : load;
+    setLoadsData((prev) => prev.map(mergeUpdatedLoad));
+    setSelectedLoad((prev) => (prev?.id === data.id ? { ...prev, ...data } : prev));
+    setEditingLoad((prev) => (prev?.id === data.id ? { ...prev, ...data } : prev));
+
+    if (currentUser?.role !== 'driver') {
+      await Promise.all([
+        saveLocationIfNotExists(pickup, 'pickup'),
+        saveLocationIfNotExists(delivery, 'delivery'),
+        returnLocation ? saveLocationIfNotExists(returnLocation, 'return') : Promise.resolve(),
+      ]);
+      await fetchSelectedLoadAuditLogs(data.id);
+    }
+
+    closeLoadLocationEditor();
+  } catch (error) {
+    console.error('Failed to save load locations:', error);
+    setLoadLocationEditor((prev) => ({
+      ...prev,
+      saving: false,
+      status: `Failed: ${error.message}`,
+    }));
+  }
+};
+
+const renderLoadLocationEditor = (load, context, title) =>
+  loadLocationEditor.loadId === load?.id && loadLocationEditor.context === context ? (
+    <LoadLocationEditor
+      editorId={`${context}-${load.id}`}
+      title={title}
+      draft={loadLocationEditor}
+      pickupOptions={getLocationEditorOptions(pickupLocations)}
+      deliveryOptions={getLocationEditorOptions(deliveryLocations)}
+      returnOptions={getLocationEditorOptions(returnLocations)}
+      saving={loadLocationEditor.saving}
+      status={loadLocationEditor.status}
+      onChange={handleLoadLocationEditorChange}
+      onSave={handleSaveLoadLocations}
+      onCancel={closeLoadLocationEditor}
+    />
+  ) : null;
+
 const handleSelectSavedLocationForSelectedLoad = (field, locationId) => {
   const selected = locations.find((loc) => loc.id === locationId);
   if (!selected) return;
@@ -9305,10 +9572,21 @@ const DriverLoadCard = ({ load }) => {
           <span className="driver-card-kicker">Load {load.id}</span>
           <h3>{load.referenceNumber || load.poNumber || load.bookingNumber || 'No reference'}</h3>
         </div>
-        <span className={`driver-status-pill status-${getDriverStatusClass(load.status)}`}>
-          {load.status || 'Assigned'}
-        </span>
+        <div className="driver-load-card-actions">
+          <span className={`driver-status-pill status-${getDriverStatusClass(load.status)}`}>
+            {load.status || 'Assigned'}
+          </span>
+          <button
+            type="button"
+            className="driver-location-edit-btn"
+            onClick={() => openLoadLocationEditor(load, 'driver')}
+          >
+            Edit Locations
+          </button>
+        </div>
       </div>
+
+      {renderLoadLocationEditor(load, 'driver', 'Edit Pickup, Delivery & Return')}
 
       <div className="driver-info-grid">
         <div className="driver-info-item wide">
@@ -10989,6 +11267,64 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   emptyText: 'No return locations found.',
 })}
 
+<div className="inline-action-row location-action-row">
+  <button
+    type="button"
+    className="secondary-btn compact-btn"
+    onClick={() => setShowNewReturnForm((prev) => !prev)}
+  >
+    {showNewReturnForm ? 'Cancel New Return' : '+ New Return Location'}
+  </button>
+</div>
+
+{showNewReturnForm && (
+  <div className="new-location-form">
+    <input
+      type="text"
+      placeholder="Return Location Name"
+      value={newReturnLocation.name}
+      onChange={(event) =>
+        setNewReturnLocation((prev) => ({ ...prev, name: event.target.value }))
+      }
+    />
+    <input
+      type="text"
+      placeholder="Street Address"
+      value={newReturnLocation.address}
+      onChange={(event) =>
+        setNewReturnLocation((prev) => ({ ...prev, address: event.target.value }))
+      }
+    />
+    <input
+      type="text"
+      placeholder="City"
+      value={newReturnLocation.city}
+      onChange={(event) =>
+        setNewReturnLocation((prev) => ({ ...prev, city: event.target.value }))
+      }
+    />
+    <input
+      type="text"
+      placeholder="State"
+      value={newReturnLocation.state}
+      onChange={(event) =>
+        setNewReturnLocation((prev) => ({ ...prev, state: event.target.value }))
+      }
+    />
+    <input
+      type="text"
+      placeholder="ZIP"
+      value={newReturnLocation.zip}
+      onChange={(event) =>
+        setNewReturnLocation((prev) => ({ ...prev, zip: event.target.value }))
+      }
+    />
+    <button type="button" className="primary-btn compact-btn" onClick={handleSaveNewReturnLocation}>
+      Save Return Location
+    </button>
+  </div>
+)}
+
 <div className="form-group">
   <label>Route Miles</label>
   <div className="inline-action-row">
@@ -11612,6 +11948,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       ) : (
                         <>
                           <button type="button" className="secondary-btn" onClick={handleEditClick}>Edit Load</button>
+                          <button
+                            type="button"
+                            className="secondary-btn"
+                            onClick={() => openLoadLocationEditor(selectedLoad, 'details')}
+                          >
+                            Edit Locations
+                          </button>
                           <button type="button" className="secondary-btn" onClick={() => handleDuplicateLoad(selectedLoad)}>Duplicate Load</button>
                         </>
                       )}
@@ -11841,6 +12184,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     </form>
                   ) : (
                     <>
+                      {renderLoadLocationEditor(selectedLoad, 'details', 'Edit Load Locations')}
                       <div className="quick-actions-grid">
                         <div className="quick-driver-box">
                           <label htmlFor="quick-driver-select">Quick Driver Change</label>
@@ -13426,8 +13770,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     <section className="panel">
       <div className="panel-header">
         <div>
-          <h3>Create Driver</h3>
-          <p className="panel-subtitle">Add a driver login for dispatch assignments.</p>
+          <h3>{editingDriverId ? 'Edit Driver' : 'Create Driver'}</h3>
+          <p className="panel-subtitle">
+            {editingDriverId
+              ? 'Update the driver profile, truck, login, or account status.'
+              : 'Add a driver login for dispatch assignments.'}
+          </p>
         </div>
       </div>
 
@@ -13436,6 +13784,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           type="text"
           placeholder="Driver ID (optional, auto DRV-001)"
           value={driverForm.id}
+          disabled={Boolean(editingDriverId)}
           onChange={(e) =>
             setDriverForm((prev) => ({ ...prev, id: e.target.value }))
           }
@@ -13481,12 +13830,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
         <input
           type="password"
-          placeholder="Temporary Password"
+          placeholder={editingDriverId ? 'New Password (leave blank to keep current)' : 'Temporary Password'}
           value={driverForm.password}
           onChange={(e) =>
             setDriverForm((prev) => ({ ...prev, password: e.target.value }))
           }
-          required
+          required={!editingDriverId}
         />
 
         <label className="checkbox-row">
@@ -13501,7 +13850,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         </label>
 
         <div className="form-actions">
-          <button type="submit" className="primary-btn">Create Driver</button>
+          <button type="submit" className="primary-btn">
+            {editingDriverId ? 'Save Driver Changes' : 'Create Driver'}
+          </button>
+          {editingDriverId && (
+            <button type="button" className="secondary-btn" onClick={handleCancelDriverEdit}>
+              Cancel
+            </button>
+          )}
         </div>
       </form>
     </section>
@@ -13532,6 +13888,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <span className={driver.isActive ? 'status-pill active' : 'status-pill inactive'}>
                   {driver.isActive ? 'Active' : 'Inactive'}
                 </span>
+                <button
+                  type="button"
+                  className="secondary-btn compact-btn"
+                  onClick={() => handleEditDriver(driver)}
+                >
+                  Edit
+                </button>
               </div>
             </div>
           ))}
@@ -14351,12 +14714,25 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <button
                     type="button"
                     className="secondary-btn compact-btn"
+                    onClick={() => openLoadLocationEditor(selectedCompletedReviewLoad, 'completed')}
+                  >
+                    Edit Locations
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn compact-btn"
                     onClick={() => setSelectedCompletedReviewLoadId('')}
                   >
                     Close
                   </button>
                 </div>
               </div>
+
+              {renderLoadLocationEditor(
+                selectedCompletedReviewLoad,
+                'completed',
+                'Edit Completed Load Locations'
+              )}
 
               <div className="details-grid accounting-details-grid">
                 <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedCompletedReviewLoad.appointmentTime) || selectedCompletedReviewLoad.loadDate || '-'}</strong></div>
@@ -15100,6 +15476,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </button>
                   <button
                     type="button"
+                    className="secondary-btn compact-btn"
+                    onClick={() => openLoadLocationEditor(selectedAccountingLoad, 'accounting')}
+                  >
+                    Edit Locations
+                  </button>
+                  <button
+                    type="button"
                     className="secondary-btn compact-btn drawer-close-btn"
                     onClick={() => setSelectedAccountingLoadId('')}
                   >
@@ -15107,6 +15490,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </button>
                 </div>
               </div>
+
+              {renderLoadLocationEditor(
+                selectedAccountingLoad,
+                'accounting',
+                'Edit Billing Load Locations'
+              )}
 
               <div className="details-grid accounting-details-grid">
                 <div className="detail-box"><span>Status</span><strong>{getLoadQuickStatus(selectedAccountingLoad) || 'Completed'}</strong></div>

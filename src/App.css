@@ -874,6 +874,32 @@ button {
   overflow-wrap: anywhere;
 }
 
+.driver-load-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.driver-location-edit-btn {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.driver-location-edit-btn:hover {
+  border-color: #3b82f6;
+  background: #dbeafe;
+}
+
 .driver-status-pill {
   flex: 0 0 auto;
   padding: 6px 9px;
@@ -1546,6 +1572,97 @@ button {
 
 .location-action-row {
   grid-column: 1 / -1;
+}
+
+.new-location-form {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.new-location-form .primary-btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.load-location-editor {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.load-location-editor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.load-location-editor-header h4 {
+  margin: 0;
+  color: #172554;
+}
+
+.load-location-editor-header p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.load-location-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.load-location-editor-grid label {
+  display: grid;
+  gap: 5px;
+}
+
+.load-location-editor-grid label > span {
+  color: #344054;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.load-location-editor-grid input {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+}
+
+.load-location-editor-grid input:focus {
+  border-color: #3b82f6;
+  outline: 3px solid rgba(59, 130, 246, 0.14);
+}
+
+.load-location-editor-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.load-location-editor-actions span {
+  color: #166534;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.load-location-editor-actions span.error {
+  color: #b42318;
 }
 
 .location-select-row {
@@ -4761,6 +4878,21 @@ button:disabled {
 @media (max-width: 640px) {
   .app-main-shell {
     padding-inline: 12px;
+  }
+
+  .load-location-editor-header {
+    flex-direction: column;
+  }
+
+  .load-location-editor-grid,
+  .new-location-form {
+    grid-template-columns: 1fr;
+  }
+
+  .load-location-editor-header .secondary-btn,
+  .load-location-editor-actions .primary-btn,
+  .new-location-form .primary-btn {
+    width: 100%;
   }
 
   .topbar {

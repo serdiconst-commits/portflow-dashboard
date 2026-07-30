@@ -3789,6 +3789,87 @@ app.put('/api/loads/:id/driver-release', authenticate, (req, res) => {
   );
 });
 
+app.put('/api/loads/:id/locations', authenticate, (req, res) => {
+  const companyId = req.company.companyId;
+  const loadId = String(req.params.id || '').trim();
+  const role = String(req.user?.role || '').trim().toLowerCase();
+  const driverId = String(req.user?.driverId || '').trim();
+  const staffRoles = new Set(['owner', 'admin', 'manager', 'dispatcher', 'carrier']);
+  const isDriver = role === 'driver';
+
+  if (!isDriver && !staffRoles.has(role)) {
+    return res.status(403).json({ error: 'You do not have permission to edit load locations.' });
+  }
+
+  const pickup = String(req.body?.pickup || '').trim();
+  const delivery = String(req.body?.delivery || '').trim();
+  const returnLocation = String(req.body?.returnLocation || '').trim();
+
+  if (!pickup || !delivery) {
+    return res.status(400).json({ error: 'Pickup and delivery locations are required.' });
+  }
+
+  const lookupSql = isDriver
+    ? `SELECT * FROM loads
+       WHERE id = ? AND companyId = ?
+         AND TRIM(LOWER(driver)) = TRIM(LOWER(?))
+         AND COALESCE(isDriverReleased, 1) = 1`
+    : `SELECT * FROM loads WHERE id = ? AND companyId = ?`;
+  const lookupParams = isDriver ? [loadId, companyId, driverId] : [loadId, companyId];
+
+  db.get(lookupSql, lookupParams, (findErr, existingLoad) => {
+    if (findErr) return res.status(500).json({ error: findErr.message });
+    if (!existingLoad) {
+      return res.status(404).json({
+        error: isDriver
+          ? 'Released load not found for this driver.'
+          : 'Load not found.',
+      });
+    }
+
+    db.run(
+      `UPDATE loads
+       SET pickup = ?, delivery = ?, returnLocation = ?
+       WHERE id = ? AND companyId = ?`,
+      [pickup, delivery, returnLocation, loadId, companyId],
+      function updateLoadLocations(err) {
+        if (err) return res.status(500).json({ error: err.message });
+
+        db.get(
+          `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
+          [loadId, companyId],
+          (readErr, updatedLoad) => {
+            if (readErr) return res.status(500).json({ error: readErr.message });
+
+            writeAuditLog(req, {
+              action: isDriver ? 'DRIVER_UPDATE_LOCATIONS' : 'UPDATE_LOCATIONS',
+              entityType: 'LOAD',
+              entityId: loadId,
+              entityLabel: loadId,
+              oldValue: {
+                pickup: existingLoad.pickup || '',
+                delivery: existingLoad.delivery || '',
+                returnLocation: existingLoad.returnLocation || '',
+              },
+              newValue: { pickup, delivery, returnLocation },
+              changedFields: {
+                pickup: { oldValue: existingLoad.pickup || '', newValue: pickup },
+                delivery: { oldValue: existingLoad.delivery || '', newValue: delivery },
+                returnLocation: {
+                  oldValue: existingLoad.returnLocation || '',
+                  newValue: returnLocation,
+                },
+              },
+            });
+
+            res.json(updatedLoad);
+          }
+        );
+      }
+    );
+  });
+});
+
 app.get('/api/drivers', authenticate, (req, res) => {
   const companyId = req.company.companyId;
 
@@ -4028,6 +4109,126 @@ app.post('/api/drivers', authenticate, async (req, res) => {
 
     createDriver(nextDriverId, true);
   });
+});
+
+app.put('/api/drivers/:id', authenticate, requireRoles(dispatchLocationRoles), async (req, res) => {
+  const companyId = req.company.companyId;
+  const driverId = String(req.params.id || '').trim();
+  const name = String(req.body?.name || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+  const truck = String(req.body?.truck || '').trim();
+  const phone = String(req.body?.phone || '').trim();
+  const isActive = req.body?.isActive ? 1 : 0;
+
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Driver name and email are required.' });
+  }
+
+  db.get(
+    `SELECT * FROM drivers WHERE id = ? AND companyId = ?`,
+    [driverId, companyId],
+    async (findErr, existingDriver) => {
+      if (findErr) return res.status(500).json({ error: findErr.message });
+      if (!existingDriver) return res.status(404).json({ error: 'Driver not found.' });
+
+      try {
+        const savedPassword = password
+          ? await bcrypt.hash(password, 10)
+          : existingDriver.password;
+
+        db.run(
+          `UPDATE drivers
+           SET name = ?, email = ?, password = ?, truck = ?, phone = ?, isActive = ?
+           WHERE id = ? AND companyId = ?`,
+          [name, email, savedPassword, truck, phone, isActive, driverId, companyId],
+          (driverErr) => {
+            if (driverErr) {
+              const status = String(driverErr.message || '').includes('UNIQUE constraint failed')
+                ? 409
+                : 500;
+              return res.status(status).json({ error: driverErr.message });
+            }
+
+            db.run(
+              `UPDATE users
+               SET name = ?, email = ?, password = ?, isActive = ?, role = 'driver'
+               WHERE driverId = ? AND companyId = ?`,
+              [name, email, savedPassword, isActive, driverId, companyId],
+              function updateDriverUser(userErr) {
+                if (userErr) {
+                  const status = String(userErr.message || '').includes('UNIQUE constraint failed')
+                    ? 409
+                    : 500;
+                  return res.status(status).json({ error: userErr.message });
+                }
+
+                const finish = () => {
+                  writeAuditLog(req, {
+                    action: 'UPDATE_DRIVER',
+                    entityType: 'DRIVER',
+                    entityId: driverId,
+                    entityLabel: name,
+                    oldValue: {
+                      name: existingDriver.name,
+                      email: existingDriver.email,
+                      phone: existingDriver.phone || '',
+                      truck: existingDriver.truck || '',
+                      isActive: Boolean(existingDriver.isActive),
+                    },
+                    newValue: {
+                      name,
+                      email,
+                      phone,
+                      truck,
+                      isActive: Boolean(isActive),
+                      passwordChanged: Boolean(password),
+                    },
+                  });
+
+                  res.json({
+                    success: true,
+                    driver: {
+                      id: driverId,
+                      name,
+                      email,
+                      truck,
+                      phone,
+                      companyId,
+                      isActive,
+                    },
+                  });
+                };
+
+                if (this.changes > 0) {
+                  finish();
+                  return;
+                }
+
+                db.run(
+                  `INSERT INTO users (
+                    id, name, email, password, role, companyId, isActive, driverId
+                  ) VALUES (?, ?, ?, ?, 'driver', ?, ?, ?)`,
+                  [`USR-${driverId}`, name, email, savedPassword, companyId, isActive, driverId],
+                  (insertErr) => {
+                    if (insertErr) {
+                      const status = String(insertErr.message || '').includes('UNIQUE constraint failed')
+                        ? 409
+                        : 500;
+                      return res.status(status).json({ error: insertErr.message });
+                    }
+                    finish();
+                  }
+                );
+              }
+            );
+          }
+        );
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  );
 });
 
 app.post('/api/loads', authenticate, (req, res) => {
