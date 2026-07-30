@@ -3477,6 +3477,255 @@ button:disabled {
   flex-direction: column;
   gap: 6px;
 }
+
+.consignee-locations-panel {
+  grid-column: 1 / -1;
+}
+
+.consignee-locations-header {
+  align-items: flex-start;
+}
+
+.consignee-quick-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.consignee-quick-actions .secondary-btn.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.consignee-locations-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.8fr) minmax(420px, 1.2fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.consignee-location-form,
+.consignee-location-library {
+  padding: 16px;
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.consignee-location-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.consignee-location-form label {
+  display: grid;
+  gap: 5px;
+}
+
+.consignee-location-form label > span {
+  color: #475467;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.consignee-location-form input,
+.consignee-location-form select,
+.consignee-location-form textarea,
+.consignee-library-toolbar select {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+}
+
+.consignee-location-form textarea {
+  resize: vertical;
+}
+
+.consignee-form-heading,
+.consignee-form-wide,
+.consignee-form-actions {
+  grid-column: 1 / -1;
+}
+
+.consignee-form-heading,
+.consignee-library-toolbar,
+.consignee-location-card,
+.consignee-location-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.consignee-form-heading > div,
+.consignee-location-card-main > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.consignee-form-heading h4,
+.consignee-library-toolbar h4,
+.consignee-location-card h5 {
+  margin: 0;
+  color: #172033;
+}
+
+.location-type-badge {
+  display: inline-flex;
+  min-height: 25px;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.location-type-badge.type-pickup {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.location-type-badge.type-delivery {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.location-type-badge.type-return {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.consignee-form-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.consignee-form-actions span {
+  color: #166534;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.consignee-form-actions span.error {
+  color: #b42318;
+}
+
+.consignee-library-toolbar {
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.consignee-library-toolbar > div > span {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.consignee-library-toolbar select {
+  width: auto;
+  min-width: 130px;
+}
+
+.consignee-location-list {
+  display: grid;
+  gap: 10px;
+  max-height: 590px;
+  overflow-y: auto;
+  padding-right: 3px;
+}
+
+.consignee-location-card {
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.consignee-location-card-main {
+  min-width: 0;
+}
+
+.consignee-location-card-main small {
+  display: block;
+  margin-top: 5px;
+  color: #2563eb;
+  font-weight: 750;
+}
+
+.consignee-location-card-main p {
+  margin: 5px 0 0;
+  color: #475467;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.consignee-location-card-main .consignee-location-notes {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.consignee-location-card-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1000px) {
+  .consignee-locations-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .consignee-locations-header,
+  .consignee-form-heading,
+  .consignee-library-toolbar,
+  .consignee-location-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .consignee-quick-actions,
+  .consignee-location-card-actions {
+    justify-content: flex-start;
+  }
+
+  .consignee-location-form {
+    grid-template-columns: 1fr;
+  }
+
+  .consignee-location-form label,
+  .consignee-form-heading,
+  .consignee-form-wide,
+  .consignee-form-actions {
+    grid-column: 1;
+  }
+
+  .consignee-library-toolbar select,
+  .consignee-form-actions .primary-btn,
+  .consignee-location-card-actions button {
+    width: 100%;
+  }
+}
 .customers-grid {
   align-items: start;
 }
