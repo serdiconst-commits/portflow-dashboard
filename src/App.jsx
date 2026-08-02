@@ -1236,6 +1236,9 @@ const [editingCustomerId, setEditingCustomerId] = useState(null);
 const fileInputRef = useRef(null);
 const [previewDocument, setPreviewDocument] = useState(null);
 const [previewUrl, setPreviewUrl] = useState('');
+const [documentPendingDeletion, setDocumentPendingDeletion] = useState(null);
+const [isDeletingDocument, setIsDeletingDocument] = useState(false);
+const [documentDeleteError, setDocumentDeleteError] = useState('');
 
 const [showForm, setShowForm] = useState(false);
 const [isEditing, setIsEditing] = useState(false);
@@ -6134,17 +6137,44 @@ const handleCompletedReviewDocumentUpload = async (e) => {
   }
 };
 
-  const handleDeleteDocument = async (docId) => {
+  const requestDocumentDeletion = (doc) => {
+    if (!doc?.id) return;
+    setDocumentDeleteError('');
+    setDocumentPendingDeletion(doc);
+  };
+
+  const closeDocumentDeleteConfirmation = () => {
+    if (isDeletingDocument) return;
+    setDocumentPendingDeletion(null);
+    setDocumentDeleteError('');
+  };
+
+  const handleDeleteDocument = async () => {
+    if (!documentPendingDeletion?.id || isDeletingDocument) return;
+
+    setIsDeletingDocument(true);
+    setDocumentDeleteError('');
+
     try {
-      await fetch(`${API_BASE}/api/documents/${docId}`, {
+      const response = await fetch(`${API_BASE}/api/documents/${documentPendingDeletion.id}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${authToken}`,
         },
       });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete document');
+      }
+
       await fetchLoads();
+      setDocumentPendingDeletion(null);
     } catch (error) {
       console.error('Failed to delete document:', error);
+      setDocumentDeleteError(error.message || 'Failed to delete document');
+    } finally {
+      setIsDeletingDocument(false);
     }
   };
 
@@ -12217,7 +12247,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                 <div className="document-actions">
                                   <button className="secondary-btn" onClick={() => handleOpenDocument(doc)}>Open</button>
                                   <button className="secondary-btn" onClick={() => handleDownloadDocument(doc)}>Download</button>
-                                  <button className="secondary-btn" onClick={() => handleDeleteDocument(doc.id)}>Remove</button>
+                                  <button className="secondary-btn" onClick={() => requestDocumentDeletion(doc)}>Remove</button>
                                 </div>
                               </div>
                             ))}
@@ -14324,7 +14354,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <button type="button" className="secondary-btn compact-btn" onClick={() => handleDownloadDocument(doc)}>
                             Download
                           </button>
-                          <button type="button" className="secondary-btn compact-btn" onClick={() => handleDeleteDocument(doc.id)}>
+                          <button type="button" className="secondary-btn compact-btn" onClick={() => requestDocumentDeletion(doc)}>
                             Remove
                           </button>
                         </div>
@@ -15852,6 +15882,55 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </div>
   </div>
 )}
+      {documentPendingDeletion && (
+        <div
+          className="document-delete-overlay"
+          onClick={closeDocumentDeleteConfirmation}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') closeDocumentDeleteConfirmation();
+          }}
+        >
+          <div
+            className="document-delete-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="document-delete-title"
+            aria-describedby="document-delete-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="document-delete-icon" aria-hidden="true">!</div>
+            <h3 id="document-delete-title">Delete this document?</h3>
+            <p id="document-delete-description">
+              You are about to permanently delete <strong>{documentPendingDeletion.name || documentPendingDeletion.fileName || 'this document'}</strong>.
+              This action cannot be undone.
+            </p>
+            {documentDeleteError && (
+              <p className="document-delete-error" role="alert">
+                {documentDeleteError}
+              </p>
+            )}
+            <div className="document-delete-actions">
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={closeDocumentDeleteConfirmation}
+                disabled={isDeletingDocument}
+                autoFocus
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger-btn"
+                onClick={handleDeleteDocument}
+                disabled={isDeletingDocument}
+              >
+                {isDeletingDocument ? 'Deleting...' : 'Delete document'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
