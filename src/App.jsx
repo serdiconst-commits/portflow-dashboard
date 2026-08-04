@@ -7,6 +7,17 @@ import {
   ScannerMode,
   ScanDocumentResponseStatus,
 } from '@capgo/capacitor-document-scanner';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  LabelList,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 // 'dispatcher' | 'driver'
 import './App.css';
 import DispatchBoard from './components/DispatchBoard/DispatchBoard.jsx';
@@ -3198,6 +3209,36 @@ const formatDashboardValue = (value, key = '') =>
   key.toLowerCase().includes('loads') || key.toLowerCase().includes('customers') || key.toLowerCase().includes('invoices')
     ? Number(value || 0).toLocaleString(language === 'es' ? 'es-US' : 'en-US')
     : moneyFormatter.format(Number(value || 0));
+
+const businessRevenueChartData = businessMonthlyRevenue.map((row) => ({
+  month: row.month || 'N/A',
+  operationalRevenue: Number(row.operationalRevenue || 0),
+  invoicedRevenue: Number(row.invoicedRevenue || 0),
+  collectedRevenue: Number(row.collectedRevenue || 0),
+}));
+const highestRevenueMonth = businessRevenueChartData.reduce(
+  (highest, row) => (row.operationalRevenue > highest.operationalRevenue ? row : highest),
+  { month: '', operationalRevenue: 0 }
+);
+const formatChartMoney = (value) =>
+  moneyFormatter.format(Number(value || 0));
+const formatCompactChartMoney = (value) => {
+  const amount = Number(value || 0);
+  if (Math.abs(amount) >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`;
+  if (Math.abs(amount) >= 1000) return `$${(amount / 1000).toFixed(0)}K`;
+  return `$${amount.toFixed(0)}`;
+};
+const formatMonthLabel = (value = '') => {
+  const text = String(value || '');
+  const match = text.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return text;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1, 12));
+  return date.toLocaleDateString(language === 'es' ? 'es-US' : 'en-US', {
+    month: 'short',
+    year: '2-digit',
+    timeZone: 'UTC',
+  });
+};
 
 const getBusinessPeriod = () => {
   const timeZone = company?.companyTimezone || analyticsSettingsForm.companyTimezone || 'America/Chicago';
@@ -11090,25 +11131,70 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           <div className="business-dashboard-grid">
             <div className="invoice-box">
               <div className="panel-header compact-header">
-                <h3>{t('monthlyRevenueTrend')}</h3>
+                <div>
+                  <h3>{t('monthlyRevenueTrend')}</h3>
+                  <p className="panel-subtitle">
+                    {highestRevenueMonth.month
+                      ? `${formatMonthLabel(highestRevenueMonth.month)} had the highest operational revenue at ${formatChartMoney(highestRevenueMonth.operationalRevenue)}.`
+                      : 'Operational revenue by completed load month.'}
+                  </p>
+                </div>
               </div>
-              <div className="mini-chart-list">
-                {businessMonthlyRevenue.length === 0 ? (
+              <div className="monthly-revenue-chart">
+                {businessRevenueChartData.length === 0 ? (
                   <p>No revenue data.</p>
                 ) : (
-                  businessMonthlyRevenue.map((row) => {
-                    const max = Math.max(...businessMonthlyRevenue.map((item) => Number(item.operationalRevenue || 0)), 1);
-                    return (
-                      <div key={row.month} className="mini-chart-row">
-                        <span>{row.month}</span>
-                        <div className="mini-chart-track">
-                          <div className="mini-chart-fill revenue" style={{ width: `${Math.max(4, (Number(row.operationalRevenue || 0) / max) * 100)}%` }} />
-                        </div>
-                        <strong>{moneyFormatter.format(Number(row.operationalRevenue || 0))}</strong>
-                      </div>
-                    );
-                  })
+                  <ResponsiveContainer width="100%" height={330}>
+                    <BarChart
+                      data={businessRevenueChartData}
+                      margin={{ top: 28, right: 12, left: 4, bottom: 42 }}
+                      barCategoryGap="22%"
+                    >
+                      <CartesianGrid stroke="#e5e7eb" vertical={false} />
+                      <XAxis
+                        dataKey="month"
+                        tickFormatter={formatMonthLabel}
+                        interval={0}
+                        angle={-42}
+                        textAnchor="end"
+                        height={64}
+                        tick={{ fill: '#111827', fontSize: 12, fontWeight: 700 }}
+                        axisLine={{ stroke: '#cbd5e1' }}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tickFormatter={formatCompactChartMoney}
+                        tick={{ fill: '#111827', fontSize: 12, fontWeight: 700 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={58}
+                      />
+                      <Tooltip
+                        formatter={(value, name) => [formatChartMoney(value), name === 'operationalRevenue' ? 'Operational Revenue' : name]}
+                        labelFormatter={(label) => formatMonthLabel(label)}
+                        cursor={{ fill: 'rgba(37, 99, 235, 0.08)' }}
+                      />
+                      <Bar dataKey="operationalRevenue" radius={[4, 4, 0, 0]} maxBarSize={42}>
+                        {businessRevenueChartData.map((row) => (
+                          <Cell
+                            key={row.month}
+                            fill={row.month === highestRevenueMonth.month ? '#f000b8' : '#6d32a8'}
+                          />
+                        ))}
+                        <LabelList
+                          dataKey="operationalRevenue"
+                          position="top"
+                          formatter={formatCompactChartMoney}
+                          className="revenue-chart-label"
+                        />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
                 )}
+              </div>
+              <div className="revenue-chart-legend">
+                <span><i className="legend-dot revenue-dot" /> Operational revenue</span>
+                <span><i className="legend-dot highest-dot" /> Highest month</span>
               </div>
             </div>
 

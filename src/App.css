@@ -5276,6 +5276,52 @@ button:disabled {
   background: #2563eb;
 }
 
+.monthly-revenue-chart {
+  min-height: 340px;
+  padding: 6px 0 0;
+}
+
+.monthly-revenue-chart .recharts-wrapper {
+  font-family: inherit;
+}
+
+.monthly-revenue-chart .recharts-cartesian-axis-tick-value {
+  letter-spacing: 0;
+}
+
+.monthly-revenue-chart .revenue-chart-label {
+  fill: #6d32a8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.revenue-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 999px;
+  vertical-align: -1px;
+}
+
+.revenue-dot {
+  background: #6d32a8;
+}
+
+.highest-dot {
+  background: #f000b8;
+}
+
 .table-scroll {
   overflow-x: auto;
 }
