@@ -48,3 +48,17 @@ services:
         generateValue: true
       - key: ENCRYPTION_KEY
         generateValue: true
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: NVIDIA_BASE_URL
+        value: https://integrate.api.nvidia.com/v1
+      - key: NVIDIA_MODEL
+        value: nvidia/nemotron-3-nano-30b-a3b
+      - key: NVIDIA_AI_ENABLED
+        value: "true"
+      - key: NVIDIA_MAX_INPUT_TOKENS
+        value: "12000"
+      - key: NVIDIA_MAX_OUTPUT_TOKENS
+        value: "1200"
+      - key: NVIDIA_TIMEOUT_MS
+        value: "45000"
