@@ -299,6 +299,16 @@ db.run(`ALTER TABLE companies ADD COLUMN tenantUpdatedAt TEXT`, (err) => {
     console.error('Error adding tenantUpdatedAt column to companies:', err.message);
   }
 });
+db.run(`ALTER TABLE companies ADD COLUMN companyTimezone TEXT DEFAULT 'America/Chicago'`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding companyTimezone column to companies:', err.message);
+  }
+});
+db.run(`ALTER TABLE companies ADD COLUMN allowAiAnalytics INTEGER DEFAULT 0`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding allowAiAnalytics column to companies:', err.message);
+  }
+});
 db.run(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -718,6 +728,156 @@ db.run(`
     FOREIGN KEY (settlementId) REFERENCES settlements(id) ON DELETE CASCADE
   )
 `);
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS payroll_runs (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    payrollNumber TEXT NOT NULL,
+    periodStart TEXT NOT NULL,
+    periodEnd TEXT NOT NULL,
+    status TEXT DEFAULT 'Draft',
+    totalGrossPay REAL DEFAULT 0,
+    totalDeductions REAL DEFAULT 0,
+    totalReimbursements REAL DEFAULT 0,
+    totalNetPay REAL DEFAULT 0,
+    driverCount INTEGER DEFAULT 0,
+    loadCount INTEGER DEFAULT 0,
+    notes TEXT,
+    createdBy TEXT,
+    reviewedBy TEXT,
+    approvedBy TEXT,
+    finalizedBy TEXT,
+    paidBy TEXT,
+    createdAt TEXT NOT NULL,
+    reviewedAt TEXT,
+    approvedAt TEXT,
+    finalizedAt TEXT,
+    paidAt TEXT,
+    updatedAt TEXT
+  )
+`);
+db.run(`
+  CREATE TABLE IF NOT EXISTS payroll_items (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    payrollRunId TEXT NOT NULL,
+    driverId TEXT NOT NULL,
+    loadId TEXT,
+    referenceNumber TEXT,
+    containerNumber TEXT,
+    completedDate TEXT,
+    baseDriverPay REAL DEFAULT 0,
+    detentionPay REAL DEFAULT 0,
+    extraStopPay REAL DEFAULT 0,
+    layoverPay REAL DEFAULT 0,
+    lumperReimbursement REAL DEFAULT 0,
+    otherPay REAL DEFAULT 0,
+    deductions REAL DEFAULT 0,
+    grossPay REAL DEFAULT 0,
+    netPay REAL DEFAULT 0,
+    calculationDetails TEXT,
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT,
+    FOREIGN KEY (payrollRunId) REFERENCES payroll_runs(id) ON DELETE CASCADE
+  )
+`);
+db.run(`
+  CREATE TABLE IF NOT EXISTS payroll_adjustments (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    payrollRunId TEXT NOT NULL,
+    driverId TEXT NOT NULL,
+    loadId TEXT,
+    type TEXT NOT NULL,
+    description TEXT NOT NULL,
+    amount REAL NOT NULL,
+    taxable INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'Draft',
+    createdBy TEXT,
+    approvedBy TEXT,
+    createdAt TEXT NOT NULL,
+    approvedAt TEXT
+  )
+`);
+db.run(`
+  CREATE TABLE IF NOT EXISTS payroll_driver_summaries (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    payrollRunId TEXT NOT NULL,
+    driverId TEXT NOT NULL,
+    loadCount INTEGER DEFAULT 0,
+    basePay REAL DEFAULT 0,
+    additions REAL DEFAULT 0,
+    deductions REAL DEFAULT 0,
+    reimbursements REAL DEFAULT 0,
+    grossPay REAL DEFAULT 0,
+    netPay REAL DEFAULT 0,
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT
+  )
+`);
+db.run(`
+  CREATE TABLE IF NOT EXISTS payroll_settings (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL UNIQUE,
+    frequency TEXT DEFAULT 'Weekly',
+    weekStartsOn TEXT DEFAULT 'Monday',
+    payDay TEXT DEFAULT 'Friday',
+    includeStatuses TEXT,
+    requirePOD INTEGER DEFAULT 1,
+    requireBOL INTEGER DEFAULT 0,
+    requireInterchange INTEGER DEFAULT 0,
+    defaultDetentionRule TEXT,
+    defaultExtraStopRate REAL DEFAULT 0,
+    defaultLayoverRate REAL DEFAULT 0,
+    approvalRequired INTEGER DEFAULT 1,
+    companyTimezone TEXT DEFAULT 'America/Chicago',
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT
+  )
+`);
+[
+  'CREATE INDEX IF NOT EXISTS idx_payroll_runs_company ON payroll_runs(companyId)',
+  'CREATE INDEX IF NOT EXISTS idx_payroll_runs_period ON payroll_runs(companyId, periodStart, periodEnd)',
+  'CREATE INDEX IF NOT EXISTS idx_payroll_runs_status ON payroll_runs(companyId, status)',
+  'CREATE INDEX IF NOT EXISTS idx_payroll_items_company ON payroll_items(companyId)',
+  'CREATE INDEX IF NOT EXISTS idx_payroll_items_run ON payroll_items(payrollRunId)',
+  'CREATE INDEX IF NOT EXISTS idx_payroll_items_driver ON payroll_items(companyId, driverId)',
+  'CREATE INDEX IF NOT EXISTS idx_payroll_items_load ON payroll_items(companyId, loadId)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_items_run_load ON payroll_items(payrollRunId, loadId)',
+  'CREATE INDEX IF NOT EXISTS idx_payroll_adjustments_company ON payroll_adjustments(companyId)',
+  'CREATE INDEX IF NOT EXISTS idx_payroll_adjustments_run ON payroll_adjustments(payrollRunId)',
+  'CREATE INDEX IF NOT EXISTS idx_payroll_adjustments_driver ON payroll_adjustments(companyId, driverId)',
+  'CREATE INDEX IF NOT EXISTS idx_payroll_driver_summaries_run ON payroll_driver_summaries(payrollRunId)',
+].forEach((sql) => db.run(sql));
+db.run(`
+  CREATE TRIGGER IF NOT EXISTS trg_payroll_no_duplicate_finalized_loads
+  BEFORE UPDATE OF status ON payroll_runs
+  WHEN NEW.status IN ('Finalized', 'Paid')
+  BEGIN
+    SELECT RAISE(ABORT, 'Load already exists in finalized or paid payroll')
+    WHERE EXISTS (
+      SELECT 1
+      FROM payroll_items next_item
+      JOIN payroll_items existing_item
+        ON existing_item.companyId = next_item.companyId
+       AND existing_item.loadId = next_item.loadId
+       AND existing_item.payrollRunId != next_item.payrollRunId
+      JOIN payroll_runs existing_run
+        ON existing_run.id = existing_item.payrollRunId
+       AND existing_run.companyId = existing_item.companyId
+       AND existing_run.status IN ('Finalized', 'Paid')
+      WHERE next_item.payrollRunId = NEW.id
+        AND next_item.companyId = NEW.companyId
+        AND next_item.loadId IS NOT NULL
+    );
+  END
+`, (err) => {
+  if (err) {
+    console.error('Error creating payroll finalized duplicate trigger:', err.message);
+  }
+});
 
     // DOCUMENTS TABLE
     db.run(`

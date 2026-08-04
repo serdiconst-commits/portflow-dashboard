@@ -98,7 +98,7 @@ const staffRoleOptions = [
   { value: 'manager', label: 'Manager' },
 ];
 
-const fullAccessRoles = new Set(['admin', 'owner', 'carrier']);
+const fullAccessRoles = new Set(['admin', 'administrator', 'owner', 'carrier']);
 const getNormalizedRole = (role) => String(role || '').trim().toLowerCase();
 const isPortFlowOwnerUser = (user = {}) => {
   const safeUser = user || {};
@@ -120,7 +120,7 @@ const roleCanAccessView = (role, view) => {
   if (view === 'tenants') return normalizedRole === 'owner';
   if (fullAccessRoles.has(normalizedRole)) return true;
   if (normalizedRole === 'driver') return view === 'driver';
-  if (normalizedRole === 'payroll') return ['settlements', 'invoices', 'accounting', 'settings'].includes(view);
+  if (normalizedRole === 'payroll') return ['businessDashboard', 'payroll', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
   if (normalizedRole === 'manager') {
     return ['dispatch', 'completed', 'drivers', 'customers', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
   }
@@ -1259,6 +1259,22 @@ const [registerName, setRegisterName] = useState('');
 const [authToken, setAuthToken] = useState(getAuthStorageItem('authToken') || '');
 const [currentUser, setCurrentUser] = useState(savedUser || null);
 const [company, setCompany] = useState(savedCompany || null);
+const [language, setLanguage] = useState(() => localStorage.getItem('portflow-language') || 'en');
+const [businessPeriodPreset, setBusinessPeriodPreset] = useState('thisMonth');
+const [businessCustomRange, setBusinessCustomRange] = useState({ startDate: '', endDate: '' });
+const [businessDashboard, setBusinessDashboard] = useState(null);
+const [businessReviewItems, setBusinessReviewItems] = useState(null);
+const [businessMonthlyRevenue, setBusinessMonthlyRevenue] = useState([]);
+const [businessDriverEfficiency, setBusinessDriverEfficiency] = useState([]);
+const [businessLoading, setBusinessLoading] = useState(false);
+const [businessStatus, setBusinessStatus] = useState('');
+const [aiQuestion, setAiQuestion] = useState('');
+const [aiAnswer, setAiAnswer] = useState(null);
+const [aiStatus, setAiStatus] = useState(null);
+const [analyticsSettingsForm, setAnalyticsSettingsForm] = useState({
+  companyTimezone: savedCompany?.companyTimezone || 'America/Chicago',
+  allowAiAnalytics: Boolean(savedCompany?.allowAiAnalytics),
+});
 const canManageTenants = isPortFlowOwnerUser(currentUser);
 const isDemoMode = authToken === DEMO_TOKEN || currentUser?.id === 'demo-dispatcher';
 const [tenantCompanies, setTenantCompanies] = useState([]);
@@ -3015,9 +3031,171 @@ const fetchCompanyProfile = async () => {
     }
 
     setCompany(data);
+    setAnalyticsSettingsForm({
+      companyTimezone: data?.companyTimezone || 'America/Chicago',
+      allowAiAnalytics: Boolean(data?.allowAiAnalytics),
+    });
     saveCompanySession(data);
   } catch (error) {
     console.error('Failed to fetch company profile:', error);
+  }
+};
+
+const translations = {
+  en: {
+    businessDashboard: 'Business Dashboard',
+    panelEjecutivo: 'Panel Ejecutivo',
+    askPortFlow: 'Ask PortFlow',
+    totalRevenue: 'Total Revenue',
+    invoicedRevenue: 'Invoiced Revenue',
+    collectedRevenue: 'Collected Revenue',
+    outstandingRevenue: 'Outstanding Revenue',
+    driverPayroll: 'Driver Payroll',
+    directLoadExpenses: 'Direct Load Expenses',
+    grossProfit: 'Gross Profit',
+    netProfit: 'Net Profit',
+    completedLoads: 'Completed Loads',
+    averageRevenuePerLoad: 'Average Revenue per Load',
+    averageDriverPayPerLoad: 'Average Driver Pay per Load',
+    revenuePerDriver: 'Revenue per Driver',
+    revenuePerTruck: 'Revenue per Truck',
+    activeCustomers: 'Active Customers',
+    overdueInvoices: 'Overdue Invoices',
+    unbilledDeliveredLoads: 'Unbilled Delivered Loads',
+    monthlyRevenueTrend: 'Monthly Revenue Trend',
+    driverEfficiency: 'Driver Efficiency',
+    reviewTables: 'Review Tables',
+  },
+  es: {
+    businessDashboard: 'Panel Ejecutivo',
+    panelEjecutivo: 'Business Dashboard',
+    askPortFlow: 'Pregúntale a PortFlow',
+    totalRevenue: 'Ingresos totales',
+    invoicedRevenue: 'Ingresos facturados',
+    collectedRevenue: 'Ingresos cobrados',
+    outstandingRevenue: 'Ingresos pendientes',
+    driverPayroll: 'Nómina de conductores',
+    directLoadExpenses: 'Gastos directos',
+    grossProfit: 'Ganancia bruta',
+    netProfit: 'Ganancia neta',
+    completedLoads: 'Cargas completadas',
+    averageRevenuePerLoad: 'Ingreso promedio por carga',
+    averageDriverPayPerLoad: 'Pago promedio por carga',
+    revenuePerDriver: 'Ingreso por conductor',
+    revenuePerTruck: 'Ingreso por camión',
+    activeCustomers: 'Clientes activos',
+    overdueInvoices: 'Facturas vencidas',
+    unbilledDeliveredLoads: 'Cargas entregadas sin facturar',
+    monthlyRevenueTrend: 'Tendencia mensual de ingresos',
+    driverEfficiency: 'Eficiencia de conductores',
+    reviewTables: 'Tablas de revisión',
+  },
+};
+const t = (key) => translations[language]?.[key] || translations.en[key] || key;
+
+const moneyFormatter = new Intl.NumberFormat(language === 'es' ? 'es-US' : 'en-US', {
+  style: 'currency',
+  currency: 'USD',
+});
+const formatDashboardValue = (value, key = '') =>
+  key.toLowerCase().includes('loads') || key.toLowerCase().includes('customers') || key.toLowerCase().includes('invoices')
+    ? Number(value || 0).toLocaleString(language === 'es' ? 'es-US' : 'en-US')
+    : moneyFormatter.format(Number(value || 0));
+
+const getBusinessPeriod = () => {
+  const timeZone = company?.companyTimezone || analyticsSettingsForm.companyTimezone || 'America/Chicago';
+  const todayText = getDateStringInAppTimeZone(new Date());
+  const [year, month, day] = todayText.split('-').map(Number);
+  const today = new Date(Date.UTC(year, month - 1, day, 12));
+  const fmt = (date) => getDateStringInAppTimeZone(date);
+  const startOfWeek = new Date(today);
+  startOfWeek.setUTCDate(today.getUTCDate() - ((today.getUTCDay() + 6) % 7));
+  const startOfMonth = new Date(Date.UTC(year, month - 1, 1, 12));
+  const endOfMonth = new Date(Date.UTC(year, month, 0, 12));
+  const lastMonthStart = new Date(Date.UTC(year, month - 2, 1, 12));
+  const lastMonthEnd = new Date(Date.UTC(year, month - 1, 0, 12));
+  const presets = {
+    today: [today, today],
+    thisWeek: [startOfWeek, today],
+    thisMonth: [startOfMonth, endOfMonth],
+    lastMonth: [lastMonthStart, lastMonthEnd],
+    last3Months: [new Date(Date.UTC(year, month - 3, 1, 12)), today],
+    last6Months: [new Date(Date.UTC(year, month - 6, 1, 12)), today],
+    thisYear: [new Date(Date.UTC(year, 0, 1, 12)), new Date(Date.UTC(year, 11, 31, 12))],
+    lastYear: [new Date(Date.UTC(year - 1, 0, 1, 12)), new Date(Date.UTC(year - 1, 11, 31, 12))],
+  };
+  if (businessPeriodPreset === 'custom') {
+    return { startDate: businessCustomRange.startDate, endDate: businessCustomRange.endDate, timezone: timeZone };
+  }
+  const [start, end] = presets[businessPeriodPreset] || presets.thisMonth;
+  return { startDate: fmt(start), endDate: fmt(end), timezone: timeZone };
+};
+
+const fetchBusinessDashboard = async () => {
+  if (!authToken || !roleCanAccessView(currentUser?.role, 'businessDashboard')) return;
+  const period = getBusinessPeriod();
+  if (!period.startDate || !period.endDate) return;
+  const query = new URLSearchParams({ startDate: period.startDate, endDate: period.endDate }).toString();
+  try {
+    setBusinessLoading(true);
+    setBusinessStatus('');
+    const [summaryRes, reviewRes, monthlyRes, driverRes, aiStatusRes] = await Promise.all([
+      fetch(`${API_BASE}/api/analytics/summary?${query}`, { headers: { Authorization: `Bearer ${authToken}` }, cache: 'no-store' }),
+      fetch(`${API_BASE}/api/analytics/review-items?${query}`, { headers: { Authorization: `Bearer ${authToken}` }, cache: 'no-store' }),
+      fetch(`${API_BASE}/api/analytics/monthly-revenue?${query}`, { headers: { Authorization: `Bearer ${authToken}` }, cache: 'no-store' }),
+      fetch(`${API_BASE}/api/analytics/driver-efficiency?${query}`, { headers: { Authorization: `Bearer ${authToken}` }, cache: 'no-store' }),
+      fetch(`${API_BASE}/api/ai/business/status`, { headers: { Authorization: `Bearer ${authToken}` }, cache: 'no-store' }),
+    ]);
+    const [summary, review, monthly, drivers, status] = await Promise.all([
+      summaryRes.json(), reviewRes.json(), monthlyRes.json(), driverRes.json(), aiStatusRes.json(),
+    ]);
+    if (!summaryRes.ok) throw new Error(summary.error || 'Failed to load business dashboard.');
+    setBusinessDashboard(summary);
+    setBusinessReviewItems(reviewRes.ok ? review : null);
+    setBusinessMonthlyRevenue(Array.isArray(monthly.data) ? monthly.data : []);
+    setBusinessDriverEfficiency(Array.isArray(drivers.data) ? drivers.data : []);
+    setAiStatus(aiStatusRes.ok ? status : null);
+  } catch (error) {
+    setBusinessStatus(error.message);
+  } finally {
+    setBusinessLoading(false);
+  }
+};
+
+const handleAskPortFlow = async (event) => {
+  event.preventDefault();
+  if (!aiQuestion.trim()) return;
+  const period = getBusinessPeriod();
+  try {
+    setAiAnswer({ answer: 'Loading...', warnings: [] });
+    const res = await fetch(`${API_BASE}/api/ai/business/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ question: aiQuestion, language, period }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ask PortFlow failed.');
+    setAiAnswer(data);
+  } catch (error) {
+    setAiAnswer({ answer: error.message, warnings: [] });
+  }
+};
+
+const handleSaveAnalyticsSettings = async (event) => {
+  event.preventDefault();
+  try {
+    const res = await fetch(`${API_BASE}/api/company/analytics-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify(analyticsSettingsForm),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save analytics settings.');
+    setCompany(data.company || data);
+    saveCompanySession(data.company || data);
+    setBusinessStatus('Analytics settings saved.');
+  } catch (error) {
+    setBusinessStatus(error.message);
   }
 };
 
@@ -3571,6 +3749,32 @@ useEffect(() => {
     fetchAuditLogs();
   }
 }, [activeView, authToken, currentUser?.role]);
+
+useEffect(() => {
+  localStorage.setItem('portflow-language', language);
+}, [language]);
+
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+  if (window.location.pathname.replace(/\/+$/, '') === '/business-dashboard') {
+    setActiveView('businessDashboard');
+  }
+}, []);
+
+useEffect(() => {
+  if (activeView === 'businessDashboard' && !isDemoMode) {
+    fetchBusinessDashboard();
+  }
+}, [
+  activeView,
+  authToken,
+  isDemoMode,
+  currentUser?.role,
+  businessPeriodPreset,
+  businessCustomRange.startDate,
+  businessCustomRange.endDate,
+  company?.companyTimezone,
+]);
 
 useEffect(() => {
   setDropDetailsDraft(selectedLoad ? buildDropDetailsDraft(selectedLoad) : buildDropDetailsDraft());
@@ -10219,6 +10423,23 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               Driver Settlements
             </button>
             )}
+            {roleCanAccessView(currentUser?.role, 'businessDashboard') && (
+            <button
+              className={activeView === 'businessDashboard' ? 'toggle-btn active' : 'toggle-btn'}
+              onClick={() => setActiveView('businessDashboard')}
+              title="Business Dashboard"
+            >
+              {t('businessDashboard')}
+            </button>
+            )}
+            {roleCanAccessView(currentUser?.role, 'payroll') && (
+            <button
+              className={activeView === 'payroll' ? 'toggle-btn active' : 'toggle-btn'}
+              onClick={() => setActiveView('payroll')}
+            >
+              Payroll
+            </button>
+            )}
             {roleCanAccessView(currentUser?.role, 'customers') && (
             <button
               className={activeView === 'customers' ? 'toggle-btn active' : 'toggle-btn'}
@@ -10296,6 +10517,179 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       </header>
 
       <NotificationStack />
+
+      {activeView === 'businessDashboard' && (
+        <section className="panel business-dashboard-panel">
+          <div className="panel-header">
+            <div>
+              <h3>{t('businessDashboard')}</h3>
+              <p className="panel-subtitle">{businessDashboard?.period?.startDate || getBusinessPeriod().startDate} to {businessDashboard?.period?.endDate || getBusinessPeriod().endDate} | {businessDashboard?.period?.timezone || company?.companyTimezone || 'America/Chicago'}</p>
+            </div>
+            <div className="business-toolbar">
+              <select className="filter-select" value={language} onChange={(e) => setLanguage(e.target.value)}>
+                <option value="en">English</option>
+                <option value="es">Español</option>
+              </select>
+              <select className="filter-select" value={businessPeriodPreset} onChange={(e) => setBusinessPeriodPreset(e.target.value)}>
+                <option value="today">Today / Hoy</option>
+                <option value="thisWeek">This Week / Esta semana</option>
+                <option value="thisMonth">This Month / Este mes</option>
+                <option value="lastMonth">Last Month / Mes pasado</option>
+                <option value="last3Months">Last 3 Months / Últimos 3 meses</option>
+                <option value="last6Months">Last 6 Months / Últimos 6 meses</option>
+                <option value="thisYear">This Year / Este año</option>
+                <option value="lastYear">Last Year / Año pasado</option>
+                <option value="custom">Custom Range / Rango personalizado</option>
+              </select>
+              {businessPeriodPreset === 'custom' && (
+                <>
+                  <input type="date" value={businessCustomRange.startDate} onChange={(e) => setBusinessCustomRange((prev) => ({ ...prev, startDate: e.target.value }))} />
+                  <input type="date" value={businessCustomRange.endDate} onChange={(e) => setBusinessCustomRange((prev) => ({ ...prev, endDate: e.target.value }))} />
+                </>
+              )}
+              <button type="button" className="secondary-btn compact-btn" onClick={fetchBusinessDashboard} disabled={businessLoading}>
+                {businessLoading ? 'Loading...' : 'Refresh'}
+              </button>
+            </div>
+          </div>
+
+          {businessStatus && <p className={businessStatus.includes('Failed') || businessStatus.includes('permission') ? 'settings-status error' : 'settings-status success'}>{businessStatus}</p>}
+
+          <div className="business-metric-grid">
+            {[
+              'totalRevenue',
+              'invoicedRevenue',
+              'collectedRevenue',
+              'outstandingRevenue',
+              'driverPayroll',
+              'directLoadExpenses',
+              'grossProfit',
+              'netProfit',
+              'completedLoads',
+              'averageRevenuePerLoad',
+              'averageDriverPayPerLoad',
+              'revenuePerDriver',
+              'revenuePerTruck',
+              'activeCustomers',
+              'overdueInvoices',
+              'unbilledDeliveredLoads',
+            ].map((key) => (
+              <div key={key} className="business-metric-card">
+                <span>{t(key)}</span>
+                <strong>{formatDashboardValue(businessDashboard?.data?.[key], key)}</strong>
+              </div>
+            ))}
+          </div>
+
+          <div className="business-dashboard-grid">
+            <div className="invoice-box">
+              <div className="panel-header compact-header">
+                <h3>{t('monthlyRevenueTrend')}</h3>
+              </div>
+              <div className="mini-chart-list">
+                {businessMonthlyRevenue.length === 0 ? (
+                  <p>No revenue data.</p>
+                ) : (
+                  businessMonthlyRevenue.map((row) => {
+                    const max = Math.max(...businessMonthlyRevenue.map((item) => Number(item.operationalRevenue || 0)), 1);
+                    return (
+                      <div key={row.month} className="mini-chart-row">
+                        <span>{row.month}</span>
+                        <div className="mini-chart-track">
+                          <div className="mini-chart-fill revenue" style={{ width: `${Math.max(4, (Number(row.operationalRevenue || 0) / max) * 100)}%` }} />
+                        </div>
+                        <strong>{moneyFormatter.format(Number(row.operationalRevenue || 0))}</strong>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="invoice-box">
+              <div className="panel-header compact-header">
+                <h3>{t('driverEfficiency')}</h3>
+              </div>
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Driver</th>
+                      <th>Loads</th>
+                      <th>Revenue</th>
+                      <th>Pay</th>
+                      <th>Margin</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {businessDriverEfficiency.map((row) => (
+                      <tr key={row.driverId}>
+                        <td>{row.driverName}</td>
+                        <td>{row.completedLoads}</td>
+                        <td>{moneyFormatter.format(Number(row.revenueGenerated || 0))}</td>
+                        <td>{moneyFormatter.format(Number(row.driverPay || 0))}</td>
+                        <td>{moneyFormatter.format(Number(row.grossMargin || 0))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div className="business-dashboard-grid">
+            <div className="invoice-box">
+              <div className="panel-header compact-header">
+                <h3>{t('reviewTables')}</h3>
+              </div>
+              {Object.entries(businessReviewItems?.data || {}).map(([key, rows]) => (
+                <div key={key} className="review-summary-row">
+                  <span>{key.replace(/([A-Z])/g, ' $1')}</span>
+                  <strong>{Array.isArray(rows) ? rows.length : 0}</strong>
+                </div>
+              ))}
+            </div>
+
+            <div className="invoice-box">
+              <div className="panel-header compact-header">
+                <h3>{t('askPortFlow')}</h3>
+                <span className={aiStatus?.companyEnabled && aiStatus?.enabled ? 'status-pill active' : 'status-pill inactive'}>
+                  {aiStatus?.companyEnabled && aiStatus?.enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+              <p className="panel-subtitle">Limited aggregated metrics are sent to the configured AI provider only when a question is submitted.</p>
+              <form className="ask-portflow-form" onSubmit={handleAskPortFlow}>
+                <textarea
+                  value={aiQuestion}
+                  onChange={(e) => setAiQuestion(e.target.value)}
+                  placeholder={language === 'es' ? '¿Cuánto revenue hicimos este mes?' : 'How much revenue did we make this month?'}
+                  rows={3}
+                />
+                <button type="submit" className="primary-btn compact-btn">Ask</button>
+              </form>
+              {aiAnswer?.answer && (
+                <div className="ai-answer-box">
+                  <p>{aiAnswer.answer}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {activeView === 'payroll' && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h3>Automatic Payroll / Nómina automática</h3>
+              <p className="panel-subtitle">Backend payroll generation and workflow APIs are available under /api/payroll.</p>
+            </div>
+            <button type="button" className="primary-btn" onClick={() => setActiveView('settlements')}>
+              Open Settlements
+            </button>
+          </div>
+        </section>
+      )}
 
       {activeView === 'dispatch' && (
         <>
@@ -13555,6 +13949,40 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
 {activeView === 'settings' && (
   <div className="dashboard-grid settings-grid">
+    {fullAccessRoles.has(getNormalizedRole(currentUser?.role)) && (
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h3>Analytics Settings / Configuración de análisis</h3>
+            <p className="panel-subtitle">AI analytics sends limited aggregated metrics only after an authorized user submits a question.</p>
+          </div>
+        </div>
+        <form className="invoice-branding-settings" onSubmit={handleSaveAnalyticsSettings}>
+          <div className="invoice-branding-grid">
+            <label>
+              <span>Company Timezone</span>
+              <input
+                type="text"
+                value={analyticsSettingsForm.companyTimezone}
+                onChange={(e) => setAnalyticsSettingsForm((prev) => ({ ...prev, companyTimezone: e.target.value }))}
+                placeholder="America/Chicago"
+              />
+            </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={analyticsSettingsForm.allowAiAnalytics}
+                onChange={(e) => setAnalyticsSettingsForm((prev) => ({ ...prev, allowAiAnalytics: e.target.checked }))}
+              />
+              Allow AI Analytics / Permitir análisis con IA
+            </label>
+          </div>
+          <div className="form-actions">
+            <button type="submit" className="primary-btn compact-btn">Save Analytics Settings</button>
+          </div>
+        </form>
+      </section>
+    )}
     {fullAccessRoles.has(getNormalizedRole(currentUser?.role)) && (
       <>
     <section className="panel">

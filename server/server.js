@@ -109,10 +109,12 @@ const getCompanyPayload = (company = {}) => ({
   portHoustonUsername: company.portHoustonUsername || '',
   portHoustonConfigured: Object.values(getSanitizedPortHoustonCredentials(company)).some((item) => item.configured),
   portHoustonCredentials: getSanitizedPortHoustonCredentials(company),
+  companyTimezone: company.companyTimezone || 'America/Chicago',
+  allowAiAnalytics: Number(company.allowAiAnalytics || 0) === 1,
 });
 
 const companyProfileSelect =
-  'id, name, email, logoPath, invoiceName, invoiceAddress, settlementCompanyName, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson';
+  'id, name, email, logoPath, invoiceName, invoiceAddress, settlementCompanyName, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson, companyTimezone, allowAiAnalytics';
 
 const parseNumericField = (value, fallback = 0) => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
@@ -124,8 +126,11 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { db, initDatabase } from './database.js';
+import createAnalyticsRoutes from './routes/analyticsRoutes.js';
+import createAiAnalyticsRoutes from './routes/aiAnalyticsRoutes.js';
 import createDriverSettlementRoutes from './routes/driverSettlements.js';
 import createInvoiceRoutes from './routes/invoices.js';
+import createPayrollRoutes from './routes/payrollRoutes.js';
 import {
   downloadGateTransactionDocument,
   extractGateTransactionNumbersFromHistory,
@@ -1348,6 +1353,9 @@ const requireTenantOwner = (req, res, next) => {
 
 app.use('/api/invoices', authenticate, createInvoiceRoutes(db));
 app.use('/api/driver-settlements', authenticate, createDriverSettlementRoutes(db));
+app.use('/api/analytics', authenticate, createAnalyticsRoutes(db));
+app.use('/api/payroll', authenticate, createPayrollRoutes(db));
+app.use('/api/ai', authenticate, createAiAnalyticsRoutes(db));
 
 app.post('/api/demo-requests', (req, res) => {
   const companyName = String(req.body?.companyName || '').trim();
@@ -2012,6 +2020,47 @@ app.put('/api/company/pod-settings', authenticate, requireRoles(adminRoles), (re
             ),
           });
 
+          res.json(getCompanyPayload(company));
+        }
+      );
+    }
+  );
+});
+
+app.put('/api/company/analytics-settings', authenticate, requireRoles(adminRoles), (req, res) => {
+  const companyId = req.company.companyId;
+  const companyTimezone = String(req.body?.companyTimezone || 'America/Chicago').trim() || 'America/Chicago';
+  const allowAiAnalytics = isTruthy(req.body?.allowAiAnalytics) ? 1 : 0;
+
+  db.run(
+    `UPDATE companies
+     SET companyTimezone = ?, allowAiAnalytics = ?
+     WHERE id = ?`,
+    [companyTimezone, allowAiAnalytics, companyId],
+    function (err) {
+      if (err) {
+        console.error('Analytics settings update error:', err.message);
+        return res.status(500).json({ error: 'Failed to save analytics settings.' });
+      }
+      if (this.changes === 0) {
+        return res.status(404).json({ error: 'Company not found.' });
+      }
+      db.get(
+        `SELECT ${companyProfileSelect} FROM companies WHERE id = ?`,
+        [companyId],
+        (lookupErr, company) => {
+          if (lookupErr || !company) {
+            console.error('Analytics settings lookup error:', lookupErr?.message);
+            return res.status(500).json({ error: 'Settings saved, but profile refresh failed.' });
+          }
+          writeAuditLog(req, {
+            action: 'ANALYTICS_SETTINGS_CHANGED',
+            entityType: 'COMPANY',
+            entityId: companyId,
+            entityLabel: company.name,
+            oldValue: null,
+            newValue: { companyTimezone, allowAiAnalytics: Boolean(allowAiAnalytics) },
+          });
           res.json(getCompanyPayload(company));
         }
       );

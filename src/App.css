@@ -4314,3 +4314,135 @@ button:disabled {
   font-size: 11px;
   padding: 3px 8px;
 }
+.business-dashboard-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.business-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.business-toolbar input,
+.ask-portflow-form textarea {
+  border: 1px solid #d7dde8;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.business-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.business-metric-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+  min-height: 86px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.business-metric-card span {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.business-metric-card strong {
+  color: #111827;
+  font-size: 1.25rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.business-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.compact-header {
+  margin-bottom: 10px;
+}
+
+.mini-chart-list {
+  display: grid;
+  gap: 10px;
+}
+
+.mini-chart-row {
+  display: grid;
+  grid-template-columns: 72px minmax(120px, 1fr) 110px;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+
+.mini-chart-track {
+  height: 10px;
+  background: #edf2f7;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mini-chart-fill {
+  height: 100%;
+  border-radius: inherit;
+}
+
+.mini-chart-fill.revenue {
+  background: #2563eb;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.review-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid #edf2f7;
+  text-transform: capitalize;
+}
+
+.ask-portflow-form {
+  display: grid;
+  gap: 10px;
+}
+
+.ask-portflow-form textarea {
+  resize: vertical;
+  min-height: 86px;
+}
+
+.ai-answer-box {
+  margin-top: 12px;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+@media (max-width: 720px) {
+  .business-toolbar {
+    justify-content: stretch;
+  }
+
+  .business-toolbar > * {
+    width: 100%;
+  }
+
+  .mini-chart-row {
+    grid-template-columns: 1fr;
+  }
+}

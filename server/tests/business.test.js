@@ -1,0 +1,81 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import sqlite3 from 'sqlite3';
+import { v4 as uuidv4 } from 'uuid';
+import { dbRun } from '../services/dbUtils.js';
+import { getSummary } from '../services/analyticsService.js';
+import { canUsePayroll, generatePayrollRun, getPayrollRun } from '../services/payrollService.js';
+
+const createDb = async () => {
+  const db = new sqlite3.Database(':memory:');
+  await dbRun(db, `CREATE TABLE companies (id TEXT PRIMARY KEY, companyTimezone TEXT DEFAULT 'America/Chicago', allowAiAnalytics INTEGER DEFAULT 0)`);
+  await dbRun(db, `CREATE TABLE loads (
+    id TEXT PRIMARY KEY, companyId TEXT, loadDate TEXT, appointmentTime TEXT, customer TEXT,
+    driver TEXT, truck TEXT, rate TEXT, driverRate TEXT, detention TEXT, lumper TEXT,
+    fuelAdvance TEXT, status TEXT, referenceNumber TEXT, containerNumber TEXT
+  )`);
+  await dbRun(db, `CREATE TABLE invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, companyId TEXT, invoiceNumber TEXT, loadId TEXT,
+    customerName TEXT, amount REAL, status TEXT, issueDate TEXT, dueDate TEXT, createdAt TEXT
+  )`);
+  await dbRun(db, `CREATE TABLE drivers (id TEXT PRIMARY KEY, companyId TEXT, name TEXT, truck TEXT)`);
+  await dbRun(db, `CREATE TABLE documents (id TEXT PRIMARY KEY, loadId TEXT, category TEXT, type TEXT)`);
+  await dbRun(db, `CREATE TABLE audit_logs (
+    id TEXT PRIMARY KEY, companyId TEXT, userId TEXT, userName TEXT, userRole TEXT, action TEXT,
+    entityType TEXT, entityId TEXT, entityLabel TEXT, oldValue TEXT, newValue TEXT,
+    changedFields TEXT, ipAddress TEXT, userAgent TEXT, createdAt TEXT NOT NULL
+  )`);
+  await dbRun(db, `CREATE TABLE payroll_runs (
+    id TEXT PRIMARY KEY, companyId TEXT, payrollNumber TEXT, periodStart TEXT, periodEnd TEXT,
+    status TEXT, totalGrossPay REAL DEFAULT 0, totalDeductions REAL DEFAULT 0,
+    totalReimbursements REAL DEFAULT 0, totalNetPay REAL DEFAULT 0, driverCount INTEGER DEFAULT 0,
+    loadCount INTEGER DEFAULT 0, notes TEXT, createdBy TEXT, reviewedBy TEXT, approvedBy TEXT,
+    finalizedBy TEXT, paidBy TEXT, createdAt TEXT, reviewedAt TEXT, approvedAt TEXT,
+    finalizedAt TEXT, paidAt TEXT, updatedAt TEXT
+  )`);
+  await dbRun(db, `CREATE TABLE payroll_items (
+    id TEXT PRIMARY KEY, companyId TEXT, payrollRunId TEXT, driverId TEXT, loadId TEXT,
+    referenceNumber TEXT, containerNumber TEXT, completedDate TEXT, baseDriverPay REAL DEFAULT 0,
+    detentionPay REAL DEFAULT 0, extraStopPay REAL DEFAULT 0, layoverPay REAL DEFAULT 0,
+    lumperReimbursement REAL DEFAULT 0, otherPay REAL DEFAULT 0, deductions REAL DEFAULT 0,
+    grossPay REAL DEFAULT 0, netPay REAL DEFAULT 0, calculationDetails TEXT, createdAt TEXT, updatedAt TEXT
+  )`);
+  await dbRun(db, `CREATE UNIQUE INDEX idx_payroll_items_run_load ON payroll_items(payrollRunId, loadId)`);
+  await dbRun(db, `CREATE TABLE payroll_settings (
+    id TEXT PRIMARY KEY, companyId TEXT UNIQUE, frequency TEXT, weekStartsOn TEXT, payDay TEXT,
+    includeStatuses TEXT, requirePOD INTEGER, requireBOL INTEGER, requireInterchange INTEGER,
+    defaultDetentionRule TEXT, defaultExtraStopRate REAL, defaultLayoverRate REAL,
+    approvalRequired INTEGER, companyTimezone TEXT, createdAt TEXT, updatedAt TEXT
+  )`);
+  await dbRun(db, `INSERT INTO companies (id, companyTimezone, allowAiAnalytics) VALUES ('COMP-A', 'America/Chicago', 0), ('COMP-B', 'America/Chicago', 0)`);
+  await dbRun(db, `INSERT INTO drivers (id, companyId, name, truck) VALUES ('DRV-A', 'COMP-A', 'Driver A', 'A1'), ('DRV-B', 'COMP-B', 'Driver B', 'B1')`);
+  return db;
+};
+
+test('analytics summary is isolated by companyId', async () => {
+  const db = await createDb();
+  await dbRun(db, `INSERT INTO loads (id, companyId, loadDate, status, rate, driverRate, customer, driver, truck) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, ['A1', 'COMP-A', '2026-07-10', 'Delivered', '$1000.00', '$400.00', 'A Customer', 'DRV-A', 'A1']);
+  await dbRun(db, `INSERT INTO loads (id, companyId, loadDate, status, rate, driverRate, customer, driver, truck) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, ['B1', 'COMP-B', '2026-07-10', 'Delivered', '$9000.00', '$4000.00', 'B Customer', 'DRV-B', 'B1']);
+  const summary = await getSummary(db, 'COMP-A', { startDate: '2026-07-01', endDate: '2026-07-31' });
+  assert.equal(summary.data.totalRevenue, 1000);
+  assert.equal(summary.data.driverPayroll, 400);
+});
+
+test('driver role cannot use administrative payroll helper', () => {
+  assert.equal(canUsePayroll('driver'), false);
+  assert.equal(canUsePayroll('payroll'), true);
+});
+
+test('payroll generation calculates net pay with reimbursement and is idempotent', async () => {
+  const db = await createDb();
+  await dbRun(db, `INSERT INTO loads (id, companyId, loadDate, status, rate, driverRate, lumper, customer, driver, truck, referenceNumber, containerNumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ['A1', 'COMP-A', '2026-07-10', 'Delivered', '$1000.00', '$500.00', '$40.00', 'A Customer', 'DRV-A', 'A1', 'REF-A1', 'CONT-A1']);
+  await dbRun(db, `INSERT INTO documents (id, loadId, category) VALUES (?, ?, ?)`, [uuidv4(), 'A1', 'POD']);
+  const first = await generatePayrollRun(db, 'COMP-A', { periodStart: '2026-07-01', periodEnd: '2026-07-31' }, { id: 'USR-A', role: 'payroll' });
+  const second = await generatePayrollRun(db, 'COMP-A', { periodStart: '2026-07-01', periodEnd: '2026-07-31' }, { id: 'USR-A', role: 'payroll' });
+  const run = await getPayrollRun(db, 'COMP-A', first.id);
+  assert.equal(first.id, second.id);
+  assert.equal(run.totalGrossPay, 500);
+  assert.equal(run.totalReimbursements, 40);
+  assert.equal(run.totalNetPay, 540);
+  assert.equal(run.items.length, 1);
+});
