@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { encrypt, isEncrypted } from './encryption.js';
 
 sqlite3.verbose();
 
@@ -465,7 +466,9 @@ droppedBy TEXT,
   customerExtraChargesJson TEXT,
   companyId TEXT,
   lastFreeDay TEXT,
-  carrierId TEXT
+  carrierId TEXT,
+  isDriverReleased INTEGER DEFAULT 1,
+  driverReleasedAt TEXT
 )
 `);
 
@@ -604,6 +607,18 @@ db.run(`ALTER TABLE loads ADD COLUMN billingStatus TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN carrierId TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding carrierId column:', err.message);
+  }
+});
+
+db.run(`ALTER TABLE loads ADD COLUMN isDriverReleased INTEGER DEFAULT 1`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding isDriverReleased column:', err.message);
+  }
+});
+
+db.run(`ALTER TABLE loads ADD COLUMN driverReleasedAt TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding driverReleasedAt column:', err.message);
   }
 });
 
@@ -1001,6 +1016,65 @@ db.run(`ALTER TABLE invoices ADD COLUMN paymentNotes TEXT`, (err) => {
             [row.maxNumber, row.maxNumber]
           );
         }
+      }
+    );
+
+    // Tenant-scoped list queries filter by companyId on every request; index the common lookups.
+    db.run(`CREATE INDEX IF NOT EXISTS idx_loads_company ON loads(companyId)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_customers_company ON customers(companyId)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_users_company ON users(companyId)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_invoices_company ON invoices(companyId)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_drivers_company ON drivers(companyId)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_documents_loadid ON documents(loadId)`);
+
+    // One-time migration: encrypt any Port Houston credentials still stored in plaintext.
+    db.all(
+      `SELECT id, portHoustonPassword, portHoustonCredentialsJson FROM companies`,
+      [],
+      (err, rows) => {
+        if (err) {
+          console.error('Port Houston credential migration lookup error:', err.message);
+          return;
+        }
+
+        (rows || []).forEach((row) => {
+          let credentialsJson = row.portHoustonCredentialsJson;
+          let credentialsChanged = false;
+
+          if (credentialsJson) {
+            try {
+              const parsed = JSON.parse(credentialsJson);
+              Object.keys(parsed).forEach((key) => {
+                const value = parsed[key];
+                if (value?.password && !isEncrypted(value.password)) {
+                  value.password = encrypt(value.password);
+                  credentialsChanged = true;
+                }
+              });
+              if (credentialsChanged) {
+                credentialsJson = JSON.stringify(parsed);
+              }
+            } catch {
+              // Leave malformed JSON untouched.
+            }
+          }
+
+          const legacyPassword = row.portHoustonPassword;
+          const legacyChanged = Boolean(legacyPassword) && !isEncrypted(legacyPassword);
+          const nextLegacyPassword = legacyChanged ? encrypt(legacyPassword) : legacyPassword;
+
+          if (credentialsChanged || legacyChanged) {
+            db.run(
+              `UPDATE companies SET portHoustonPassword = ?, portHoustonCredentialsJson = ? WHERE id = ?`,
+              [nextLegacyPassword, credentialsJson, row.id],
+              (updateErr) => {
+                if (updateErr) {
+                  console.error('Port Houston credential migration update error:', updateErr.message);
+                }
+              }
+            );
+          }
+        });
       }
     );
   });

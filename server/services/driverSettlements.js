@@ -308,53 +308,62 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
 
   const settlementId = input.id || uuidv4();
   const now = new Date().toISOString();
-  await dbRun(
-    db,
-    `INSERT INTO settlements (id, companyId, driverId, periodStart, periodEnd, status, notes, createdAt, updatedAt, createdBy)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      settlementId,
-      companyId,
-      driverId,
-      periodStart,
-      periodEnd,
-      input.status || 'Draft',
-      String(input.notes || ''),
-      now,
-      now,
-      createdBy,
-    ]
-  );
 
-  const config = getDriverPayConfig(driver);
-  const loads = await dbAll(
-    db,
-    `SELECT *
-     FROM loads
-     WHERE companyId = ?
-       AND driver = ?
-       AND LOWER(COALESCE(status, '')) IN ('delivered', 'completed')
-       AND DATE(SUBSTR(COALESCE(NULLIF(appointmentTime, ''), loadDate), 1, 10)) BETWEEN DATE(?) AND DATE(?)
-     ORDER BY appointmentTime, id`,
-    [companyId, driverId, periodStart, periodEnd]
-  );
-
-  for (const load of loads) {
+  await dbRun(db, 'BEGIN IMMEDIATE');
+  try {
     await dbRun(
       db,
-      `INSERT INTO settlement_loads (id, settlementId, loadId, payAmount, movesCount, description, source, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO settlements (id, companyId, driverId, periodStart, periodEnd, status, notes, createdAt, updatedAt, createdBy)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        uuidv4(),
         settlementId,
-        load.id,
-        calculateLoadPay(load, config),
-        Math.max(1, Number.parseInt(load.movesCount || 1, 10) || 1),
-        'Auto-added by appointment period',
-        'auto',
+        companyId,
+        driverId,
+        periodStart,
+        periodEnd,
+        input.status || 'Draft',
+        String(input.notes || ''),
         now,
+        now,
+        createdBy,
       ]
     );
+
+    const config = getDriverPayConfig(driver);
+    const loads = await dbAll(
+      db,
+      `SELECT *
+       FROM loads
+       WHERE companyId = ?
+         AND driver = ?
+         AND LOWER(COALESCE(status, '')) IN ('delivered', 'completed')
+         AND DATE(SUBSTR(COALESCE(NULLIF(appointmentTime, ''), loadDate), 1, 10)) BETWEEN DATE(?) AND DATE(?)
+       ORDER BY appointmentTime, id`,
+      [companyId, driverId, periodStart, periodEnd]
+    );
+
+    for (const load of loads) {
+      await dbRun(
+        db,
+        `INSERT INTO settlement_loads (id, settlementId, loadId, payAmount, movesCount, description, source, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          uuidv4(),
+          settlementId,
+          load.id,
+          calculateLoadPay(load, config),
+          Math.max(1, Number.parseInt(load.movesCount || 1, 10) || 1),
+          'Auto-added by appointment period',
+          'auto',
+          now,
+        ]
+      );
+    }
+
+    await dbRun(db, 'COMMIT');
+  } catch (error) {
+    await dbRun(db, 'ROLLBACK');
+    throw error;
   }
 
   await writeSettlementAudit(db, settlementId, 'CREATE', null, { driverId, periodStart, periodEnd }, createdBy);

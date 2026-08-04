@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
@@ -48,7 +49,7 @@ const parsePortHoustonCredentials = (company = {}) => {
   const credentials = portHoustonCredentialKeys.reduce((result, key) => {
     result[key] = {
       username: String(parsed?.[key]?.username || '').trim(),
-      password: String(parsed?.[key]?.password || ''),
+      password: decrypt(parsed?.[key]?.password || ''),
     };
     return result;
   }, {});
@@ -56,7 +57,7 @@ const parsePortHoustonCredentials = (company = {}) => {
   if (company.portHoustonUsername || company.portHoustonPassword) {
     const legacy = {
       username: company.portHoustonUsername || '',
-      password: company.portHoustonPassword || '',
+      password: decrypt(company.portHoustonPassword || ''),
     };
     if (!credentials.bayportContainerTracking.username && !credentials.bayportContainerTracking.password) {
       credentials.bayportContainerTracking = legacy;
@@ -125,9 +126,12 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import cron from 'node-cron';
 import { db, initDatabase } from './database.js';
 import createAnalyticsRoutes from './routes/analyticsRoutes.js';
 import createAiAnalyticsRoutes from './routes/aiAnalyticsRoutes.js';
+import { runBackup } from './backup-database.js';
+import { encrypt, decrypt, safeCompare } from './encryption.js';
 import createDriverSettlementRoutes from './routes/driverSettlements.js';
 import createInvoiceRoutes from './routes/invoices.js';
 import createPayrollRoutes from './routes/payrollRoutes.js';
@@ -143,7 +147,8 @@ import {
 } from './integrations/portHouston.js';
 
 const isProduction = process.env.NODE_ENV === 'production' || process.env.APP_ENV === 'production';
-const JWT_SECRET = process.env.JWT_SECRET || (!isProduction ? 'portflow-dev-secret-change-before-production' : '');
+const DEV_JWT_SECRET = 'portflow-dev-secret-change-before-production';
+const JWT_SECRET = process.env.JWT_SECRET || (!isProduction ? DEV_JWT_SECRET : '');
 const PORTFLOW_OWNER_EMAIL = String(process.env.PORTFLOW_OWNER_EMAIL || 'oliver@portflow-net.com').trim().toLowerCase();
 const PORTFLOW_OWNER_RESET_CODE = String(process.env.PORTFLOW_OWNER_RESET_CODE || '').trim();
 
@@ -1160,7 +1165,7 @@ const requirePortHoustonInternalToken = (req, res, next) => {
     return res.status(503).json({ error: 'Port Houston internal token is not configured.' });
   }
 
-  if (!providedToken || providedToken !== expectedToken) {
+  if (!providedToken || !safeCompare(providedToken, expectedToken)) {
     return res.status(401).json({ error: 'Unauthorized Port Houston callback.' });
   }
 
@@ -1306,6 +1311,30 @@ app.post('/api/port-houston/eir-upload', requirePortHoustonInternalToken, upload
     console.error('Port Houston EIR upload failed:', error.message);
     res.status(500).json({ ok: false, error: 'Failed to save Port Houston EIR.' });
   }
+});
+
+const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please try again later.' },
+});
+
+const ownerResetRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many password reset attempts. Please try again later.' },
+});
+
+const registerRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many registration attempts. Please try again later.' },
 });
 
 const authenticate = (req, res, next) => {
@@ -2113,14 +2142,22 @@ app.put('/api/company/port-houston', authenticate, requireRoles(adminRoles), (re
         (credential) => credential.username && credential.password
       ).length;
 
+      const encryptedCredentials = portHoustonCredentialKeys.reduce((result, key) => {
+        result[key] = {
+          username: nextCredentials[key]?.username || '',
+          password: encrypt(nextCredentials[key]?.password || ''),
+        };
+        return result;
+      }, {});
+
       db.run(
         `UPDATE companies
          SET portHoustonUsername = ?, portHoustonPassword = ?, portHoustonCredentialsJson = ?
          WHERE id = ?`,
         [
           primaryCredentials.username || '',
-          primaryCredentials.password || '',
-          JSON.stringify(nextCredentials),
+          encrypt(primaryCredentials.password || ''),
+          JSON.stringify(encryptedCredentials),
           companyId,
         ],
         function (updateErr) {
@@ -3152,7 +3189,7 @@ app.delete('/api/locations/:id', authenticate, (req, res) => {
   );
 });
 
-app.post('/api/owner/reset-password', async (req, res) => {
+app.post('/api/owner/reset-password', ownerResetRateLimiter, async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   const resetCode = String(req.body?.resetCode || '').trim();
   const newPassword = String(req.body?.newPassword || '');
@@ -3161,7 +3198,7 @@ app.post('/api/owner/reset-password', async (req, res) => {
     return res.status(503).json({ error: 'Owner password reset is not configured.' });
   }
 
-  if (email !== PORTFLOW_OWNER_EMAIL || resetCode !== PORTFLOW_OWNER_RESET_CODE) {
+  if (email !== PORTFLOW_OWNER_EMAIL || !safeCompare(resetCode, PORTFLOW_OWNER_RESET_CODE)) {
     return res.status(403).json({ error: 'Invalid reset email or reset code.' });
   }
 
@@ -3267,7 +3304,7 @@ app.post('/api/owner/reset-password', async (req, res) => {
   }
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', loginRateLimiter, (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
@@ -3337,7 +3374,7 @@ app.post('/api/login', (req, res) => {
 });
 
 app.get('/api/create-test-driver', async (req, res) => {
-  if (isProduction) {
+  if (isProduction || JWT_SECRET !== DEV_JWT_SECRET) {
     return res.status(404).json({ error: 'Not found' });
   }
 
@@ -3579,7 +3616,9 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           customerExtraChargesJson = ?,
           lastFreeDay = ?,
           miles = ?,
-          billingStatus = ?
+          billingStatus = ?,
+          isDriverReleased = ?,
+          driverReleasedAt = ?
          WHERE id = ? AND companyId = ?`,
         [
           l.loadDate || '',
@@ -3624,6 +3663,12 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           body.lastFreeDay || '',
           parseNumericField(l.miles),
           l.billingStatus || existingLoad.billingStatus || '',
+          String(normalizedDriver || '').trim().toLowerCase() !== String(existingLoad.driver || '').trim().toLowerCase()
+            ? 0
+            : isTruthy(l.isDriverReleased ?? existingLoad.isDriverReleased) ? 1 : 0,
+          String(normalizedDriver || '').trim().toLowerCase() !== String(existingLoad.driver || '').trim().toLowerCase()
+            ? ''
+            : l.driverReleasedAt || existingLoad.driverReleasedAt || '',
           loadId,
           companyId,
         ],
@@ -3684,7 +3729,8 @@ app.get('/api/loads', authenticate, (req, res) => {
     db.all(
       `SELECT * FROM loads
        WHERE companyId = ?
-       AND TRIM(LOWER(driver)) = TRIM(LOWER(?))`,
+       AND TRIM(LOWER(driver)) = TRIM(LOWER(?))
+       AND COALESCE(isDriverReleased, 1) = 1`,
       [companyId, driverId],
       (err, rows) => {
       if (err) {
@@ -3722,6 +3768,155 @@ app.get('/api/loads', authenticate, (req, res) => {
       });
     }
   );
+});
+
+app.put('/api/loads/:id/driver-release', authenticate, (req, res) => {
+  const companyId = req.company.companyId;
+  const loadId = String(req.params.id || '').trim();
+  const role = String(req.user?.role || '').trim().toLowerCase();
+  const allowedRoles = new Set(['owner', 'admin', 'manager', 'dispatcher', 'carrier']);
+
+  if (!allowedRoles.has(role)) {
+    return res.status(403).json({ error: 'Only dispatch staff can release loads to drivers.' });
+  }
+
+  db.get(
+    `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
+    [loadId, companyId],
+    (findErr, existingLoad) => {
+      if (findErr) return res.status(500).json({ error: findErr.message });
+      if (!existingLoad) return res.status(404).json({ error: 'Load not found' });
+
+      const released = isTruthy(req.body?.released);
+      if (released && !String(existingLoad.driver || '').trim()) {
+        return res.status(400).json({ error: 'Assign a driver before releasing this load.' });
+      }
+
+      const driverReleasedAt = released ? new Date().toISOString() : '';
+      db.run(
+        `UPDATE loads
+         SET isDriverReleased = ?, driverReleasedAt = ?
+         WHERE id = ? AND companyId = ?`,
+        [released ? 1 : 0, driverReleasedAt, loadId, companyId],
+        function updateRelease(err) {
+          if (err) return res.status(500).json({ error: err.message });
+
+          db.get(
+            `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
+            [loadId, companyId],
+            (readErr, updatedLoad) => {
+              if (readErr) return res.status(500).json({ error: readErr.message });
+
+              writeAuditLog(req, {
+                action: released ? 'RELEASE_TO_DRIVER' : 'RETURN_TO_DISPATCH',
+                entityType: 'LOAD',
+                entityId: loadId,
+                entityLabel: loadId,
+                oldValue: {
+                  isDriverReleased: existingLoad.isDriverReleased,
+                  driverReleasedAt: existingLoad.driverReleasedAt || '',
+                },
+                newValue: { isDriverReleased: released ? 1 : 0, driverReleasedAt },
+                changedFields: {
+                  isDriverReleased: {
+                    oldValue: existingLoad.isDriverReleased,
+                    newValue: released ? 1 : 0,
+                  },
+                  driverReleasedAt: {
+                    oldValue: existingLoad.driverReleasedAt || '',
+                    newValue: driverReleasedAt,
+                  },
+                },
+              });
+
+              res.json(updatedLoad);
+            }
+          );
+        }
+      );
+    }
+  );
+});
+
+app.put('/api/loads/:id/locations', authenticate, (req, res) => {
+  const companyId = req.company.companyId;
+  const loadId = String(req.params.id || '').trim();
+  const role = String(req.user?.role || '').trim().toLowerCase();
+  const driverId = String(req.user?.driverId || '').trim();
+  const staffRoles = new Set(['owner', 'admin', 'manager', 'dispatcher', 'carrier']);
+  const isDriver = role === 'driver';
+
+  if (!isDriver && !staffRoles.has(role)) {
+    return res.status(403).json({ error: 'You do not have permission to edit load locations.' });
+  }
+
+  const pickup = String(req.body?.pickup || '').trim();
+  const delivery = String(req.body?.delivery || '').trim();
+  const returnLocation = String(req.body?.returnLocation || '').trim();
+
+  if (!pickup || !delivery) {
+    return res.status(400).json({ error: 'Pickup and delivery locations are required.' });
+  }
+
+  const lookupSql = isDriver
+    ? `SELECT * FROM loads
+       WHERE id = ? AND companyId = ?
+         AND TRIM(LOWER(driver)) = TRIM(LOWER(?))
+         AND COALESCE(isDriverReleased, 1) = 1`
+    : `SELECT * FROM loads WHERE id = ? AND companyId = ?`;
+  const lookupParams = isDriver ? [loadId, companyId, driverId] : [loadId, companyId];
+
+  db.get(lookupSql, lookupParams, (findErr, existingLoad) => {
+    if (findErr) return res.status(500).json({ error: findErr.message });
+    if (!existingLoad) {
+      return res.status(404).json({
+        error: isDriver
+          ? 'Released load not found for this driver.'
+          : 'Load not found.',
+      });
+    }
+
+    db.run(
+      `UPDATE loads
+       SET pickup = ?, delivery = ?, returnLocation = ?
+       WHERE id = ? AND companyId = ?`,
+      [pickup, delivery, returnLocation, loadId, companyId],
+      function updateLoadLocations(err) {
+        if (err) return res.status(500).json({ error: err.message });
+
+        db.get(
+          `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
+          [loadId, companyId],
+          (readErr, updatedLoad) => {
+            if (readErr) return res.status(500).json({ error: readErr.message });
+
+            writeAuditLog(req, {
+              action: isDriver ? 'DRIVER_UPDATE_LOCATIONS' : 'UPDATE_LOCATIONS',
+              entityType: 'LOAD',
+              entityId: loadId,
+              entityLabel: loadId,
+              oldValue: {
+                pickup: existingLoad.pickup || '',
+                delivery: existingLoad.delivery || '',
+                returnLocation: existingLoad.returnLocation || '',
+              },
+              newValue: { pickup, delivery, returnLocation },
+              changedFields: {
+                pickup: { oldValue: existingLoad.pickup || '', newValue: pickup },
+                delivery: { oldValue: existingLoad.delivery || '', newValue: delivery },
+                returnLocation: {
+                  oldValue: existingLoad.returnLocation || '',
+                  newValue: returnLocation,
+                },
+              },
+            });
+
+            res.json(updatedLoad);
+          }
+        );
+      }
+    );
+  });
 });
 
 app.get('/api/drivers', authenticate, (req, res) => {
@@ -3965,6 +4160,126 @@ app.post('/api/drivers', authenticate, async (req, res) => {
   });
 });
 
+app.put('/api/drivers/:id', authenticate, requireRoles(dispatchLocationRoles), async (req, res) => {
+  const companyId = req.company.companyId;
+  const driverId = String(req.params.id || '').trim();
+  const name = String(req.body?.name || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+  const truck = String(req.body?.truck || '').trim();
+  const phone = String(req.body?.phone || '').trim();
+  const isActive = req.body?.isActive ? 1 : 0;
+
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Driver name and email are required.' });
+  }
+
+  db.get(
+    `SELECT * FROM drivers WHERE id = ? AND companyId = ?`,
+    [driverId, companyId],
+    async (findErr, existingDriver) => {
+      if (findErr) return res.status(500).json({ error: findErr.message });
+      if (!existingDriver) return res.status(404).json({ error: 'Driver not found.' });
+
+      try {
+        const savedPassword = password
+          ? await bcrypt.hash(password, 10)
+          : existingDriver.password;
+
+        db.run(
+          `UPDATE drivers
+           SET name = ?, email = ?, password = ?, truck = ?, phone = ?, isActive = ?
+           WHERE id = ? AND companyId = ?`,
+          [name, email, savedPassword, truck, phone, isActive, driverId, companyId],
+          (driverErr) => {
+            if (driverErr) {
+              const status = String(driverErr.message || '').includes('UNIQUE constraint failed')
+                ? 409
+                : 500;
+              return res.status(status).json({ error: driverErr.message });
+            }
+
+            db.run(
+              `UPDATE users
+               SET name = ?, email = ?, password = ?, isActive = ?, role = 'driver'
+               WHERE driverId = ? AND companyId = ?`,
+              [name, email, savedPassword, isActive, driverId, companyId],
+              function updateDriverUser(userErr) {
+                if (userErr) {
+                  const status = String(userErr.message || '').includes('UNIQUE constraint failed')
+                    ? 409
+                    : 500;
+                  return res.status(status).json({ error: userErr.message });
+                }
+
+                const finish = () => {
+                  writeAuditLog(req, {
+                    action: 'UPDATE_DRIVER',
+                    entityType: 'DRIVER',
+                    entityId: driverId,
+                    entityLabel: name,
+                    oldValue: {
+                      name: existingDriver.name,
+                      email: existingDriver.email,
+                      phone: existingDriver.phone || '',
+                      truck: existingDriver.truck || '',
+                      isActive: Boolean(existingDriver.isActive),
+                    },
+                    newValue: {
+                      name,
+                      email,
+                      phone,
+                      truck,
+                      isActive: Boolean(isActive),
+                      passwordChanged: Boolean(password),
+                    },
+                  });
+
+                  res.json({
+                    success: true,
+                    driver: {
+                      id: driverId,
+                      name,
+                      email,
+                      truck,
+                      phone,
+                      companyId,
+                      isActive,
+                    },
+                  });
+                };
+
+                if (this.changes > 0) {
+                  finish();
+                  return;
+                }
+
+                db.run(
+                  `INSERT INTO users (
+                    id, name, email, password, role, companyId, isActive, driverId
+                  ) VALUES (?, ?, ?, ?, 'driver', ?, ?, ?)`,
+                  [`USR-${driverId}`, name, email, savedPassword, companyId, isActive, driverId],
+                  (insertErr) => {
+                    if (insertErr) {
+                      const status = String(insertErr.message || '').includes('UNIQUE constraint failed')
+                        ? 409
+                        : 500;
+                      return res.status(status).json({ error: insertErr.message });
+                    }
+                    finish();
+                  }
+                );
+              }
+            );
+          }
+        );
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  );
+});
+
 app.post('/api/loads', authenticate, (req, res) => {
   const l = req.body || {};
   const companyId = req.company.companyId;
@@ -4061,8 +4376,10 @@ dropDateTime,
               lastFreeDay,
               carrierId,
               miles,
-              billingStatus
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              billingStatus,
+              isDriverReleased,
+              driverReleasedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               generatedLoadId,
               l.loadDate || new Date().toISOString().slice(0, 10),
@@ -4107,7 +4424,9 @@ dropDateTime,
               l.lastFreeDay || '',
               l.carrierId || '',
               parseNumericField(l.miles),
-              l.billingStatus || ''
+              l.billingStatus || '',
+              0,
+              ''
             ],
             function (err) {
               if (err) {
@@ -5068,7 +5387,7 @@ app.put('/api/loads/:id/status', authenticate, (req, res) => {
 console.log('SERVER FILE LOADED');
 console.log('Invoice routes mounted at /api/invoices');
 
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', registerRateLimiter, async (req, res) => {
   const { name, email, password } = req.body;
 
   if (!name || !email || !password) {
@@ -5148,45 +5467,6 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required.' });
-  }
-
-  db.get(
-    `SELECT * FROM companies WHERE email = ?`,
-    [email],
-    async (err, company) => {
-      if (err) {
-        console.error('Login lookup error:', err.message);
-        return res.status(500).json({ error: 'Database error.' });
-      }
-
-      if (!company) {
-        return res.status(401).json({ error: 'Invalid email or password.' });
-      }
-
-      const isValid = await bcrypt.compare(password, company.passwordHash);
-
-      if (!isValid) {
-        return res.status(401).json({ error: 'Invalid email or password.' });
-      }
-
-      const token = jwt.sign(
-        { companyId: company.id, email: company.email, role: String(company.email || '').trim().toLowerCase() === PORTFLOW_OWNER_EMAIL ? 'owner' : 'admin' },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-
-      res.json({
-        token,
-        company: getCompanyPayload(company),
-      });
-    }
-  );
-});
-
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir));
   app.get(/^(?!\/api\/|\/uploads\/).*/, (_req, res) => {
@@ -5194,6 +5474,18 @@ if (fs.existsSync(distDir)) {
   });
 } else {
   console.warn(`Frontend dist folder not found at ${distDir}. Run npm run build before production start.`);
+}
+
+if (isProduction) {
+  const backupSchedule = process.env.BACKUP_CRON_SCHEDULE || '0 3 * * *';
+  cron.schedule(backupSchedule, () => {
+    try {
+      runBackup();
+    } catch (error) {
+      console.error('Scheduled database backup failed:', error.message);
+    }
+  });
+  console.log(`Scheduled database backups: "${backupSchedule}"`);
 }
 
 app.listen(PORT, '0.0.0.0', () => {

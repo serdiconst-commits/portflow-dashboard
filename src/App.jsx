@@ -9,6 +9,72 @@ import {
 } from '@capgo/capacitor-document-scanner';
 // 'dispatcher' | 'driver'
 import './App.css';
+import DispatchBoard from './components/DispatchBoard/DispatchBoard.jsx';
+import StatusBadge from './components/DispatchBoard/StatusBadge.jsx';
+
+function LoadLocationEditor({
+  editorId,
+  title = 'Edit Load Locations',
+  draft,
+  pickupOptions = [],
+  deliveryOptions = [],
+  returnOptions = [],
+  saving = false,
+  status = '',
+  onChange,
+  onSave,
+  onCancel,
+}) {
+  const lists = [
+    ['pickup', `${editorId}-pickup-options`, 'Pickup Location', pickupOptions, true],
+    ['delivery', `${editorId}-delivery-options`, 'Delivery Location', deliveryOptions, true],
+    ['returnLocation', `${editorId}-return-options`, 'Return Location', returnOptions, false],
+  ];
+
+  return (
+    <section className="load-location-editor" aria-label={title}>
+      <div className="load-location-editor-header">
+        <div>
+          <h4>{title}</h4>
+          <p>Choose a saved location or type a full address.</p>
+        </div>
+        <button type="button" className="secondary-btn compact-btn" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+
+      <div className="load-location-editor-grid">
+        {lists.map(([field, listId, label, options, required]) => (
+          <label key={field}>
+            <span>{label}</span>
+            <input
+              type="text"
+              list={listId}
+              value={draft[field] || ''}
+              onChange={(event) => onChange(field, event.target.value)}
+              placeholder={`Enter ${label.toLowerCase()}`}
+              required={required}
+            />
+            <datalist id={listId}>
+              {options.map((option) => (
+                <option key={option.id || option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </datalist>
+          </label>
+        ))}
+      </div>
+
+      <div className="load-location-editor-actions">
+        <button type="button" className="primary-btn compact-btn" onClick={onSave} disabled={saving}>
+          {saving ? 'Saving Locations...' : 'Save Locations'}
+        </button>
+        {status && <span className={status.startsWith('Failed') ? 'error' : ''}>{status}</span>}
+      </div>
+    </section>
+  );
+}
 
 export default function App() {
 const rawApiBase = import.meta.env.VITE_API_BASE || '';
@@ -82,6 +148,7 @@ const [driverForm, setDriverForm] = useState({
   truck: '',
   isActive: true,
 });
+const [editingDriverId, setEditingDriverId] = useState('');
 
 const emptyStaffForm = {
   name: '',
@@ -862,6 +929,18 @@ state: '',
 zip: '',
   };
 
+  const emptyConsigneeLocation = {
+    id: '',
+    customerId: '',
+    name: '',
+    type: 'delivery',
+    address: '',
+    city: '',
+    state: '',
+    zip: '',
+    notes: '',
+  };
+
 const getDemoData = () => {
   const today = getDateStringInAppTimeZone();
   const tomorrow = getDateStringWithOffsetInAppTimeZone(1);
@@ -1065,7 +1144,7 @@ const [dashboardFilter, setDashboardFilter] = useState('all');
 const [appointmentDateFilter, setAppointmentDateFilter] = useState('today');
 const [appointmentDeliveryTypeFilter, setAppointmentDeliveryTypeFilter] = useState('all');
 const [customAppointmentDate, setCustomAppointmentDate] = useState(getTodayDate());
-const [availableAppointmentDateFilter, setAvailableAppointmentDateFilter] = useState('today');
+const [availableAppointmentDateFilter, setAvailableAppointmentDateFilter] = useState('all');
 const [availableDeliveryTypeFilter, setAvailableDeliveryTypeFilter] = useState('all');
 const [availableCustomAppointmentDate, setAvailableCustomAppointmentDate] = useState(getTodayDate());
 const [lfdDateFilter, setLfdDateFilter] = useState('all');
@@ -1196,6 +1275,7 @@ const buildPortHoustonCredentialForm = (source = {}) => {
 const [activeView, setActiveView] = useState(
   isDriverApp || savedUser?.role === 'driver' ? 'driver' : getDefaultViewForRole(savedUser?.role)
 );
+const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
 const [loadsData, setLoadsData] = useState([]);
 const availableLoads = loadsData.filter(
@@ -1233,13 +1313,30 @@ const [customers, setCustomers] = useState([]);
 const [customerForm, setCustomerForm] = useState(emptyCustomer);
 const [showCustomerEditor, setShowCustomerEditor] = useState(false);
 const [editingCustomerId, setEditingCustomerId] = useState(null);
+const [consigneeLocationForm, setConsigneeLocationForm] = useState(emptyConsigneeLocation);
+const [editingConsigneeLocationId, setEditingConsigneeLocationId] = useState('');
+const [consigneeLocationTypeFilter, setConsigneeLocationTypeFilter] = useState('all');
+const [consigneeLocationSaving, setConsigneeLocationSaving] = useState(false);
+const [consigneeLocationStatus, setConsigneeLocationStatus] = useState('');
 const fileInputRef = useRef(null);
 const [previewDocument, setPreviewDocument] = useState(null);
 const [previewUrl, setPreviewUrl] = useState('');
+const [documentPendingDeletion, setDocumentPendingDeletion] = useState(null);
+const [isDeletingDocument, setIsDeletingDocument] = useState(false);
+const [documentDeleteError, setDocumentDeleteError] = useState('');
 
 const [showForm, setShowForm] = useState(false);
 const [isEditing, setIsEditing] = useState(false);
 const [showLocationEditor, setShowLocationEditor] = useState(false);
+const [loadLocationEditor, setLoadLocationEditor] = useState({
+  loadId: '',
+  context: '',
+  pickup: '',
+  delivery: '',
+  returnLocation: '',
+  saving: false,
+  status: '',
+});
 
 const sigCanvas = useRef(null);
 const [signatures, setSignatures] = useState({});
@@ -4223,6 +4320,44 @@ useEffect(() => {
     return createBackendSettlement();
   };
 
+  const handleSaveSettlementNote = async () => {
+    if (!activeSettlementDriverId || !settlementStartDate || !settlementEndDate) {
+      setSettlementBackendStatus('Choose a driver and settlement week before saving the payroll note.');
+      return;
+    }
+
+    let settlement = activeBackendSettlement;
+    if (!settlement?.id) {
+      settlement = await createBackendSettlement();
+      if (!settlement?.id) return;
+    }
+
+    setSettlementBackendLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/driver-settlements/${settlement.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ notes: settlementNote }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to save payroll note');
+      }
+
+      setActiveBackendSettlement(data);
+      setSettlementNote(data.notes || data.statement?.settlement?.notes || '');
+      setSettlementBackendStatus('Payroll note saved. It will appear on the settlement PDF.');
+    } catch (error) {
+      console.error('Failed to save payroll note:', error);
+      setSettlementBackendStatus(`Failed to save payroll note: ${error.message}`);
+    } finally {
+      setSettlementBackendLoading(false);
+    }
+  };
+
   const handleCompleteBackendSettlement = async () => {
     if (!activeBackendSettlement?.id) return;
 
@@ -4623,7 +4758,7 @@ const matchesAppointmentDateFilter = (load) => {
 };
 const matchesAvailableAppointmentDateFilter = (load) => {
   const targetDate = getAvailableAppointmentFilterDate();
-  if (!targetDate) return hasAppointment(load);
+  if (!targetDate) return true;
   return getLoadAppointmentDate(load) === targetDate;
 };
 const matchesLfdDateFilter = (load) => {
@@ -5907,11 +6042,15 @@ const handleQuickDriverChange = async (e) => {
   if (!selectedLoad) return;
 
 const newDriver = normalizeDriverForStorage(e.target.value);
+const driverChanged =
+  normalizeDriverForStorage(selectedLoad.driver) !== newDriver;
 
 const updatedLoad = {
   ...selectedLoad,
   driver: newDriver,
   truck: newDriver ? getDriverTruck(newDriver) : '',
+  isDriverReleased: driverChanged ? 0 : selectedLoad.isDriverReleased,
+  driverReleasedAt: driverChanged ? '' : selectedLoad.driverReleasedAt || '',
   status: getStatusAfterDriverAssignment(newDriver, selectedLoad.status),
   pickup:
     selectedLoad.status === 'Dropped'
@@ -5940,6 +6079,39 @@ const updatedLoad = {
     await fetchSelectedLoadAuditLogs(updatedLoad.id);
   } catch (error) {
     console.error('Failed to update driver:', error);
+  }
+};
+
+const handleDriverReleaseChange = async (load, released) => {
+  if (!load?.id) return;
+  if (released && !normalizeDriverForStorage(load.driver)) {
+    alert('Assign a driver before releasing this load.');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${load.id}/driver-release`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ released }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to update driver visibility');
+    }
+
+    setLoadsData((prevLoads) =>
+      prevLoads.map((currentLoad) => (currentLoad.id === data.id ? data : currentLoad))
+    );
+    setSelectedLoad((currentLoad) => (currentLoad?.id === data.id ? data : currentLoad));
+    setEditingLoad((currentLoad) => (currentLoad?.id === data.id ? data : currentLoad));
+    await fetchSelectedLoadAuditLogs(data.id);
+  } catch (error) {
+    console.error('Failed to update driver visibility:', error);
+    alert(`Failed to update driver visibility: ${error.message}`);
   }
 };
 const handleQuickStatusChange = async (e) => {
@@ -6338,17 +6510,44 @@ const handleCompletedReviewDocumentUpload = async (e) => {
   }
 };
 
-  const handleDeleteDocument = async (docId) => {
+  const requestDocumentDeletion = (doc) => {
+    if (!doc?.id) return;
+    setDocumentDeleteError('');
+    setDocumentPendingDeletion(doc);
+  };
+
+  const closeDocumentDeleteConfirmation = () => {
+    if (isDeletingDocument) return;
+    setDocumentPendingDeletion(null);
+    setDocumentDeleteError('');
+  };
+
+  const handleDeleteDocument = async () => {
+    if (!documentPendingDeletion?.id || isDeletingDocument) return;
+
+    setIsDeletingDocument(true);
+    setDocumentDeleteError('');
+
     try {
-      await fetch(`${API_BASE}/api/documents/${docId}`, {
+      const response = await fetch(`${API_BASE}/api/documents/${documentPendingDeletion.id}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${authToken}`,
         },
       });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete document');
+      }
+
       await fetchLoads();
+      setDocumentPendingDeletion(null);
     } catch (error) {
       console.error('Failed to delete document:', error);
+      setDocumentDeleteError(error.message || 'Failed to delete document');
+    } finally {
+      setIsDeletingDocument(false);
     }
   };
 
@@ -6534,18 +6733,113 @@ const handleDeleteCustomer = async (customerId) => {
     alert(`Failed to delete customer: ${error.message}`);
   }
 };
+
+const resetConsigneeLocationForm = (type = 'delivery', customerId = '') => {
+  setConsigneeLocationForm({
+    ...emptyConsigneeLocation,
+    type,
+    customerId,
+  });
+  setEditingConsigneeLocationId('');
+  setConsigneeLocationStatus('');
+};
+
+const handleConsigneeLocationFormChange = (event) => {
+  const { name, value } = event.target;
+  setConsigneeLocationForm((prev) => ({ ...prev, [name]: value }));
+  setConsigneeLocationStatus('');
+};
+
+const handleEditConsigneeLocation = (location) => {
+  setEditingConsigneeLocationId(location.id);
+  setConsigneeLocationForm({
+    ...emptyConsigneeLocation,
+    ...location,
+    type: ['pickup', 'delivery', 'return'].includes(location.type)
+      ? location.type
+      : 'delivery',
+  });
+  setConsigneeLocationStatus('');
+};
+
+const handleSaveConsigneeLocation = async (event) => {
+  event.preventDefault();
+  const isEditingLocation = Boolean(editingConsigneeLocationId);
+  const payload = {
+    ...consigneeLocationForm,
+    name: String(consigneeLocationForm.name || '').trim(),
+    address: String(consigneeLocationForm.address || '').trim(),
+    city: String(consigneeLocationForm.city || '').trim(),
+    state: String(consigneeLocationForm.state || '').trim(),
+    zip: String(consigneeLocationForm.zip || '').trim(),
+    notes: String(consigneeLocationForm.notes || '').trim(),
+  };
+
+  setConsigneeLocationSaving(true);
+  setConsigneeLocationStatus('');
+  try {
+    const res = await fetch(
+      isEditingLocation
+        ? `${API_BASE}/api/locations/${encodeURIComponent(editingConsigneeLocationId)}`
+        : `${API_BASE}/api/locations`,
+      {
+        method: isEditingLocation ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save consignee location');
+    }
+
+    await fetchLocations();
+    setConsigneeLocationForm({
+      ...emptyConsigneeLocation,
+      type: payload.type,
+      customerId: payload.customerId,
+    });
+    setEditingConsigneeLocationId('');
+    setConsigneeLocationStatus(
+      isEditingLocation
+        ? 'Location updated. The change is available in Create Load.'
+        : 'Location added. It is now available in Create Load.'
+    );
+  } catch (error) {
+    console.error('Failed to save consignee location:', error);
+    setConsigneeLocationStatus(`Failed: ${error.message}`);
+  } finally {
+    setConsigneeLocationSaving(false);
+  }
+};
+
+const handleDeleteConsigneeLocation = async (locationId) => {
+  await handleDeleteLocation(locationId);
+  if (editingConsigneeLocationId === locationId) {
+    resetConsigneeLocationForm();
+  }
+};
+
 const handleSaveDriver = async (e) => {
   if (e) e.preventDefault();
 
   try {
-    const res = await fetch(`${API_BASE}/api/drivers`, {
-      method: 'POST',
+    const res = await fetch(
+      editingDriverId
+        ? `${API_BASE}/api/drivers/${encodeURIComponent(editingDriverId)}`
+        : `${API_BASE}/api/drivers`,
+      {
+      method: editingDriverId ? 'PUT' : 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
       },
       body: JSON.stringify(driverForm),
-    });
+      }
+    );
 
     const data = await res.json();
 
@@ -6562,7 +6856,7 @@ const handleSaveDriver = async (e) => {
       });
     }
 
-    alert('Driver created successfully');
+    alert(editingDriverId ? 'Driver updated successfully' : 'Driver created successfully');
     await fetchDrivers();
     await fetchAllUsers();
 
@@ -6575,10 +6869,37 @@ const handleSaveDriver = async (e) => {
       truck: '',
       isActive: true,
     });
+    setEditingDriverId('');
   } catch (error) {
     console.error('Failed to save driver:', error);
     alert(`Failed to save driver: ${error.message}`);
   }
+};
+
+const handleEditDriver = (driver) => {
+  setEditingDriverId(driver.id);
+  setDriverForm({
+    id: driver.id || '',
+    name: driver.name || '',
+    email: driver.email || '',
+    password: '',
+    phone: driver.phone || '',
+    truck: driver.truck || '',
+    isActive: Boolean(driver.isActive),
+  });
+};
+
+const handleCancelDriverEdit = () => {
+  setEditingDriverId('');
+  setDriverForm({
+    id: '',
+    name: '',
+    email: '',
+    password: '',
+    phone: '',
+    truck: '',
+    isActive: true,
+  });
 };
 
 const handleSaveStaffUser = async (e) => {
@@ -6864,7 +7185,11 @@ const handleChangeUserRole = async (userId, newRole) => {
             <div class="box"><span>Base Driver Pay</span><strong>${settlementTotals.driverShare}</strong></div>
             <div class="box"><span>Final Take Home Pay</span><strong>${settlementTotals.finalPayCheck}</strong></div>
           </div>
-          ${settlementNote ? `<div class="note"><strong>Payroll Note</strong><br>${settlementNote}</div>` : ''}
+          ${
+            settlementNote
+              ? `<div class="note"><strong>Payroll Note</strong><br>${escapeSettlementHtml(settlementNote).replace(/\n/g, '<br>')}</div>`
+              : ''
+          }
           <h2>Custom Deductions</h2>
           <table>
             <thead>
@@ -8092,6 +8417,28 @@ const returnLocations = Array.isArray(locations)
     )
   : [];
 
+const customerNameById = useMemo(
+  () => new Map(customers.map((customer) => [customer.id, customer.name])),
+  [customers]
+);
+
+const managedConsigneeLocations = useMemo(() => {
+  const supportedTypes = new Set(['pickup', 'delivery', 'return']);
+  return locations
+    .filter((location) => supportedTypes.has(String(location.type || '').toLowerCase()))
+    .filter(
+      (location) =>
+        consigneeLocationTypeFilter === 'all' ||
+        String(location.type || '').toLowerCase() === consigneeLocationTypeFilter
+    )
+    .toSorted((a, b) => {
+      const customerCompare = String(customerNameById.get(a.customerId) || '').localeCompare(
+        String(customerNameById.get(b.customerId) || '')
+      );
+      return customerCompare || String(a.name || '').localeCompare(String(b.name || ''));
+    });
+}, [locations, consigneeLocationTypeFilter, customerNameById]);
+
 const normalizeLocationText = (value = '') =>
   String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -8407,6 +8754,167 @@ const handleSaveNewDeliveryLocation = async () => {
     alert(error.message);
   }
 };
+
+const handleSaveNewReturnLocation = async () => {
+  try {
+    const payload = {
+      ...newReturnLocation,
+      customerId: newLoad.customerId || '',
+      type: 'return',
+    };
+    const res = await fetch(`${API_BASE}/api/locations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save return location');
+    }
+
+    const savedLocation = {
+      ...payload,
+      id: data.id,
+      companyId: company?.id || currentUser?.companyId || '',
+    };
+    const fullAddress = formatLocationAddress(savedLocation);
+    setLocations((prev) => [...prev.filter((location) => location.id !== savedLocation.id), savedLocation]);
+    setNewLoad((prev) => ({ ...prev, returnLocation: fullAddress }));
+    setNewReturnLocation({
+      name: '',
+      address: '',
+      city: '',
+      state: '',
+      zip: '',
+      type: 'return',
+      customerId: '',
+      notes: '',
+    });
+    setShowNewReturnForm(false);
+  } catch (error) {
+    console.error('Error saving return location:', error);
+    if (handleAuthError(error.message)) return;
+    alert(error.message);
+  }
+};
+
+const getLocationEditorOptions = (options = []) =>
+  options.map((location) => ({
+    id: location.id,
+    value: formatLocationAddress(location),
+    label: getLocationOptionLabel(location),
+  }));
+
+const openLoadLocationEditor = (load, context) => {
+  if (!load?.id) return;
+  setLoadLocationEditor({
+    loadId: load.id,
+    context,
+    pickup: load.pickup || '',
+    delivery: load.delivery || '',
+    returnLocation: load.returnLocation || '',
+    saving: false,
+    status: '',
+  });
+};
+
+const closeLoadLocationEditor = () => {
+  setLoadLocationEditor({
+    loadId: '',
+    context: '',
+    pickup: '',
+    delivery: '',
+    returnLocation: '',
+    saving: false,
+    status: '',
+  });
+};
+
+const handleLoadLocationEditorChange = (field, value) => {
+  setLoadLocationEditor((prev) => ({
+    ...prev,
+    [field]: value,
+    status: '',
+  }));
+};
+
+const handleSaveLoadLocations = async () => {
+  const pickup = String(loadLocationEditor.pickup || '').trim();
+  const delivery = String(loadLocationEditor.delivery || '').trim();
+  const returnLocation = String(loadLocationEditor.returnLocation || '').trim();
+
+  if (!pickup || !delivery) {
+    setLoadLocationEditor((prev) => ({
+      ...prev,
+      status: 'Failed: pickup and delivery are required.',
+    }));
+    return;
+  }
+
+  setLoadLocationEditor((prev) => ({ ...prev, saving: true, status: '' }));
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/loads/${encodeURIComponent(loadLocationEditor.loadId)}/locations`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ pickup, delivery, returnLocation }),
+      }
+    );
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save load locations');
+    }
+
+    const mergeUpdatedLoad = (load) =>
+      load.id === data.id ? { ...load, ...data, documents: load.documents || [] } : load;
+    setLoadsData((prev) => prev.map(mergeUpdatedLoad));
+    setSelectedLoad((prev) => (prev?.id === data.id ? { ...prev, ...data } : prev));
+    setEditingLoad((prev) => (prev?.id === data.id ? { ...prev, ...data } : prev));
+
+    if (currentUser?.role !== 'driver') {
+      await Promise.all([
+        saveLocationIfNotExists(pickup, 'pickup'),
+        saveLocationIfNotExists(delivery, 'delivery'),
+        returnLocation ? saveLocationIfNotExists(returnLocation, 'return') : Promise.resolve(),
+      ]);
+      await fetchSelectedLoadAuditLogs(data.id);
+    }
+
+    closeLoadLocationEditor();
+  } catch (error) {
+    console.error('Failed to save load locations:', error);
+    setLoadLocationEditor((prev) => ({
+      ...prev,
+      saving: false,
+      status: `Failed: ${error.message}`,
+    }));
+  }
+};
+
+const renderLoadLocationEditor = (load, context, title) =>
+  loadLocationEditor.loadId === load?.id && loadLocationEditor.context === context ? (
+    <LoadLocationEditor
+      editorId={`${context}-${load.id}`}
+      title={title}
+      draft={loadLocationEditor}
+      pickupOptions={getLocationEditorOptions(pickupLocations)}
+      deliveryOptions={getLocationEditorOptions(deliveryLocations)}
+      returnOptions={getLocationEditorOptions(returnLocations)}
+      saving={loadLocationEditor.saving}
+      status={loadLocationEditor.status}
+      onChange={handleLoadLocationEditorChange}
+      onSave={handleSaveLoadLocations}
+      onCancel={closeLoadLocationEditor}
+    />
+  ) : null;
+
 const handleSelectSavedLocationForSelectedLoad = (field, locationId) => {
   const selected = locations.find((loc) => loc.id === locationId);
   if (!selected) return;
@@ -8827,8 +9335,9 @@ const viewFilteredLoadsData =
     ? (loadsData || []).filter((load) => {
         const status = String(load.status || '').trim().toLowerCase();
         const matchesDriver = driverMatchesCurrentUser(load.driver, currentUser);
+        const isReleased = Number(load.isDriverReleased ?? 1) === 1;
 
-        return matchesDriver && !['delivered', 'dropped'].includes(status);
+        return matchesDriver && isReleased && !['delivered', 'dropped'].includes(status);
       })
     : baseFilteredLoadsData;
 
@@ -8959,14 +9468,7 @@ const dispatchLoadColumnsByKey = {
   },
   status: {
     label: 'Status',
-    render: (load) => {
-      const displayStatus = getLoadQuickStatus(load);
-      return (
-        <span className={`sheet-status ${String(displayStatus || '').toLowerCase().replace(/\s/g, '-')}`}>
-          {displayStatus || '-'}
-        </span>
-      );
-    },
+    render: (load) => <StatusBadge status={getLoadQuickStatus(load)} />,
   },
   referenceNumber: {
     label: 'Ref #',
@@ -9433,10 +9935,21 @@ const DriverLoadCard = ({ load }) => {
           <span className="driver-card-kicker">Load {load.id}</span>
           <h3>{load.referenceNumber || load.poNumber || load.bookingNumber || 'No reference'}</h3>
         </div>
-        <span className={`driver-status-pill status-${getDriverStatusClass(load.status)}`}>
-          {load.status || 'Assigned'}
-        </span>
+        <div className="driver-load-card-actions">
+          <span className={`driver-status-pill status-${getDriverStatusClass(load.status)}`}>
+            {load.status || 'Assigned'}
+          </span>
+          <button
+            type="button"
+            className="driver-location-edit-btn"
+            onClick={() => openLoadLocationEditor(load, 'driver')}
+          >
+            Edit Locations
+          </button>
+        </div>
       </div>
+
+      {renderLoadLocationEditor(load, 'driver', 'Edit Pickup, Delivery & Return')}
 
       <div className="driver-info-grid">
         <div className="driver-info-item wide">
@@ -10344,6 +10857,91 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 }
   return (
   <div className="app-shell">
+    <button
+      type="button"
+      className="sidebar-mobile-toggle"
+      onClick={() => setIsSidebarOpen((open) => !open)}
+      aria-label="Open navigation"
+      aria-expanded={isSidebarOpen}
+    >
+      <span />
+      <span />
+      <span />
+    </button>
+    {isSidebarOpen && (
+      <button
+        type="button"
+        className="sidebar-backdrop"
+        aria-label="Close navigation"
+        onClick={() => setIsSidebarOpen(false)}
+      />
+    )}
+    <aside className={`app-sidebar ${isSidebarOpen ? 'open' : ''}`}>
+      <div className="sidebar-brand">
+        {getCompanyLogoSrc() ? (
+          <img src={getCompanyLogoSrc()} alt={`${company?.name || 'PortFlow'} logo`} />
+        ) : (
+          <span className="sidebar-brand-mark">P</span>
+        )}
+        <div>
+          <strong>PortFlow</strong>
+          <small>{company?.name || 'Transportation'}</small>
+        </div>
+      </div>
+
+      <nav className="sidebar-nav" aria-label="Main navigation">
+        {[
+          ['dispatch', 'Dispatch Board'],
+          ['completed', 'Completed Loads'],
+          ['settlements', 'Driver Settlements'],
+          ['businessDashboard', t('businessDashboard')],
+          ['payroll', 'Payroll'],
+          ['customers', 'Customers'],
+          ['drivers', 'Drivers'],
+          ['invoices', 'Invoices'],
+          ['accounting', 'Accounting'],
+          ['settings', 'Settings'],
+          ...(canManageTenants ? [['tenants', 'Tenant Management']] : []),
+        ].map(([view, label]) =>
+          roleCanAccessView(currentUser?.role, view) ? (
+            <button
+              type="button"
+              key={view}
+              className={activeView === view ? 'active' : ''}
+              onClick={() => {
+                setActiveView(view);
+                setIsSidebarOpen(false);
+              }}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="4" y="4" width="6" height="6" rx="1" />
+                <rect x="14" y="4" width="6" height="6" rx="1" />
+                <rect x="4" y="14" width="6" height="6" rx="1" />
+                <rect x="14" y="14" width="6" height="6" rx="1" />
+              </svg>
+              <span>{label}</span>
+            </button>
+          ) : null
+        )}
+      </nav>
+
+      <div className="sidebar-footer">
+        <div className="sidebar-user">
+          <span>{String(currentUser?.name || currentUser?.email || 'U').slice(0, 1).toUpperCase()}</span>
+          <div>
+            <strong>{currentUser?.name || 'PortFlow User'}</strong>
+            <small>{currentUser?.role || 'Dispatcher'}</small>
+          </div>
+        </div>
+        <button type="button" className="sidebar-logout" onClick={handleLogout}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10" />
+          </svg>
+          Logout
+        </button>
+      </div>
+    </aside>
+    <div className="app-main-shell">
      {fullAccessRoles.has(getNormalizedRole(currentUser?.role)) && (
      <div className="view-toggle portal-toggle">
       <button type="button" className="toggle-btn" onClick={() => setUserRole('driver')}>
@@ -10382,116 +10980,27 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 )}
       <header className="topbar">
         <div className="brand-block">
-          {getCompanyLogoSrc() && (
-            <img
-              src={getCompanyLogoSrc()}
-              alt={`${company?.name || 'Company'} logo`}
-              className="company-logo"
-            />
-          )}
           <div>
-          <h1>{company?.name || 'PortFlow Dispatch'}</h1>
+          <h1>{({
+            dispatch: 'Dispatch Board',
+            completed: 'Completed Loads',
+            settlements: 'Driver Settlements',
+            customers: 'Customers',
+            drivers: 'Drivers',
+            invoices: 'Invoices',
+            accounting: 'Accounting',
+            businessDashboard: t('businessDashboard'),
+            payroll: 'Payroll',
+            settings: 'Settings',
+            tenants: 'Tenant Management',
+          })[activeView] || 'PortFlow'}</h1>
           {isDemoMode && <span className="demo-mode-badge">Demo Mode - sample data only</span>}
-          <p>Dispatch • Settlements • Paperwork • Load Tracking</p>
+          <p>{company?.name || 'Transportation Management System'}</p>
         </div>
 
         </div>
 
         <div className="topbar-actions">
-          <div className="view-toggle">
-            {roleCanAccessView(currentUser?.role, 'dispatch') && (
-            <button
-              className={activeView === 'dispatch' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('dispatch')}
-            >
-              Dispatch Board
-            </button>
-            )}
-            {roleCanAccessView(currentUser?.role, 'completed') && (
-            <button
-              className={activeView === 'completed' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('completed')}
-            >
-              Completed Loads
-            </button>
-            )}
-            {roleCanAccessView(currentUser?.role, 'settlements') && (
-            <button
-              className={activeView === 'settlements' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('settlements')}
-            >
-              Driver Settlements
-            </button>
-            )}
-            {roleCanAccessView(currentUser?.role, 'businessDashboard') && (
-            <button
-              className={activeView === 'businessDashboard' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('businessDashboard')}
-              title="Business Dashboard"
-            >
-              {t('businessDashboard')}
-            </button>
-            )}
-            {roleCanAccessView(currentUser?.role, 'payroll') && (
-            <button
-              className={activeView === 'payroll' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('payroll')}
-            >
-              Payroll
-            </button>
-            )}
-            {roleCanAccessView(currentUser?.role, 'customers') && (
-            <button
-              className={activeView === 'customers' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('customers')}
-            >
-              Customers
-            </button>
-            )}
-{roleCanAccessView(currentUser?.role, 'drivers') && (
-<button
-              className={activeView === 'drivers' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('drivers')}
-            >
-              Drivers
-            </button>
-)}
-
-{roleCanAccessView(currentUser?.role, 'settings') && (
-<button
-  className={activeView === 'settings' ? 'toggle-btn active' : 'toggle-btn'}
-  onClick={() => setActiveView('settings')}
->
-  Settings
-</button>
-)}
-
-            {roleCanAccessView(currentUser?.role, 'invoices') && (
-            <button
-              className={activeView === 'invoices' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('invoices')}
-            >
-              Invoices
-            </button>
-            )}
-            {roleCanAccessView(currentUser?.role, 'accounting') && (
-            <button
-              className={activeView === 'accounting' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('accounting')}
-            >
-              Accounting
-            </button>
-            )}
-            {canManageTenants && (
-              <button
-                className={activeView === 'tenants' ? 'toggle-btn active' : 'toggle-btn'}
-                onClick={() => setActiveView('tenants')}
-              >
-                Tenant Management
-              </button>
-            )}
-          </div>
-
           {activeView === 'dispatch' && (
             <button
   className="primary-btn"
@@ -10510,9 +11019,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   {showForm ? 'Close Form' : '+ Add New Load'}
 </button>
           )}
-          <button type="button" className="secondary-btn" onClick={handleLogout}>
-            Logout
-          </button>
         </div>
       </header>
 
@@ -11301,6 +11807,64 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   emptyText: 'No return locations found.',
 })}
 
+<div className="inline-action-row location-action-row">
+  <button
+    type="button"
+    className="secondary-btn compact-btn"
+    onClick={() => setShowNewReturnForm((prev) => !prev)}
+  >
+    {showNewReturnForm ? 'Cancel New Return' : '+ New Return Location'}
+  </button>
+</div>
+
+{showNewReturnForm && (
+  <div className="new-location-form">
+    <input
+      type="text"
+      placeholder="Return Location Name"
+      value={newReturnLocation.name}
+      onChange={(event) =>
+        setNewReturnLocation((prev) => ({ ...prev, name: event.target.value }))
+      }
+    />
+    <input
+      type="text"
+      placeholder="Street Address"
+      value={newReturnLocation.address}
+      onChange={(event) =>
+        setNewReturnLocation((prev) => ({ ...prev, address: event.target.value }))
+      }
+    />
+    <input
+      type="text"
+      placeholder="City"
+      value={newReturnLocation.city}
+      onChange={(event) =>
+        setNewReturnLocation((prev) => ({ ...prev, city: event.target.value }))
+      }
+    />
+    <input
+      type="text"
+      placeholder="State"
+      value={newReturnLocation.state}
+      onChange={(event) =>
+        setNewReturnLocation((prev) => ({ ...prev, state: event.target.value }))
+      }
+    />
+    <input
+      type="text"
+      placeholder="ZIP"
+      value={newReturnLocation.zip}
+      onChange={(event) =>
+        setNewReturnLocation((prev) => ({ ...prev, zip: event.target.value }))
+      }
+    />
+    <button type="button" className="primary-btn compact-btn" onClick={handleSaveNewReturnLocation}>
+      Save Return Location
+    </button>
+  </div>
+)}
+
 <div className="form-group">
   <label>Route Miles</label>
   <div className="inline-action-row">
@@ -11470,7 +12034,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           {dashboardFilter === 'available' && (
             <section className="appointment-filter-panel">
               <div>
-                <span>Available By Appointment</span>
+                <span>Available Loads</span>
                 <strong>{filteredLoadsData.length} loads</strong>
               </div>
               <select
@@ -11478,7 +12042,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onChange={(e) => setAvailableAppointmentDateFilter(e.target.value)}
                 className="filter-select"
               >
-                <option value="all">All Loads</option>
+                <option value="all">All Available Loads</option>
                 <option value="today">Today</option>
                 <option value="tomorrow">Tomorrow</option>
                 <option value="custom">Custom</option>
@@ -11617,51 +12181,24 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </>
                 )}
               </div>
-              <div className="dispatch-sheet-wrap">
-                {filteredLoadsData.length > 0 ? (
-                  <table className="dispatch-load-sheet">
-                    <thead>
-                      <tr>
-                        {orderedDispatchLoadColumns.map((column) => (
-                          <th
-                            key={column.key}
-                            draggable
-                            className={draggedDispatchColumn === column.key ? 'dragging-column' : ''}
-                            onDragStart={(event) => handleDispatchColumnDragStart(event, column.key)}
-                            onDragEnd={() => setDraggedDispatchColumn('')}
-                            onDragOver={(event) => event.preventDefault()}
-                            onDrop={(event) => handleDispatchColumnDrop(event, column.key)}
-                            title="Drag to move this column"
-                          >
-                            <span className="column-drag-handle" aria-hidden="true">::</span>
-                            {column.label}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredLoadsData.map((load) => (
-                        <tr
-                          key={load.id}
-                          className={selectedLoad?.id === load.id ? 'selected' : ''}
-                          onClick={() => {
-                            setSelectedLoad(load);
-                            setIsEditing(false);
-                          }}
-                        >
-                          {orderedDispatchLoadColumns.map((column) => (
-                            <td key={`${load.id}-${column.key}`}>{column.render(load)}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="empty-state">
-                    <p>No loads found with those filters.</p>
-                  </div>
-                )}
+              <div className="driver-release-legend" role="note">
+                <span><i className="release-dot pending" /> Pending release (dispatch only)</span>
+                <span><i className="release-dot released">✓</i> Released (visible to driver)</span>
+                <p>Selecting a driver keeps the load with dispatch until the release checkmark is clicked.</p>
               </div>
+              <DispatchBoard
+                filteredLoadsData={filteredLoadsData}
+                orderedDispatchLoadColumns={orderedDispatchLoadColumns}
+                draggedDispatchColumn={draggedDispatchColumn}
+                handleDispatchColumnDragStart={handleDispatchColumnDragStart}
+                setDraggedDispatchColumn={setDraggedDispatchColumn}
+                handleDispatchColumnDrop={handleDispatchColumnDrop}
+                selectedLoad={selectedLoad}
+                setSelectedLoad={setSelectedLoad}
+                setIsEditing={setIsEditing}
+                onDriverReleaseChange={handleDriverReleaseChange}
+                getDriverLabel={getDriverLabel}
+              />
 
               <div className="legacy-load-list-hidden" aria-hidden="true">
                 {filteredLoadsData.length > 0 ? (
@@ -11951,6 +12488,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       ) : (
                         <>
                           <button type="button" className="secondary-btn" onClick={handleEditClick}>Edit Load</button>
+                          <button
+                            type="button"
+                            className="secondary-btn"
+                            onClick={() => openLoadLocationEditor(selectedLoad, 'details')}
+                          >
+                            Edit Locations
+                          </button>
                           <button type="button" className="secondary-btn" onClick={() => handleDuplicateLoad(selectedLoad)}>Duplicate Load</button>
                         </>
                       )}
@@ -12180,6 +12724,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     </form>
                   ) : (
                     <>
+                      {renderLoadLocationEditor(selectedLoad, 'details', 'Edit Load Locations')}
                       <div className="quick-actions-grid">
                         <div className="quick-driver-box">
                           <label htmlFor="quick-driver-select">Quick Driver Change</label>
@@ -12196,6 +12741,39 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </option>
   ))}
 </select>
+                        </div>
+
+                        <div className="quick-driver-box driver-release-box">
+                          <label>Driver App Visibility</label>
+                          <button
+                            type="button"
+                            className={`driver-release-action ${Number(selectedLoad.isDriverReleased ?? 1) === 1 ? 'released' : 'pending'}`}
+                            disabled={!normalizeDriverForStorage(selectedLoad.driver)}
+                            onClick={() =>
+                              handleDriverReleaseChange(
+                                selectedLoad,
+                                Number(selectedLoad.isDriverReleased ?? 1) !== 1
+                              )
+                            }
+                          >
+                            <span className="driver-release-action-icon" aria-hidden="true">
+                              {Number(selectedLoad.isDriverReleased ?? 1) === 1 ? '✓' : ''}
+                            </span>
+                            <span>
+                              <strong>
+                                {Number(selectedLoad.isDriverReleased ?? 1) === 1
+                                  ? 'Released to driver'
+                                  : 'Release to driver'}
+                              </strong>
+                              <small>
+                                {Number(selectedLoad.isDriverReleased ?? 1) === 1
+                                  ? 'This load is visible in the driver app.'
+                                  : normalizeDriverForStorage(selectedLoad.driver)
+                                    ? 'Pending release — dispatch can still make changes.'
+                                    : 'Assign a driver first.'}
+                              </small>
+                            </span>
+                          </button>
                         </div>
 
                         <div className="quick-driver-box">
@@ -12611,7 +13189,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                 <div className="document-actions">
                                   <button className="secondary-btn" onClick={() => handleOpenDocument(doc)}>Open</button>
                                   <button className="secondary-btn" onClick={() => handleDownloadDocument(doc)}>Download</button>
-                                  <button className="secondary-btn" onClick={() => handleDeleteDocument(doc.id)}>Remove</button>
+                                  <button className="secondary-btn" onClick={() => requestDocumentDeletion(doc)}>Remove</button>
                                 </div>
                               </div>
                             ))}
@@ -12927,10 +13505,24 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <span>Payroll Note</span>
               <textarea
                 rows="3"
-                placeholder="Internal note for this driver's settlement"
+                placeholder="Note shown on this driver's settlement PDF"
                 value={settlementNote}
                 onChange={(e) => setSettlementNote(e.target.value)}
               />
+              <button
+                type="button"
+                className="primary-btn settlement-note-save"
+                onClick={handleSaveSettlementNote}
+                disabled={
+                  settlementBackendLoading ||
+                  !activeSettlementDriverId ||
+                  !settlementStartDate ||
+                  !settlementEndDate
+                }
+              >
+                Save Payroll Note
+              </button>
+              <small>Saved notes appear on the printed settlement PDF.</small>
             </label>
 
             <div className="settlement-entry-meta">
@@ -13371,6 +13963,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               </div>
             </div>
 
+            {(activeBackendSettlement.notes || activeBackendSettlement.statement?.settlement?.notes) && (
+              <div className="settlement-note-preview">
+                <span>Payroll Note — included on PDF</span>
+                <p>{activeBackendSettlement.notes || activeBackendSettlement.statement?.settlement?.notes}</p>
+              </div>
+            )}
+
             <div className="table-wrap">
               <table>
                 <thead>
@@ -13691,6 +14290,20 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       <button className="secondary-btn" onClick={() => handleEditCustomer(customer)}>
                         Edit
                       </button>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => {
+                          resetConsigneeLocationForm('delivery', customer.id);
+                          window.requestAnimationFrame(() => {
+                            document
+                              .getElementById('consignee-locations-panel')
+                              ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          });
+                        }}
+                      >
+                        Add Location
+                      </button>
                       <button className="danger-btn" onClick={() => handleDeleteCustomer(customer.id)}>
                         Delete
                       </button>
@@ -13704,6 +14317,236 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               )}
             </div>
           </section>
+
+          <section id="consignee-locations-panel" className="panel consignee-locations-panel">
+            <div className="panel-header consignee-locations-header">
+              <div>
+                <h3>Consignees & Locations</h3>
+                <p className="panel-subtitle">
+                  Manage pickup, delivery, and return locations here. Every saved location is
+                  automatically available when creating a load.
+                </p>
+              </div>
+              <div className="consignee-quick-actions" aria-label="Add consignee location">
+                {[
+                  ['pickup', 'New Pickup'],
+                  ['delivery', 'New Delivery'],
+                  ['return', 'New Return'],
+                ].map(([type, label]) => (
+                  <button
+                    key={type}
+                    type="button"
+                    className={`secondary-btn compact-btn ${consigneeLocationForm.type === type && !editingConsigneeLocationId ? 'active' : ''}`}
+                    onClick={() => resetConsigneeLocationForm(type)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="consignee-locations-layout">
+              <form className="consignee-location-form" onSubmit={handleSaveConsigneeLocation}>
+                <div className="consignee-form-heading">
+                  <div>
+                    <span className={`location-type-badge type-${consigneeLocationForm.type}`}>
+                      {consigneeLocationForm.type}
+                    </span>
+                    <h4>
+                      {editingConsigneeLocationId
+                        ? 'Edit Consignee Location'
+                        : `Add ${consigneeLocationForm.type} location`}
+                    </h4>
+                  </div>
+                  {editingConsigneeLocationId && (
+                    <button
+                      type="button"
+                      className="secondary-btn compact-btn"
+                      onClick={() => resetConsigneeLocationForm()}
+                    >
+                      Cancel Edit
+                    </button>
+                  )}
+                </div>
+
+                <label>
+                  <span>Customer</span>
+                  <select
+                    name="customerId"
+                    value={consigneeLocationForm.customerId}
+                    onChange={handleConsigneeLocationFormChange}
+                  >
+                    <option value="">General / All Customers</option>
+                    {customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <span>Location Type</span>
+                  <select
+                    name="type"
+                    value={consigneeLocationForm.type}
+                    onChange={handleConsigneeLocationFormChange}
+                  >
+                    <option value="pickup">Pickup</option>
+                    <option value="delivery">Delivery</option>
+                    <option value="return">Return</option>
+                  </select>
+                </label>
+
+                <label className="consignee-form-wide">
+                  <span>Consignee / Location Name</span>
+                  <input
+                    type="text"
+                    name="name"
+                    value={consigneeLocationForm.name}
+                    onChange={handleConsigneeLocationFormChange}
+                    placeholder="Example: ABC Warehouse"
+                    required
+                  />
+                </label>
+
+                <label className="consignee-form-wide">
+                  <span>Street Address</span>
+                  <input
+                    type="text"
+                    name="address"
+                    value={consigneeLocationForm.address}
+                    onChange={handleConsigneeLocationFormChange}
+                    placeholder="Street address"
+                    required
+                  />
+                </label>
+
+                <label>
+                  <span>City</span>
+                  <input
+                    type="text"
+                    name="city"
+                    value={consigneeLocationForm.city}
+                    onChange={handleConsigneeLocationFormChange}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>State</span>
+                  <input
+                    type="text"
+                    name="state"
+                    value={consigneeLocationForm.state}
+                    onChange={handleConsigneeLocationFormChange}
+                    maxLength="2"
+                    placeholder="TX"
+                    required
+                  />
+                </label>
+                <label>
+                  <span>ZIP</span>
+                  <input
+                    type="text"
+                    name="zip"
+                    value={consigneeLocationForm.zip}
+                    onChange={handleConsigneeLocationFormChange}
+                    placeholder="ZIP code"
+                  />
+                </label>
+                <label className="consignee-form-wide">
+                  <span>Location Notes</span>
+                  <textarea
+                    name="notes"
+                    value={consigneeLocationForm.notes}
+                    onChange={handleConsigneeLocationFormChange}
+                    rows="3"
+                    placeholder="Gate instructions, receiving hours, contact details..."
+                  />
+                </label>
+
+                <div className="consignee-form-actions">
+                  <button
+                    type="submit"
+                    className="primary-btn"
+                    disabled={consigneeLocationSaving}
+                  >
+                    {consigneeLocationSaving
+                      ? 'Saving...'
+                      : editingConsigneeLocationId
+                        ? 'Save Location Changes'
+                        : 'Add Location'}
+                  </button>
+                  {consigneeLocationStatus && (
+                    <span className={consigneeLocationStatus.startsWith('Failed') ? 'error' : ''}>
+                      {consigneeLocationStatus}
+                    </span>
+                  )}
+                </div>
+              </form>
+
+              <div className="consignee-location-library">
+                <div className="consignee-library-toolbar">
+                  <div>
+                    <h4>Saved Consignee Locations</h4>
+                    <span>{managedConsigneeLocations.length} shown</span>
+                  </div>
+                  <select
+                    value={consigneeLocationTypeFilter}
+                    onChange={(event) => setConsigneeLocationTypeFilter(event.target.value)}
+                    aria-label="Filter consignee locations by type"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="pickup">Pickup</option>
+                    <option value="delivery">Delivery</option>
+                    <option value="return">Return</option>
+                  </select>
+                </div>
+
+                {managedConsigneeLocations.length > 0 ? (
+                  <div className="consignee-location-list">
+                    {managedConsigneeLocations.map((location) => (
+                      <article key={location.id} className="consignee-location-card">
+                        <div className="consignee-location-card-main">
+                          <div>
+                            <span className={`location-type-badge type-${location.type}`}>
+                              {location.type}
+                            </span>
+                            <h5>{location.name || 'Unnamed location'}</h5>
+                          </div>
+                          <small>
+                            {customerNameById.get(location.customerId) || 'General / All Customers'}
+                          </small>
+                          <p>{formatLocationAddress(location)}</p>
+                          {location.notes && <p className="consignee-location-notes">{location.notes}</p>}
+                        </div>
+                        <div className="consignee-location-card-actions">
+                          <button
+                            type="button"
+                            className="secondary-btn compact-btn"
+                            onClick={() => handleEditConsigneeLocation(location)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="danger-btn compact-btn"
+                            onClick={() => handleDeleteConsigneeLocation(location.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <p>No consignee locations match this type yet.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
         </div>
       )}
 {activeView === 'drivers' && (
@@ -13711,8 +14554,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     <section className="panel">
       <div className="panel-header">
         <div>
-          <h3>Create Driver</h3>
-          <p className="panel-subtitle">Add a driver login for dispatch assignments.</p>
+          <h3>{editingDriverId ? 'Edit Driver' : 'Create Driver'}</h3>
+          <p className="panel-subtitle">
+            {editingDriverId
+              ? 'Update the driver profile, truck, login, or account status.'
+              : 'Add a driver login for dispatch assignments.'}
+          </p>
         </div>
       </div>
 
@@ -13721,6 +14568,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           type="text"
           placeholder="Driver ID (optional, auto DRV-001)"
           value={driverForm.id}
+          disabled={Boolean(editingDriverId)}
           onChange={(e) =>
             setDriverForm((prev) => ({ ...prev, id: e.target.value }))
           }
@@ -13766,12 +14614,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
         <input
           type="password"
-          placeholder="Temporary Password"
+          placeholder={editingDriverId ? 'New Password (leave blank to keep current)' : 'Temporary Password'}
           value={driverForm.password}
           onChange={(e) =>
             setDriverForm((prev) => ({ ...prev, password: e.target.value }))
           }
-          required
+          required={!editingDriverId}
         />
 
         <label className="checkbox-row">
@@ -13786,7 +14634,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         </label>
 
         <div className="form-actions">
-          <button type="submit" className="primary-btn">Create Driver</button>
+          <button type="submit" className="primary-btn">
+            {editingDriverId ? 'Save Driver Changes' : 'Create Driver'}
+          </button>
+          {editingDriverId && (
+            <button type="button" className="secondary-btn" onClick={handleCancelDriverEdit}>
+              Cancel
+            </button>
+          )}
         </div>
       </form>
     </section>
@@ -13817,6 +14672,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <span className={driver.isActive ? 'status-pill active' : 'status-pill inactive'}>
                   {driver.isActive ? 'Active' : 'Inactive'}
                 </span>
+                <button
+                  type="button"
+                  className="secondary-btn compact-btn"
+                  onClick={() => handleEditDriver(driver)}
+                >
+                  Edit
+                </button>
               </div>
             </div>
           ))}
@@ -14670,12 +15532,25 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <button
                     type="button"
                     className="secondary-btn compact-btn"
+                    onClick={() => openLoadLocationEditor(selectedCompletedReviewLoad, 'completed')}
+                  >
+                    Edit Locations
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn compact-btn"
                     onClick={() => setSelectedCompletedReviewLoadId('')}
                   >
                     Close
                   </button>
                 </div>
               </div>
+
+              {renderLoadLocationEditor(
+                selectedCompletedReviewLoad,
+                'completed',
+                'Edit Completed Load Locations'
+              )}
 
               <div className="details-grid accounting-details-grid">
                 <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedCompletedReviewLoad.appointmentTime) || selectedCompletedReviewLoad.loadDate || '-'}</strong></div>
@@ -14752,7 +15627,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <button type="button" className="secondary-btn compact-btn" onClick={() => handleDownloadDocument(doc)}>
                             Download
                           </button>
-                          <button type="button" className="secondary-btn compact-btn" onClick={() => handleDeleteDocument(doc.id)}>
+                          <button type="button" className="secondary-btn compact-btn" onClick={() => requestDocumentDeletion(doc)}>
                             Remove
                           </button>
                         </div>
@@ -15419,6 +16294,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </button>
                   <button
                     type="button"
+                    className="secondary-btn compact-btn"
+                    onClick={() => openLoadLocationEditor(selectedAccountingLoad, 'accounting')}
+                  >
+                    Edit Locations
+                  </button>
+                  <button
+                    type="button"
                     className="secondary-btn compact-btn drawer-close-btn"
                     onClick={() => setSelectedAccountingLoadId('')}
                   >
@@ -15426,6 +16308,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </button>
                 </div>
               </div>
+
+              {renderLoadLocationEditor(
+                selectedAccountingLoad,
+                'accounting',
+                'Edit Billing Load Locations'
+              )}
 
               <div className="details-grid accounting-details-grid">
                 <div className="detail-box"><span>Status</span><strong>{getLoadQuickStatus(selectedAccountingLoad) || 'Completed'}</strong></div>
@@ -16280,6 +17168,56 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </div>
   </div>
 )}
+      {documentPendingDeletion && (
+        <div
+          className="document-delete-overlay"
+          onClick={closeDocumentDeleteConfirmation}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') closeDocumentDeleteConfirmation();
+          }}
+        >
+          <div
+            className="document-delete-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="document-delete-title"
+            aria-describedby="document-delete-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="document-delete-icon" aria-hidden="true">!</div>
+            <h3 id="document-delete-title">Delete this document?</h3>
+            <p id="document-delete-description">
+              You are about to permanently delete <strong>{documentPendingDeletion.name || documentPendingDeletion.fileName || 'this document'}</strong>.
+              This action cannot be undone.
+            </p>
+            {documentDeleteError && (
+              <p className="document-delete-error" role="alert">
+                {documentDeleteError}
+              </p>
+            )}
+            <div className="document-delete-actions">
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={closeDocumentDeleteConfirmation}
+                disabled={isDeletingDocument}
+                autoFocus
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger-btn"
+                onClick={handleDeleteDocument}
+                disabled={isDeletingDocument}
+              >
+                {isDeletingDocument ? 'Deleting...' : 'Delete document'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
     </div>
   );
 }
