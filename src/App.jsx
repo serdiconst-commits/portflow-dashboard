@@ -365,6 +365,10 @@ const getLoadQuickStatus = (load = {}) => {
     return operationalStatus;
   }
 
+  if (operationalKey === 'dispatched' && String(load.driver || '').trim()) {
+    return 'Dispatched';
+  }
+
   if (['Available', 'Not Available'].includes(load.availabilityStatus)) {
     return load.availabilityStatus;
   }
@@ -5280,6 +5284,7 @@ const getPortHoustonSummary = (result) => {
     lastFreeDay: availability.lastFreeDay || '',
     lastGateMove,
     outEir: result?.eir?.out || null,
+    outEirTransaction: result?.gateTransactions?.outEirTransaction || null,
     inEir: result?.eir?.in || null,
     eirNote: result?.eir?.note || '',
     hasPortDocuments: Boolean(result?.eir?.hasPortDocuments),
@@ -6115,6 +6120,9 @@ const updatedLoad = {
 };
 
   setSelectedLoad(updatedLoad);
+  setLoadsData((prev) =>
+    prev.map((load) => (load.id === updatedLoad.id ? updatedLoad : load))
+  );
 
   try {
     const res = await fetch(`${API_BASE}/api/loads/${updatedLoad.id}`, {
@@ -6131,10 +6139,17 @@ const updatedLoad = {
       throw new Error(errorData.error || 'Failed to update driver');
     }
 
-    await fetchLoads();
+    const savedLoad = await res.json().catch(() => null);
+    if (savedLoad?.id) {
+      setSelectedLoad(savedLoad);
+      setLoadsData((prev) => prev.map((load) => (load.id === savedLoad.id ? savedLoad : load)));
+    } else {
+      await fetchLoads();
+    }
     await fetchSelectedLoadAuditLogs(updatedLoad.id);
   } catch (error) {
     console.error('Failed to update driver:', error);
+    await fetchLoads();
   }
 };
 
@@ -13079,6 +13094,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       {(() => {
                         const checkState = portHoustonChecksByLoad[selectedLoad.id];
                         const summary = getPortHoustonSummary(checkState?.result);
+                        const outEir = summary.outEirTransaction;
+                        const eirValue = (...values) =>
+                          values.find((value) => value !== undefined && value !== null && String(value).trim()) || '—';
+                        const outEirSizeType = [outEir?.containerSize || selectedLoad.containerSize, outEir?.containerType]
+                          .filter(Boolean)
+                          .join(' ');
                         return (
                           <div className="port-check-box">
                             <div className="documents-header">
@@ -13099,6 +13120,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                 <p>{checkState.error}</p>
                               </div>
                             ) : checkState?.result ? (
+                              <>
                               <div className="port-check-grid">
                                 <div className="detail-box">
                                   <span>Available</span>
@@ -13148,6 +13170,64 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                 <div className="detail-box"><span>Checked By</span><strong>{summary.checkedBy || 'Not returned'}</strong></div>
                                 <div className="detail-box"><span>Checked At</span><strong>{formatDateTime(summary.checkedAt)}</strong></div>
                               </div>
+                              {outEir && (
+                                <section className="eir-print-replica" aria-label="OUT EIR print replica">
+                                  <div className="eir-replica-title">P R I N T&nbsp;&nbsp; R E P L I C A</div>
+                                  <div className="eir-replica-heading">
+                                    <strong>{eirValue(outEir.terminal, summary.terminal, selectedLoad.pickup)}</strong>
+                                    <strong>EIR: {eirValue(outEir.nbr, outEir.gkey, summary.outEir?.transactionNumber)}</strong>
+                                  </div>
+                                  <div className="eir-replica-line">
+                                    {eirValue(outEir.shipLine, selectedLoad.shipLine)}
+                                  </div>
+                                  <div className="eir-replica-meta">
+                                    <div>
+                                      <span><b>Type:</b> {eirValue(outEir.subType)}</span>
+                                      <span><b>Truck Co.:</b> {eirValue(outEir.truckingCompany)}</span>
+                                    </div>
+                                    <div>
+                                      <span><b>Created:</b> {formatDateTime(outEir.created)}</span>
+                                      <span><b>EIRDate:</b> {formatDateTime(outEir.handled || outEir.changed)}</span>
+                                    </div>
+                                  </div>
+                                  <div className="eir-replica-section eir-replica-columns">
+                                    <div>
+                                      <span><b>DRIVER NAME:</b> {eirValue(getDriverLabel(selectedLoad.driver))}</span>
+                                      <span><b>CONTAINER:</b> {eirValue(outEir.containerNumber, selectedLoad.containerNumber)}</span>
+                                      <span><b>CHASSIS:</b> {eirValue(outEir.chassisNumber, selectedLoad.chassisNumber)}</span>
+                                      <span><b>OWNER CHASSIS:</b> {outEir.chassisIsOwner === true ? 'Yes' : outEir.chassisIsOwner === false ? 'No' : eirValue(outEir.chassisIsOwner)}</span>
+                                      <span><b>VESSEL:</b> {eirValue(outEir.raw?.vesselName, outEir.raw?.vesselId)}</span>
+                                      <span><b>PORT:</b> {eirValue(outEir.terminal, summary.terminal)}</span>
+                                    </div>
+                                    <div>
+                                      <span><b>TRUCK LICENSE #:</b> {eirValue(outEir.truckLicenseNbr)}</span>
+                                      <span><b>SIZE/TYPE:</b> {eirValue(outEirSizeType)}</span>
+                                      <span><b>SIZE/TYPE:</b> —</span>
+                                      <span><b>RELEASE:</b> {eirValue(outEir.bookingNumber, selectedLoad.bookingNumber, selectedLoad.referenceNumber)}</span>
+                                      <span><b>TICKET POSITION:</b> {eirValue(outEir.ticketPosition)}</span>
+                                    </div>
+                                  </div>
+                                  <div className="eir-replica-section eir-replica-columns">
+                                    <div>
+                                      <span><b>GENERATOR:</b> {eirValue(outEir.raw?.generatorId)}</span>
+                                      <span><b>FUEL LEVEL:</b> {eirValue(outEir.raw?.fuelLevel)}</span>
+                                      <span><b>TEMP:</b> {eirValue(outEir.raw?.temperature)} &nbsp; <b>AIR EXCH:</b> {eirValue(outEir.raw?.airExchange)}</span>
+                                      <span><b>SEALS:</b> {eirValue(outEir.sealNumber, selectedLoad.sealNumber)}</span>
+                                    </div>
+                                    <div>
+                                      <span><b>SCALE WT:</b> {eirValue(outEir.scaleWeight)}</span>
+                                      <span><b>GROSS WT:</b> {eirValue(outEir.containerGrossWeight)}</span>
+                                      <span><b>CARGO WT:</b> {eirValue(outEir.raw?.cargoWeight)}</span>
+                                    </div>
+                                  </div>
+                                  {summary.outEir?.url && (
+                                    <a className="eir-replica-open" href={summary.outEir.url} target="_blank" rel="noreferrer">
+                                      Open OUT EIR PDF
+                                    </a>
+                                  )}
+                                </section>
+                              )}
+                              </>
                             ) : (
                               <p className="documents-empty">
                                 Click Check Port Houston to request availability, holds, LFD, and gate movement details.
