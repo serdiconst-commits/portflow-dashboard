@@ -200,10 +200,10 @@ const roleCanAccessView = (role, view) => {
   if (normalizedRole === 'driver') return view === 'driver';
   if (normalizedRole === 'payroll') return ['businessDashboard', 'payroll', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
   if (normalizedRole === 'manager') {
-    return ['dispatch', 'completed', 'drivers', 'customers', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
+    return ['dispatch', 'live-tracking', 'completed', 'drivers', 'customers', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
   }
   if (normalizedRole === 'dispatcher') {
-    return ['dispatch', 'completed', 'drivers', 'customers', 'settings'].includes(view);
+    return ['dispatch', 'live-tracking', 'completed', 'drivers', 'customers', 'settings'].includes(view);
   }
   return view === 'dispatch';
 };
@@ -400,7 +400,7 @@ const normalizeDriverForStorage = (driverValue) => {
 const shouldAutoDispatchLoad = (driverValue, status) => {
   const driverId = normalizeDriverForStorage(driverValue);
   const currentStatus = String(status || '').trim().toLowerCase();
-  return Boolean(driverId) && (!currentStatus || ['pending', 'available', 'not available'].includes(currentStatus));
+  return Boolean(driverId) && !['in transit', 'dropped', 'delivered', 'completed'].includes(currentStatus);
 };
 
 const getStatusAfterDriverAssignment = (driverValue, status) =>
@@ -4906,7 +4906,7 @@ const filteredLoads = loadsData.filter((load) => {
         truck: name === 'driver' ? (value ? getDriverTruck(value) : '') : prev.truck,
         status:
           name === 'driver'
-            ? getStatusAfterDriverAssignment(value, prev.status)
+            ? (normalizeDriverForStorage(value) ? 'Dispatched' : prev.status)
             : name === 'status'
               ? value
               : prev.status,
@@ -4933,7 +4933,7 @@ const filteredLoads = loadsData.filter((load) => {
   truck: name === 'driver' ? (value ? getDriverTruck(value) : '') : prev.truck,
   status:
     name === 'driver'
-      ? getStatusAfterDriverAssignment(value, prev.status)
+      ? (normalizeDriverForStorage(value) ? 'Dispatched' : prev.status)
       : name === 'status'
         ? value
         : prev.status,
@@ -5360,6 +5360,18 @@ const fillEmptyPortField = (currentValue, portValue) => {
   return String(currentValue || '').trim() || !normalizedPortValue ? currentValue : normalizedPortValue;
 };
 
+const getPortHoustonPickupLocation = (terminal = '') => {
+  const normalized = String(terminal || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized.includes('barbours') || normalized.includes('barbour') || normalized === 'bct') {
+    return 'Barbours Cut Terminal';
+  }
+  if (normalized.includes('bayport') || normalized === 'bpt') {
+    return 'Bayport Container Terminal';
+  }
+  return String(terminal).trim();
+};
+
 const handleSmartPortLookup = async () => {
   const containerNumber = String(newLoad.containerNumber || '').trim().toUpperCase();
   const bolNumber = String(newLoad.referenceNumber || newLoad.poNumber || newLoad.bookingNumber || '').trim();
@@ -5391,6 +5403,7 @@ const handleSmartPortLookup = async () => {
     }
 
     const suggested = data.suggested || {};
+    const suggestedPickup = getPortHoustonPickupLocation(suggested.terminal || data.facility);
     setNewLoad((prev) => ({
       ...prev,
       containerNumber: fillEmptyPortField(prev.containerNumber, suggested.containerNumber),
@@ -5401,6 +5414,7 @@ const handleSmartPortLookup = async () => {
       sealNumber: fillEmptyPortField(prev.sealNumber, suggested.sealNumber),
       lastFreeDay: fillEmptyPortField(prev.lastFreeDay, getLocalDatePortion(suggested.lastFreeDay)),
       availabilityStatus: fillEmptyPortField(prev.availabilityStatus, suggested.availabilityStatus),
+      pickup: fillEmptyPortField(prev.pickup, suggestedPickup),
       notes:
         suggested.vesselName && !String(prev.notes || '').includes(`Port vessel: ${suggested.vesselName}`)
           ? `${prev.notes || ''}${prev.notes ? '\n' : ''}Port vessel: ${suggested.vesselName}`
@@ -5415,6 +5429,7 @@ const handleSmartPortLookup = async () => {
       suggested.availabilityStatus && 'availability',
       suggested.bookingNumber && 'booking',
       suggested.sealNumber && 'seal',
+      suggestedPickup && 'pickup location',
     ].filter(Boolean);
 
     setSmartPortLookupStatus(
@@ -6092,7 +6107,7 @@ const updatedLoad = {
   truck: newDriver ? getDriverTruck(newDriver) : '',
   isDriverReleased: driverChanged ? 0 : selectedLoad.isDriverReleased,
   driverReleasedAt: driverChanged ? '' : selectedLoad.driverReleasedAt || '',
-  status: getStatusAfterDriverAssignment(newDriver, selectedLoad.status),
+  status: newDriver ? 'Dispatched' : selectedLoad.status,
   pickup:
     selectedLoad.status === 'Dropped'
       ? getDroppedLoadPickup(selectedLoad)
@@ -9874,6 +9889,19 @@ const trackedDriverLocations = liveDriverLocations
   .filter((location) => Number.isFinite(location.latitude) && Number.isFinite(location.longitude));
 
 useEffect(() => {
+  if (activeView === 'live-tracking') {
+    fetchDriverLocations();
+    driverMapHasFitRef.current = false;
+    return;
+  }
+
+  Object.values(driverMapMarkersRef.current).forEach((marker) => marker.setMap(null));
+  driverMapMarkersRef.current = {};
+  driverMapInstanceRef.current = null;
+  driverMapHasFitRef.current = false;
+}, [activeView]);
+
+useEffect(() => {
   if (!driverMapRef.current || !window.google?.maps || trackedDriverLocations.length === 0) return;
 
   if (!driverMapInstanceRef.current) {
@@ -10933,6 +10961,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       <nav className="sidebar-nav" aria-label="Main navigation">
         {[
           ['dispatch', 'Dispatch Board'],
+          ['live-tracking', 'Live Tracking'],
           ['completed', 'Completed Loads'],
           ['settlements', 'Driver Settlements'],
           ['businessDashboard', t('businessDashboard')],
@@ -11024,6 +11053,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           <div>
           <h1>{({
             dispatch: 'Dispatch Board',
+            'live-tracking': 'Live Tracking',
             completed: 'Completed Loads',
             settlements: 'Driver Settlements',
             customers: 'Customers',
@@ -12152,69 +12182,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               )}
             </section>
           )}
-
-          <section className="panel driver-tracking-panel">
-            <div className="panel-header compact-header">
-              <div>
-                <h3>Driver Live Tracking</h3>
-                <p className="panel-subtitle">Drivers appear here after they tap Start in the phone app. Use Refresh to update locations.</p>
-              </div>
-              <div className="details-actions">
-                <span>{trackedDriverLocations.length} online</span>
-                <button
-                  type="button"
-                  className="secondary-btn compact-btn"
-                  onClick={fetchDriverLocations}
-                >
-                  Refresh
-                </button>
-              </div>
-            </div>
-
-            {trackedDriverLocations.length > 0 ? (
-              <div className="driver-tracking-grid">
-                <div className="driver-map-canvas" ref={driverMapRef} aria-label="Driver live map" />
-                <div className="driver-location-list">
-                  {trackedDriverLocations.map((location) => {
-                    const isFresh = Date.now() - new Date(location.updatedAt).getTime() < 10 * 60 * 1000;
-                    const activeLoad = location.activeLoads[0];
-
-                    return (
-                      <article key={location.driverId} className="driver-location-row">
-                        <div>
-                          <strong>{location.driverName || getDriverLabel(location.driverId)}</strong>
-                          <span>
-                            {location.truck ? `Truck ${location.truck}` : 'Truck N/A'} • {formatRelativeTime(location.updatedAt)}
-                          </span>
-                          <span>
-                            {activeLoad
-                              ? `${activeLoad.containerNumber || activeLoad.referenceNumber || activeLoad.id} • ${activeLoad.status || 'Assigned'}`
-                              : 'No active load found'}
-                          </span>
-                        </div>
-                        <div className="driver-location-actions">
-                          <span className={isFresh ? 'live-dot fresh' : 'live-dot stale'}>
-                            {isFresh ? 'Live' : 'Stale'}
-                          </span>
-                          <a
-                            href={getGoogleMapsCoordinateLink(location.latitude, location.longitude)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            Open Map
-                          </a>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className="empty-state">
-                <p>No driver locations yet. Ask a driver to open the driver app and tap Start under Live tracking.</p>
-              </div>
-            )}
-          </section>
 
           <main className="dashboard-grid dispatch-workspace">
             <section className="panel">
@@ -15451,6 +15418,67 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </section>
   </div>
 )}
+      {activeView === 'live-tracking' && (
+        <section className="panel driver-tracking-panel">
+          <div className="panel-header compact-header">
+            <div>
+              <h3>Driver Live Tracking</h3>
+              <p className="panel-subtitle">Drivers appear here after they tap Start in the phone app. Use Refresh to update locations.</p>
+            </div>
+            <div className="details-actions">
+              <span>{trackedDriverLocations.length} online</span>
+              <button type="button" className="secondary-btn compact-btn" onClick={fetchDriverLocations}>
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {trackedDriverLocations.length > 0 ? (
+            <div className="driver-tracking-grid">
+              <div className="driver-map-canvas" ref={driverMapRef} aria-label="Driver live map" />
+              <div className="driver-location-list">
+                {trackedDriverLocations.map((location) => {
+                  const isFresh = Date.now() - new Date(location.updatedAt).getTime() < 10 * 60 * 1000;
+                  const activeLoad = location.activeLoads[0];
+
+                  return (
+                    <article key={location.driverId} className="driver-location-row">
+                      <div>
+                        <strong>{location.driverName || getDriverLabel(location.driverId)}</strong>
+                        <span>
+                          {location.truck ? `Truck ${location.truck}` : 'Truck N/A'} • {formatRelativeTime(location.updatedAt)}
+                        </span>
+                        <span>
+                          {activeLoad
+                            ? `${activeLoad.containerNumber || activeLoad.referenceNumber || activeLoad.id} • ${activeLoad.status || 'Assigned'}`
+                            : 'No active load found'}
+                        </span>
+                      </div>
+                      <div className="driver-location-actions">
+                        <span className={isFresh ? 'live-dot fresh' : 'live-dot stale'}>
+                          {isFresh ? 'Live' : 'Stale'}
+                        </span>
+                        <a
+                          href={getGoogleMapsCoordinateLink(location.latitude, location.longitude)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Open Map
+                        </a>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <p>No driver locations yet. Ask a driver to open the driver app and tap Start under Live tracking.</p>
+            </div>
+          )}
+        </section>
+      )}
+
       {activeView === 'completed' && (
         <section className="panel accounting-panel">
           <div className="panel-header">
