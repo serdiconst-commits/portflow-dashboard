@@ -637,47 +637,80 @@ const buildGeneratedEirRows = ({ transaction = {}, load = {} }) => [
 
 const createGeneratedPortHoustonEirPdf = async ({ category, transaction, load }) => {
   const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([612, 792]);
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const darkBlue = rgb(0.03, 0.19, 0.38);
-  const muted = rgb(0.35, 0.42, 0.5);
-  const border = rgb(0.82, 0.86, 0.9);
-  const softBlue = rgb(0.9, 0.96, 1);
-  const black = rgb(0.08, 0.1, 0.12);
-  const title = category === 'IN EIR' ? 'PORTFLOW IN EIR DATA SUMMARY' : 'PORTFLOW OUT EIR DATA SUMMARY';
-
-  page.drawRectangle({ x: 36, y: 700, width: 540, height: 56, color: darkBlue });
-  page.drawText(title, { x: 54, y: 730, size: 18, font: boldFont, color: rgb(1, 1, 1) });
-  page.drawText('Generated from Port Houston gate transaction data', {
-    x: 54,
-    y: 710,
-    size: 9,
-    font,
-    color: rgb(0.86, 0.93, 1),
-  });
-
-  page.drawText(`Load: ${load.loadNumber || load.id || ''}`, { x: 54, y: 674, size: 10, font: boldFont, color: black });
-  page.drawText(`Container: ${transaction.containerNumber || load.containerNumber || ''}`, { x: 220, y: 674, size: 10, font: boldFont, color: black });
-  page.drawText(`Generated: ${formatPortHoustonDate(new Date().toISOString())}`, { x: 390, y: 674, size: 9, font, color: muted });
-
-  const rows = buildGeneratedEirRows({ transaction, load }).filter(([, value]) => String(value || '').trim());
-  let y = 642;
-  rows.forEach(([label, value], index) => {
-    const isEven = index % 2 === 0;
-    if (isEven) {
-      page.drawRectangle({ x: 54, y: y - 7, width: 504, height: 22, color: softBlue });
+  const page = pdfDoc.addPage([792, 612]);
+  const font = await pdfDoc.embedFont(StandardFonts.Courier);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.CourierBold);
+  const black = rgb(0.04, 0.04, 0.04);
+  const muted = rgb(0.3, 0.3, 0.3);
+  const left = 24;
+  const right = 768;
+  const rightColumn = 396;
+  const drawRule = (y) => page.drawLine({ start: { x: left, y }, end: { x: right, y }, thickness: 0.8, color: black });
+  const value = (input) => String(input ?? '').trim();
+  const drawField = (label, fieldValue, x, y, labelWidth = 118) => {
+    page.drawText(`${label}:`, { x, y, size: 10, font: boldFont, color: black });
+    if (value(fieldValue)) {
+      page.drawText(value(fieldValue), { x: x + labelWidth, y, size: 10, font, color: muted, maxWidth: 245 });
     }
-    page.drawRectangle({ x: 54, y: y - 7, width: 504, height: 22, borderColor: border, borderWidth: 0.5 });
-    page.drawText(label, { x: 66, y, size: 9, font: boldFont, color: darkBlue });
-    page.drawText(String(value), { x: 230, y, size: 9, font, color: black });
-    y -= 22;
-  });
+  };
 
-  page.drawText(
-    'Note: This Portflow summary is generated from Port Houston EVP/Road Service data. The official EIR document remains in the Port Houston Customer Service Portal.',
-    { x: 54, y: 54, size: 8, font, color: muted, maxWidth: 504 }
-  );
+  const terminal = value(transaction.terminal || load.pickup || 'Port Houston')
+    .replace(/^BPT$/i, 'Bayport')
+    .replace(/^BCT$/i, 'Barbours Cut');
+  const eirNumber = transaction.nbr || transaction.gkey || '';
+  const handledAt = transaction.handled || transaction.changed || '';
+  const sizeType = [transaction.containerSize || load.containerSize, transaction.containerType]
+    .map(value)
+    .filter(Boolean)
+    .join(' ');
+
+  page.drawText('P R I N T   R E P L I C A', { x: 318, y: 584, size: 11, font: boldFont, color: black });
+  drawRule(576);
+  page.drawText(terminal || 'Port Houston', { x: left, y: 552, size: 18, font, color: black });
+  page.drawText(`EIR: ${value(eirNumber) || '-'}`, { x: 590, y: 552, size: 18, font, color: black });
+  page.drawText(`${value(transaction.shipLine || load.shipLine) || 'LINE'}: ${value(transaction.raw?.lineOperatorName || transaction.shipLine || load.shipLine)}`, {
+    x: left,
+    y: 522,
+    size: 16,
+    font,
+    color: black,
+  });
+  drawField('Type', transaction.subType || category, left, 500, 50);
+  drawField('Truck Co.', transaction.truckingCompany, left, 482, 82);
+  drawField('Created', formatPortHoustonDate(transaction.created), 530, 500, 72);
+  drawField('EIRDate', formatPortHoustonDate(handledAt), 530, 482, 72);
+
+  drawRule(464);
+  drawField('DRIVER NAME', load.driverName || load.driver, left, 446, 128);
+  drawField('TRUCK LICENSE #', transaction.truckLicenseNbr, rightColumn, 446, 146);
+  drawField('CONTAINER', transaction.containerNumber || load.containerNumber, left, 428, 128);
+  drawField('SIZE/TYPE', sizeType, rightColumn, 428, 146);
+  drawField('CHASSIS', transaction.chassisNumber || load.chassisNumber, left, 410, 128);
+  drawField('SIZE/TYPE', '', rightColumn, 410, 146);
+  drawField('OWNER CHASSIS', formatPortHoustonYesNo(transaction.chassisIsOwner), left, 392, 128);
+  drawField('RELEASE', transaction.bookingNumber || load.bookingNumber || load.referenceNumber, rightColumn, 392, 146);
+  drawField('VESSEL', transaction.raw?.vesselName || transaction.raw?.vesselId, left, 374, 128);
+  drawField('TICKET POSITION', transaction.ticketPosition, rightColumn, 374, 146);
+  drawField('PORT', terminal, left, 356, 128);
+
+  drawRule(340);
+  drawField('GENERATOR', transaction.raw?.generatorId, left, 322, 128);
+  drawField('SCALE WT', transaction.scaleWeight, rightColumn, 322, 146);
+  drawField('FUEL LEVEL', transaction.raw?.fuelLevel, left, 304, 128);
+  drawField('GROSS WT', transaction.containerGrossWeight, rightColumn, 304, 146);
+  drawField('TEMP', transaction.raw?.temperature, left, 286, 128);
+  drawField('AIR EXCH', transaction.raw?.airExchange, left + 150, 286, 82);
+  drawField('CARGO WT', transaction.raw?.cargoWeight, rightColumn, 286, 146);
+  drawField('SEALS', transaction.sealNumber || load.sealNumber, left, 268, 128);
+  drawRule(254);
+
+  page.drawText(`PortFlow load ${load.loadNumber || load.id || ''} - generated from Port Houston gate transaction data`, {
+    x: left,
+    y: 30,
+    size: 7,
+    font,
+    color: muted,
+  });
 
   return Buffer.from(await pdfDoc.save());
 };
@@ -712,7 +745,26 @@ const ensureGeneratedPortHoustonEirDocument = ({
         }
 
         if (existingDoc) {
-          resolve(existingDoc);
+          try {
+            const buffer = await createGeneratedPortHoustonEirPdf({ category, transaction, load });
+            const filePath = existingDoc.filePath || path.join(uploadsDir, existingDoc.name);
+            const uploadedAt = new Date().toISOString();
+            const size = `${(buffer.length / 1024).toFixed(1)} KB`;
+            fs.writeFileSync(filePath, buffer);
+            db.run(
+              `UPDATE documents SET size = ?, type = ?, filePath = ?, uploadedAt = ? WHERE id = ?`,
+              [size, 'application/pdf', filePath, uploadedAt, existingDoc.id],
+              (updateErr) => {
+                if (updateErr) {
+                  reject(updateErr);
+                  return;
+                }
+                resolve({ ...existingDoc, size, type: 'application/pdf', filePath, uploadedAt, generated: true });
+              }
+            );
+          } catch (generateErr) {
+            reject(generateErr);
+          }
           return;
         }
 
@@ -3571,7 +3623,10 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
             return res.status(500).json({ error: droppedByErr.message });
           }
 
-      const nextStatus = getStatusAfterDriverAssignment(normalizedDriver, l.status, existingLoad.status || 'Pending');
+      const driverChanged = Boolean(normalizedDriver) && normalizedDriver !== String(existingLoad.driver || '').trim();
+      const nextStatus = driverChanged
+        ? 'Dispatched'
+        : getStatusAfterDriverAssignment(normalizedDriver, l.status, existingLoad.status || 'Pending');
 
       db.run(
         `UPDATE loads SET

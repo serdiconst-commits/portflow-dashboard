@@ -2055,7 +2055,8 @@ button {
   border: 1px solid #d8e1ec;
   border-radius: 8px;
   background: #ffffff;
-  max-height: 640px;
+  height: clamp(700px, calc(100vh - 220px), 960px);
+  max-height: none;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
@@ -5081,6 +5082,83 @@ button:disabled {
   line-height: 1.35;
 }
 
+.eir-print-replica {
+  margin-top: 18px;
+  padding: 16px 18px 18px;
+  overflow-x: auto;
+  border: 1px solid #b8b8b8;
+  border-radius: 4px;
+  background: #fff;
+  color: #111;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.eir-replica-title {
+  padding-bottom: 7px;
+  border-bottom: 1px solid #333;
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+}
+
+.eir-replica-heading,
+.eir-replica-meta,
+.eir-replica-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 40px;
+}
+
+.eir-replica-heading {
+  align-items: center;
+  padding: 9px 0 5px;
+  font-size: 21px;
+  font-weight: 400;
+}
+
+.eir-replica-heading strong:last-child {
+  text-align: right;
+}
+
+.eir-replica-line {
+  padding: 2px 0 8px;
+  font-size: 18px;
+}
+
+.eir-replica-meta {
+  padding-bottom: 8px;
+}
+
+.eir-replica-meta > div,
+.eir-replica-columns > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.eir-replica-meta > div:last-child {
+  align-items: flex-end;
+}
+
+.eir-replica-section {
+  padding: 8px 0;
+  border-top: 1px solid #333;
+}
+
+.eir-replica-open {
+  display: inline-flex;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #0f62fe;
+  color: #fff;
+  font-family: Inter, system-ui, sans-serif;
+  font-weight: 800;
+  text-decoration: none;
+}
+
 .port-check-error {
   padding: 12px;
   border: 1px solid #fecaca;
@@ -5141,6 +5219,23 @@ button:disabled {
 
   .port-check-grid {
     grid-template-columns: 1fr;
+  }
+
+  .dispatch-sheet-wrap {
+    height: 70vh;
+  }
+
+  .eir-replica-heading,
+  .eir-replica-meta,
+  .eir-replica-columns {
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+  }
+
+  .eir-replica-heading strong:last-child,
+  .eir-replica-meta > div:last-child {
+    text-align: left;
+    align-items: flex-start;
   }
 }
 
