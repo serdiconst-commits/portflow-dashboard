@@ -1085,6 +1085,161 @@ const getCompanyPortHoustonCredentials = (companyId, terminal = '') =>
     );
   });
 
+const autoAvailabilityEnabled =
+  String(process.env.PORT_HOUSTON_AUTO_AVAILABILITY_ENABLED || '').trim().toLowerCase() === 'true';
+const autoAvailabilityIntervalMinutes = Math.max(
+  5,
+  Number.parseInt(process.env.PORT_HOUSTON_AUTO_AVAILABILITY_INTERVAL_MINUTES || '15', 10) || 15
+);
+const autoAvailabilityBatchSize = Math.max(
+  1,
+  Number.parseInt(process.env.PORT_HOUSTON_AUTO_AVAILABILITY_BATCH_SIZE || '100', 10) || 100
+);
+let autoAvailabilityCheckRunning = false;
+let autoAvailabilityOffset = 0;
+
+const queryLoadsForAutomaticAvailabilityCheck = (offset) =>
+  new Promise((resolve, reject) => {
+    db.all(
+      `SELECT *
+       FROM loads
+       WHERE TRIM(COALESCE(containerNumber, '')) <> ''
+         AND LOWER(TRIM(COALESCE(availabilityStatus, ''))) <> 'available'
+         AND LOWER(TRIM(COALESCE(status, ''))) NOT IN ('in transit', 'picked up', 'dropped', 'delivered', 'completed')
+       ORDER BY COALESCE(loadDate, '') ASC, id ASC
+       LIMIT ? OFFSET ?`,
+      [autoAvailabilityBatchSize, offset],
+      (err, rows) => (err ? reject(err) : resolve(rows || []))
+    );
+  });
+
+const getLoadsForAutomaticAvailabilityCheck = async () => {
+  let loads = await queryLoadsForAutomaticAvailabilityCheck(autoAvailabilityOffset);
+  if (!loads.length && autoAvailabilityOffset > 0) {
+    autoAvailabilityOffset = 0;
+    loads = await queryLoadsForAutomaticAvailabilityCheck(0);
+  }
+
+  autoAvailabilityOffset = loads.length < autoAvailabilityBatchSize
+    ? 0
+    : autoAvailabilityOffset + loads.length;
+  return loads;
+};
+
+const markLoadAutomaticallyAvailable = (load, availability) =>
+  new Promise((resolve, reject) => {
+    const nextLastFreeDay = availability?.lastFreeDay || load.lastFreeDay || '';
+    db.run(
+      `UPDATE loads
+       SET availabilityStatus = 'Available',
+           lastFreeDay = ?
+       WHERE id = ?
+         AND companyId = ?
+         AND LOWER(TRIM(COALESCE(availabilityStatus, ''))) <> 'available'`,
+      [nextLastFreeDay, load.id, load.companyId],
+      function onUpdated(err) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(this.changes > 0);
+      }
+    );
+  });
+
+const runAutomaticPortHoustonAvailabilityCheck = async () => {
+  if (!autoAvailabilityEnabled || autoAvailabilityCheckRunning) return;
+  autoAvailabilityCheckRunning = true;
+
+  try {
+    const loads = await getLoadsForAutomaticAvailabilityCheck();
+    let transitioned = 0;
+
+    for (const load of loads) {
+      const containerNumber = String(load.containerNumber || '').trim().toUpperCase();
+      const facility = getLoadPortHoustonFacility(load);
+
+      try {
+        const credentials = await getCompanyPortHoustonCredentials(load.companyId, facility);
+        const availability = await getContainerAvailability(containerNumber, credentials, facility);
+        if (availability?.available !== true) continue;
+
+        const changed = await markLoadAutomaticallyAvailable(load, availability);
+        if (!changed) continue;
+
+        transitioned += 1;
+        const log = await insertPortCheckLog({
+          companyId: load.companyId,
+          loadId: load.id,
+          containerNumber,
+          terminal: availability.terminal || facility || load.pickup || '',
+          requestType: 'AUTO_AVAILABILITY_TRANSITION',
+          status: 'SUCCESS',
+          response: {
+            available: true,
+            statusReason: availability.statusReason || '',
+            transitState: availability.transitState || '',
+            stoppedRoad: availability.stoppedRoad ?? null,
+            lastFreeDay: availability.lastFreeDay || '',
+          },
+        });
+
+        writeAuditLog(
+          {
+            company: { companyId: load.companyId },
+            user: { name: 'PortFlow Automation', role: 'system' },
+            headers: {},
+          },
+          {
+            action: 'PORT_HOUSTON_AUTO_AVAILABLE',
+            entityType: 'LOAD',
+            entityId: load.id,
+            entityLabel: containerNumber || load.id,
+            oldValue: { availabilityStatus: load.availabilityStatus || '' },
+            newValue: {
+              availabilityStatus: 'Available',
+              checkedAt: log.checkedAt,
+              statusReason: availability.statusReason || '',
+            },
+            changedFields: {
+              availabilityStatus: {
+                oldValue: load.availabilityStatus || '',
+                newValue: 'Available',
+              },
+            },
+          }
+        );
+      } catch (error) {
+        console.error(
+          `[port-houston-auto-availability] ${containerNumber || load.id}: ${error.message}`
+        );
+      }
+    }
+
+    console.log(
+      `[port-houston-auto-availability] Checked ${loads.length} load(s); marked ${transitioned} available.`
+    );
+  } catch (error) {
+    console.error('[port-houston-auto-availability] Check failed:', error.message);
+  } finally {
+    autoAvailabilityCheckRunning = false;
+  }
+};
+
+const startAutomaticPortHoustonAvailabilityChecks = () => {
+  if (!autoAvailabilityEnabled) {
+    console.log('[port-houston-auto-availability] Disabled.');
+    return;
+  }
+
+  const intervalMs = autoAvailabilityIntervalMinutes * 60 * 1000;
+  console.log(
+    `[port-houston-auto-availability] Enabled every ${autoAvailabilityIntervalMinutes} minute(s), up to ${autoAvailabilityBatchSize} load(s) per run.`
+  );
+  setTimeout(runAutomaticPortHoustonAvailabilityCheck, 10_000);
+  setInterval(runAutomaticPortHoustonAvailabilityCheck, intervalMs);
+};
+
 const getAuditAccessFilter = (role) => {
   const normalizedRole = normalizeRole(role);
   if (adminRoles.has(normalizedRole)) return { clause: '', params: [] };
@@ -5545,4 +5700,5 @@ if (isProduction) {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
+  startAutomaticPortHoustonAvailabilityChecks();
 });
