@@ -15761,25 +15761,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <button
                     type="button"
                     className="secondary-btn compact-btn"
-                    onClick={() => openLoadLocationEditor(selectedCompletedReviewLoad, 'completed')}
-                  >
-                    Edit Locations
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-btn compact-btn"
                     onClick={() => setSelectedCompletedReviewLoadId('')}
                   >
                     Close
                   </button>
                 </div>
               </div>
-
-              {renderLoadLocationEditor(
-                selectedCompletedReviewLoad,
-                'completed',
-                'Edit Completed Load Locations'
-              )}
 
               <div className="details-grid accounting-details-grid">
                 <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedCompletedReviewLoad.appointmentTime) || selectedCompletedReviewLoad.loadDate || '-'}</strong></div>

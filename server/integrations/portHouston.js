@@ -830,18 +830,35 @@ export const getGateTransactionsByContainer = async (containerNumber, credential
   // Legacy query first restores the exact request shape that previously found
   // OUT EIR rows. Then use broader fallbacks for BCT/BPT and strict predicates.
   const legacyTransactions = await fetchLegacyGateTransactionsByContainer(cleanContainer, credentials, facility);
-  const lookupResult = legacyTransactions.length ? {
-    transactions: legacyTransactions,
-    lookupMethod: 'ctrId legacy',
-    errors: [],
-  } : await fetchFirstGateTransactionsMatch([
-    `ctrId=${cleanContainer}`,
-    `ctrId = ${cleanContainer}`,
-    `unitId=${cleanContainer}`,
-    `unitId = ${cleanContainer}`,
-  ], credentials, facility);
-  const sortedTransactions = lookupResult.transactions;
-  const lookupMethod = lookupResult.lookupMethod || 'ctrId/unitId';
+  let broaderLookupResult;
+  try {
+    broaderLookupResult = await fetchFirstGateTransactionsMatch([
+      `ctrId=${cleanContainer}`,
+      `ctrId = ${cleanContainer}`,
+      `unitId=${cleanContainer}`,
+      `unitId = ${cleanContainer}`,
+    ], credentials, facility);
+  } catch (error) {
+    if (!legacyTransactions.length) throw error;
+    broaderLookupResult = {
+      transactions: [],
+      lookupMethod: '',
+      errors: [{ status: error.status || '', message: error.message }],
+    };
+  }
+  const combinedTransactions = [];
+  const seenTransactions = new Set();
+  [...legacyTransactions, ...(broaderLookupResult.transactions || [])].forEach((transaction) => {
+    const key = `${transaction.nbr || transaction.gkey || ''}|${transaction.subType || ''}`;
+    if (seenTransactions.has(key)) return;
+    seenTransactions.add(key);
+    combinedTransactions.push(transaction);
+  });
+  const sortedTransactions = sortGateTransactions(combinedTransactions);
+  const lookupMethod = [
+    legacyTransactions.length ? 'ctrId legacy' : '',
+    broaderLookupResult.lookupMethod,
+  ].filter(Boolean).join(' + ') || 'ctrId/unitId';
 
   return {
     transactions: sortedTransactions,
@@ -853,7 +870,7 @@ export const getGateTransactionsByContainer = async (containerNumber, credential
     ) || sortedTransactions.find((item) => IN_GATE_SUBTYPES.includes(item.subType)) || null,
     lookupMethod,
     requestedContainerNumber: cleanContainer,
-    errors: lookupResult.errors || [],
+    errors: broaderLookupResult.errors || [],
     raw: sortedTransactions.map((item) => item.raw),
   };
 };
