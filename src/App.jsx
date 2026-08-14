@@ -15766,6 +15766,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </button>
                   <button
                     type="button"
+                    className="pod-generate-btn compact-btn"
+                    onClick={() => handleGeneratePOD(selectedCompletedReviewLoad)}
+                  >
+                    Generate POD
+                  </button>
+                  <button
+                    type="button"
                     className="primary-btn compact-btn"
                     onClick={() => handleSendCompletedLoadToAccounting(selectedCompletedReviewLoad)}
                   >
