@@ -857,10 +857,13 @@ const updateLoadFromPortHoustonCheck = ({
 }) =>
   new Promise((resolve, reject) => {
     const hasAvailability = typeof availability?.available === 'boolean';
+    const holdStatus = String(availability?.holdStatus || '').trim();
     const nextAvailabilityStatus = hasAvailability
       ? availability.available
         ? 'Available'
-        : 'Not Available'
+        : holdStatus
+          ? `Not Available - ${holdStatus}`
+          : 'Not Available'
       : load.availabilityStatus || '';
     const nextLastFreeDay = availability?.lastFreeDay || load.lastFreeDay || '';
 
@@ -1134,7 +1137,6 @@ const queryLoadsForAutomaticAvailabilityCheck = (offset) =>
       `SELECT *
        FROM loads
        WHERE TRIM(COALESCE(containerNumber, '')) <> ''
-         AND LOWER(TRIM(COALESCE(availabilityStatus, ''))) <> 'available'
          AND LOWER(TRIM(COALESCE(status, ''))) NOT IN ('in transit', 'picked up', 'dropped', 'delivered', 'completed')
        ORDER BY COALESCE(loadDate, '') ASC, id ASC
        LIMIT ? OFFSET ?`,
@@ -1156,17 +1158,23 @@ const getLoadsForAutomaticAvailabilityCheck = async () => {
   return loads;
 };
 
-const markLoadAutomaticallyAvailable = (load, availability) =>
+const syncLoadAutomaticAvailability = (load, availability) =>
   new Promise((resolve, reject) => {
     const nextLastFreeDay = availability?.lastFreeDay || load.lastFreeDay || '';
+    const holdStatus = String(availability?.holdStatus || '').trim();
+    const nextAvailabilityStatus = availability?.available === true
+      ? 'Available'
+      : holdStatus
+        ? `Not Available - ${holdStatus}`
+        : 'Not Available';
     db.run(
       `UPDATE loads
-       SET availabilityStatus = 'Available',
+       SET availabilityStatus = ?,
            lastFreeDay = ?
        WHERE id = ?
          AND companyId = ?
-         AND LOWER(TRIM(COALESCE(availabilityStatus, ''))) <> 'available'`,
-      [nextLastFreeDay, load.id, load.companyId],
+         AND (COALESCE(availabilityStatus, '') <> ? OR COALESCE(lastFreeDay, '') <> ?)`,
+      [nextAvailabilityStatus, nextLastFreeDay, load.id, load.companyId, nextAvailabilityStatus, nextLastFreeDay],
       function onUpdated(err) {
         if (err) {
           reject(err);
@@ -1192,9 +1200,9 @@ const runAutomaticPortHoustonAvailabilityCheck = async () => {
       try {
         const credentials = await getCompanyPortHoustonCredentials(load.companyId, facility);
         const availability = await getContainerAvailability(containerNumber, credentials, facility);
-        if (availability?.available !== true) continue;
+        if (typeof availability?.available !== 'boolean') continue;
 
-        const changed = await markLoadAutomaticallyAvailable(load, availability);
+        const changed = await syncLoadAutomaticAvailability(load, availability);
         if (!changed) continue;
 
         transitioned += 1;
@@ -1206,7 +1214,8 @@ const runAutomaticPortHoustonAvailabilityCheck = async () => {
           requestType: 'AUTO_AVAILABILITY_TRANSITION',
           status: 'SUCCESS',
           response: {
-            available: true,
+            available: availability.available,
+            holdStatus: availability.holdStatus || '',
             statusReason: availability.statusReason || '',
             transitState: availability.transitState || '',
             stoppedRoad: availability.stoppedRoad ?? null,
@@ -1221,20 +1230,28 @@ const runAutomaticPortHoustonAvailabilityCheck = async () => {
             headers: {},
           },
           {
-            action: 'PORT_HOUSTON_AUTO_AVAILABLE',
+            action: 'PORT_HOUSTON_AUTO_AVAILABILITY',
             entityType: 'LOAD',
             entityId: load.id,
             entityLabel: containerNumber || load.id,
             oldValue: { availabilityStatus: load.availabilityStatus || '' },
             newValue: {
-              availabilityStatus: 'Available',
+              availabilityStatus: availability.available
+                ? 'Available'
+                : availability.holdStatus
+                  ? `Not Available - ${availability.holdStatus}`
+                  : 'Not Available',
               checkedAt: log.checkedAt,
               statusReason: availability.statusReason || '',
             },
             changedFields: {
               availabilityStatus: {
                 oldValue: load.availabilityStatus || '',
-                newValue: 'Available',
+                newValue: availability.available
+                  ? 'Available'
+                  : availability.holdStatus
+                    ? `Not Available - ${availability.holdStatus}`
+                    : 'Not Available',
               },
             },
           }
@@ -1247,7 +1264,7 @@ const runAutomaticPortHoustonAvailabilityCheck = async () => {
     }
 
     console.log(
-      `[port-houston-auto-availability] Checked ${loads.length} load(s); marked ${transitioned} available.`
+      `[port-houston-auto-availability] Checked ${loads.length} load(s); updated ${transitioned} availability status(es).`
     );
   } catch (error) {
     console.error('[port-houston-auto-availability] Check failed:', error.message);
@@ -2669,6 +2686,7 @@ app.get('/api/port-houston/load-lookup', authenticate, async (req, res) => {
       portStatusReason: statusSource.statusReason || '',
       transitState: statusSource.transitState || '',
       stoppedRoad: statusSource.stoppedRoad ?? null,
+      holdStatus: statusSource.holdStatus || '',
       terminal: statusSource.terminal || primaryContainer.terminal || facility || '',
       vesselName: primaryContainer.vesselName || '',
       timeIn: primaryContainer.timeIn || '',
