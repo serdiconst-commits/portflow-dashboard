@@ -14,8 +14,8 @@ export const getEirCategoryFromSubType = (
   subType: unknown,
 ): "IN EIR" | "OUT EIR" | "" => {
   const normalized = normalize(subType).toUpperCase();
-  if (normalized === "RI") return "IN EIR";
-  if (normalized === "RO" || normalized === "DM") return "OUT EIR";
+  if (["RI", "RM", "RE", "RC", "RB"].includes(normalized)) return "IN EIR";
+  if (["RO", "DM", "DI", "DE"].includes(normalized)) return "OUT EIR";
   return "";
 };
 

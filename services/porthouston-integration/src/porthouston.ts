@@ -311,7 +311,7 @@ const getEirDocumentEndpoint = (transactionId: string) => {
 
 const getEirCategory = (subType = ""): "IN EIR" | "OUT EIR" => {
   const normalized = subType.trim().toUpperCase();
-  return normalized === "RI" ? "IN EIR" : "OUT EIR";
+  return ["RI", "RM", "RE", "RC", "RB"].includes(normalized) ? "IN EIR" : "OUT EIR";
 };
 
 export const downloadEirDocument = async (

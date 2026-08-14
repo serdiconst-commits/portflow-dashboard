@@ -497,8 +497,8 @@ const getPortHoustonTransactionId = (transaction = {}) => {
   return String(safeTransaction.nbr || safeTransaction.gkey || '').trim();
 };
 
-const portHoustonOutGateSubtypes = ['RO', 'RM', 'DM', 'DI', 'DE'];
-const portHoustonInGateSubtypes = ['RI', 'RE', 'RC', 'RB'];
+const portHoustonOutGateSubtypes = ['RO', 'DM', 'DI', 'DE'];
+const portHoustonInGateSubtypes = ['RI', 'RM', 'RE', 'RC', 'RB'];
 
 const getPortHoustonEirCategory = (transaction = {}) => {
   const safeTransaction = transaction || {};

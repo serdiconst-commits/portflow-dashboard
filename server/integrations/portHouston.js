@@ -87,8 +87,8 @@ const ASSOCIATED_EQUIPMENT_FIELDS = [
   'category',
 ].join(',');
 
-const OUT_GATE_SUBTYPES = ['RO', 'RM', 'DM', 'DI', 'DE'];
-const IN_GATE_SUBTYPES = ['RI', 'RE', 'RC', 'RB'];
+const OUT_GATE_SUBTYPES = ['RO', 'DM', 'DI', 'DE'];
+const IN_GATE_SUBTYPES = ['RI', 'RM', 'RE', 'RC', 'RB'];
 
 const DEFAULT_API_BASE = 'https://api.america.naviscloudops.com/v3/evp';
 const DEFAULT_AUTH_URL =
