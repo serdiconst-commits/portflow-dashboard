@@ -508,6 +508,36 @@ const getPortHoustonEirCategory = (transaction = {}) => {
   return '';
 };
 
+const mergePortHoustonGateTransactions = (...results) => {
+  const validResults = results.filter(Boolean);
+  const transactions = [];
+  const seen = new Set();
+
+  validResults.flatMap((result) => result.transactions || []).forEach((transaction) => {
+    const transactionId = getPortHoustonTransactionId(transaction);
+    const key = `${transactionId}|${String(transaction.subType || '').trim().toUpperCase()}`;
+    if (!transactionId || seen.has(key)) return;
+    seen.add(key);
+    transactions.push(transaction);
+  });
+
+  const findTransaction = (subtypes) =>
+    transactions.find((transaction) =>
+      subtypes.includes(String(transaction.subType || '').trim().toUpperCase()) &&
+      transaction.hasDocuments === true
+    ) || transactions.find((transaction) =>
+      subtypes.includes(String(transaction.subType || '').trim().toUpperCase())
+    ) || null;
+
+  return {
+    transactions,
+    outEirTransaction: findTransaction(portHoustonOutGateSubtypes),
+    inEirTransaction: findTransaction(portHoustonInGateSubtypes),
+    lookupMethod: validResults.map((result) => result.lookupMethod).filter(Boolean).join(' + '),
+    errors: validResults.flatMap((result) => result.errors || []),
+  };
+};
+
 const ensureDownloadedPortHoustonDocument = ({
   loadId,
   companyId,
@@ -2717,21 +2747,36 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       const containerGateTransactions = containerNumber
         ? await getGateTransactionsByContainer(containerNumber, credentials, facility)
         : null;
-      if (containerGateTransactions?.transactions?.length) {
-        gateTransactions = containerGateTransactions;
-      } else if (gateTransactionNumbers.length) {
-        gateTransactions = await getGateTransactionsByNumbers(gateTransactionNumbers, credentials, facility);
-        gateTransactions.lookupMethod = 'equipment-history-nbr';
-        gateTransactions.containerLookupEmpty = true;
-      } else {
+      let historyGateTransactions = null;
+      if (gateTransactionNumbers.length) {
+        try {
+          historyGateTransactions = await getGateTransactionsByNumbers(gateTransactionNumbers, credentials, facility);
+        } catch (historyLookupError) {
+          if (!containerGateTransactions?.transactions?.length) throw historyLookupError;
+          historyGateTransactions = {
+            transactions: [],
+            errors: [{ status: historyLookupError.status || '', message: historyLookupError.message }],
+          };
+        }
+      }
+      if (historyGateTransactions) historyGateTransactions.lookupMethod = 'equipment-history-nbr';
+
+      gateTransactions = mergePortHoustonGateTransactions(
+        containerGateTransactions,
+        historyGateTransactions
+      );
+      gateTransactions.requestedContainerNumber = containerNumber;
+      gateTransactions.requestedTransactionNumbers = gateTransactionNumbers;
+      gateTransactions.containerLookupEmpty = !containerGateTransactions?.transactions?.length;
+
+      if (!gateTransactions.transactions.length) {
         gateTransactions = {
+            ...gateTransactions,
             transactions: [],
             outEirTransaction: null,
             inEirTransaction: null,
-            lookupMethod: containerNumber ? 'ctrId' : '',
             requestedContainerNumber: containerNumber,
-            requestedTransactionNumbers: [],
-            errors: [],
+            requestedTransactionNumbers: gateTransactionNumbers,
             reason: containerNumber
               ? 'No Port Houston gate transaction was returned for this container number.'
               : 'No container number was available for gate transaction lookup.',
