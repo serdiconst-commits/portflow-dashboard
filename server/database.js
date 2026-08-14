@@ -719,6 +719,16 @@ db.run(`ALTER TABLE settlements ADD COLUMN notes TEXT`, (err) => {
     console.error('Error adding notes column to settlements:', err.message);
   }
 });
+[
+  ['emailedAt', 'TEXT'],
+  ['emailedTo', 'TEXT'],
+].forEach(([column, definition]) => {
+  db.run(`ALTER TABLE settlements ADD COLUMN ${column} ${definition}`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error(`Error adding ${column} column to settlements:`, err.message);
+    }
+  });
+});
 db.run(`
   CREATE INDEX IF NOT EXISTS idx_settlements_company_driver_period
   ON settlements(companyId, driverId, periodStart, periodEnd)
