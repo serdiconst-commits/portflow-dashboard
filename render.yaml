@@ -48,6 +48,10 @@ services:
         value: "15"
       - key: PORT_HOUSTON_AUTO_AVAILABILITY_BATCH_SIZE
         value: "100"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: DRIVER_COMPLIANCE_FROM_EMAIL
+        sync: false
       - key: NODE_VERSION
         value: "22"
       - key: JWT_SECRET

@@ -136,6 +136,12 @@ import createDriverSettlementRoutes from './routes/driverSettlements.js';
 import createInvoiceRoutes from './routes/invoices.js';
 import createPayrollRoutes from './routes/payrollRoutes.js';
 import {
+  DRIVER_EXPIRATION_REMINDER_DAYS,
+  isDriverReminderEmailConfigured,
+  normalizeExpirationDate,
+  startDriverExpirationReminderChecks,
+} from './driverCompliance.js';
+import {
   downloadGateTransactionDocument,
   extractGateTransactionNumbersFromHistory,
   getBolAvailability,
@@ -4212,6 +4218,13 @@ app.get('/api/drivers', authenticate, (req, res) => {
   );
 });
 
+app.get('/api/driver-compliance/status', authenticate, (_req, res) => {
+  res.json({
+    emailConfigured: isDriverReminderEmailConfigured(),
+    reminderDays: DRIVER_EXPIRATION_REMINDER_DAYS,
+  });
+});
+
 app.get('/api/driver-locations', authenticate, requireRoles(dispatchLocationRoles), (req, res) => {
   const companyId = req.company.companyId;
 
@@ -4332,19 +4345,30 @@ app.post('/api/drivers', authenticate, async (req, res) => {
     truck = '',
     phone = '',
     isActive = 1,
+    licenseExpirationDate = '',
+    twicExpirationDate = '',
   } = req.body || {};
 
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Driver name, email, and password are required' });
   }
 
+  const normalizedLicenseExpirationDate = normalizeExpirationDate(licenseExpirationDate);
+  const normalizedTwicExpirationDate = normalizeExpirationDate(twicExpirationDate);
+  if (normalizedLicenseExpirationDate === null || normalizedTwicExpirationDate === null) {
+    return res.status(400).json({ error: 'Expiration dates must be valid calendar dates.' });
+  }
+
   const hashedPassword = await bcrypt.hash(password, 10);
   const createDriver = (driverId, allowRetry = false, attempt = 0) => {
     // 1. Insert into drivers table
     db.run(
-      `INSERT INTO drivers (id, name, email, password, truck, phone, companyId, isActive)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [driverId, name, email, hashedPassword, truck, phone, companyId, isActive ? 1 : 0],
+      `INSERT INTO drivers (
+         id, name, email, password, truck, phone, companyId, isActive,
+         licenseExpirationDate, twicExpirationDate
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [driverId, name, email, hashedPassword, truck, phone, companyId, isActive ? 1 : 0,
+        normalizedLicenseExpirationDate || null, normalizedTwicExpirationDate || null],
       function (err) {
         if (err) {
           console.error('Error creating driver:', err.message);
@@ -4405,6 +4429,8 @@ app.post('/api/drivers', authenticate, async (req, res) => {
                 phone,
                 companyId,
                 isActive: isActive ? 1 : 0,
+                licenseExpirationDate: normalizedLicenseExpirationDate || '',
+                twicExpirationDate: normalizedTwicExpirationDate || '',
               },
             });
           }
@@ -4442,9 +4468,14 @@ app.put('/api/drivers/:id', authenticate, requireRoles(dispatchLocationRoles), a
   const truck = String(req.body?.truck || '').trim();
   const phone = String(req.body?.phone || '').trim();
   const isActive = req.body?.isActive ? 1 : 0;
+  const licenseExpirationDate = normalizeExpirationDate(req.body?.licenseExpirationDate);
+  const twicExpirationDate = normalizeExpirationDate(req.body?.twicExpirationDate);
 
   if (!name || !email) {
     return res.status(400).json({ error: 'Driver name and email are required.' });
+  }
+  if (licenseExpirationDate === null || twicExpirationDate === null) {
+    return res.status(400).json({ error: 'Expiration dates must be valid calendar dates.' });
   }
 
   db.get(
@@ -4461,9 +4492,11 @@ app.put('/api/drivers/:id', authenticate, requireRoles(dispatchLocationRoles), a
 
         db.run(
           `UPDATE drivers
-           SET name = ?, email = ?, password = ?, truck = ?, phone = ?, isActive = ?
+           SET name = ?, email = ?, password = ?, truck = ?, phone = ?, isActive = ?,
+               licenseExpirationDate = ?, twicExpirationDate = ?
            WHERE id = ? AND companyId = ?`,
-          [name, email, savedPassword, truck, phone, isActive, driverId, companyId],
+          [name, email, savedPassword, truck, phone, isActive,
+            licenseExpirationDate || null, twicExpirationDate || null, driverId, companyId],
           (driverErr) => {
             if (driverErr) {
               const status = String(driverErr.message || '').includes('UNIQUE constraint failed')
@@ -4497,6 +4530,8 @@ app.put('/api/drivers/:id', authenticate, requireRoles(dispatchLocationRoles), a
                       phone: existingDriver.phone || '',
                       truck: existingDriver.truck || '',
                       isActive: Boolean(existingDriver.isActive),
+                      licenseExpirationDate: existingDriver.licenseExpirationDate || '',
+                      twicExpirationDate: existingDriver.twicExpirationDate || '',
                     },
                     newValue: {
                       name,
@@ -4505,6 +4540,8 @@ app.put('/api/drivers/:id', authenticate, requireRoles(dispatchLocationRoles), a
                       truck,
                       isActive: Boolean(isActive),
                       passwordChanged: Boolean(password),
+                      licenseExpirationDate: licenseExpirationDate || '',
+                      twicExpirationDate: twicExpirationDate || '',
                     },
                   });
 
@@ -4518,6 +4555,8 @@ app.put('/api/drivers/:id', authenticate, requireRoles(dispatchLocationRoles), a
                       phone,
                       companyId,
                       isActive,
+                      licenseExpirationDate: licenseExpirationDate || '',
+                      twicExpirationDate: twicExpirationDate || '',
                     },
                   });
                 };
@@ -5764,4 +5803,5 @@ if (isProduction) {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
   startAutomaticPortHoustonAvailabilityChecks();
+  startDriverExpirationReminderChecks(db);
 });

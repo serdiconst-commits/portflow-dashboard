@@ -45,7 +45,9 @@ db.run(`
     truck TEXT,
     phone TEXT,
     companyId TEXT,
-    isActive INTEGER DEFAULT 1
+    isActive INTEGER DEFAULT 1,
+    licenseExpirationDate TEXT,
+    twicExpirationDate TEXT
   )
 `);
 db.run(`
@@ -651,6 +653,34 @@ db.run(`ALTER TABLE loads ADD COLUMN carrierId TEXT`, (err) => {
     }
   });
 });
+
+[
+  ['licenseExpirationDate', 'TEXT'],
+  ['twicExpirationDate', 'TEXT'],
+].forEach(([column, definition]) => {
+  db.run(`ALTER TABLE drivers ADD COLUMN ${column} ${definition}`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error(`Error adding ${column} column to drivers:`, err.message);
+    }
+  });
+});
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS driver_expiration_notifications (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    driverId TEXT NOT NULL,
+    documentType TEXT NOT NULL,
+    expirationDate TEXT NOT NULL,
+    sentAt TEXT NOT NULL,
+    recipientEmail TEXT NOT NULL,
+    UNIQUE(companyId, driverId, documentType, expirationDate)
+  )
+`);
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_driver_expiration_notifications_lookup
+  ON driver_expiration_notifications(companyId, driverId, documentType, expirationDate)
+`);
 
 [
   ['miles', 'REAL DEFAULT 0'],

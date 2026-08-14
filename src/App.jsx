@@ -158,8 +158,11 @@ const [driverForm, setDriverForm] = useState({
   phone: '',
   truck: '',
   isActive: true,
+  licenseExpirationDate: '',
+  twicExpirationDate: '',
 });
 const [editingDriverId, setEditingDriverId] = useState('');
+const [driverComplianceStatus, setDriverComplianceStatus] = useState({ emailConfigured: false, reminderDays: 5 });
 
 const emptyStaffForm = {
   name: '',
@@ -3114,6 +3117,11 @@ const fetchDrivers = async () => {
     }
 
     setDriversList(data);
+    const complianceRes = await fetch(`${API_BASE}/api/driver-compliance/status`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      cache: 'no-store',
+    });
+    if (complianceRes.ok) setDriverComplianceStatus(await complianceRes.json());
   } catch (error) {
     console.error('Failed to fetch drivers:', error);
   }
@@ -6969,6 +6977,8 @@ const handleSaveDriver = async (e) => {
       phone: '',
       truck: '',
       isActive: true,
+      licenseExpirationDate: '',
+      twicExpirationDate: '',
     });
     setEditingDriverId('');
   } catch (error) {
@@ -6987,6 +6997,8 @@ const handleEditDriver = (driver) => {
     phone: driver.phone || '',
     truck: driver.truck || '',
     isActive: Boolean(driver.isActive),
+    licenseExpirationDate: driver.licenseExpirationDate || '',
+    twicExpirationDate: driver.twicExpirationDate || '',
   });
 };
 
@@ -7000,6 +7012,8 @@ const handleCancelDriverEdit = () => {
     phone: '',
     truck: '',
     isActive: true,
+    licenseExpirationDate: '',
+    twicExpirationDate: '',
   });
 };
 
@@ -14723,6 +14737,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         </div>
       </div>
 
+      <div className={`compliance-email-banner ${driverComplianceStatus.emailConfigured ? 'ready' : 'setup'}`}>
+        <strong>{driverComplianceStatus.emailConfigured ? 'Email reminders active' : 'Email setup required'}</strong>
+        <span>{driverComplianceStatus.emailConfigured
+          ? `Drivers receive one reminder during the ${driverComplianceStatus.reminderDays}-day expiration window.`
+          : 'Dates will be saved; configure the Render email variables to send automatic alerts.'}</span>
+      </div>
+
       <form className="load-form admin-form" onSubmit={handleSaveDriver}>
         <input
           type="text"
@@ -14782,6 +14803,17 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           required={!editingDriverId}
         />
 
+        <div className="driver-compliance-fields">
+          <label>
+            <span>Driver License Expiration</span>
+            <input type="date" value={driverForm.licenseExpirationDate} onChange={(e) => setDriverForm((prev) => ({ ...prev, licenseExpirationDate: e.target.value }))} />
+          </label>
+          <label>
+            <span>TWIC Card Expiration</span>
+            <input type="date" value={driverForm.twicExpirationDate} onChange={(e) => setDriverForm((prev) => ({ ...prev, twicExpirationDate: e.target.value }))} />
+          </label>
+        </div>
+
         <label className="checkbox-row">
           <input
             type="checkbox"
@@ -14829,6 +14861,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <span>{driver.id}</span>
                 <span>Truck {driver.truck || 'N/A'}</span>
                 <span>Driver</span>
+                <span className="compliance-date-pill">License: {driver.licenseExpirationDate || 'Not set'}</span>
+                <span className="compliance-date-pill">TWIC: {driver.twicExpirationDate || 'Not set'}</span>
                 <span className={driver.isActive ? 'status-pill active' : 'status-pill inactive'}>
                   {driver.isActive ? 'Active' : 'Inactive'}
                 </span>
