@@ -542,6 +542,25 @@ const normalizeImpediments = (value) => {
   return [String(value)].filter(Boolean);
 };
 
+const isActiveRoadImpediment = (value = '') => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return false;
+  if (/(:|=)\s*(false|no|0)$/.test(normalized)) return false;
+  return ![
+    'no hold',
+    'no holds',
+    'none',
+    'false',
+    'released',
+    'cleared',
+    'inactive',
+  ].some((inactiveText) =>
+    normalized === inactiveText ||
+    normalized.startsWith(`${inactiveText} -`) ||
+    normalized.endsWith(` - ${inactiveText}`)
+  );
+};
+
 const normalizeContainerSizeCode = (value = '') => {
   const raw = String(value || '').trim();
   const normalized = raw.replace(/[^a-z0-9]/gi, '').toUpperCase();
@@ -560,20 +579,23 @@ const normalizeContainerSizeCode = (value = '') => {
   return sizeMap[normalized] || raw;
 };
 
-const normalizeAvailability = (response) => {
+export const normalizeAvailability = (response) => {
   const records = unwrapRecords(response);
   const unit = records[0] || {};
   const found = records.length > 0 && Object.keys(unit).length > 0;
   const transitState = String(getFirstValue(unit, ['transitState']) || '').trim().toUpperCase();
   const stoppedRoad = normalizeBoolean(getFirstValue(unit, ['stoppedRoad']));
   const impediments = normalizeImpediments(getFirstValue(unit, ['impediments', 'roadImpediments', 'stopFlags']));
-  const available = found && transitState === 'S40_YARD' && stoppedRoad !== true;
+  const activeRoadImpediments = impediments.filter(isActiveRoadImpediment);
+  const holdStatus = activeRoadImpediments.join(', ');
+  const hasActiveHold = stoppedRoad === true || activeRoadImpediments.length > 0;
+  const available = found && transitState === 'S40_YARD' && !hasActiveHold;
   const statusReason = !found
     ? 'Container not found in Port Houston response.'
     : available
       ? 'Container is in yard and has no active road hold.'
-      : stoppedRoad
-        ? 'Container has an active road hold.'
+      : hasActiveHold
+        ? `Container is on hold${holdStatus ? `: ${holdStatus}` : '.'}`
         : transitState
           ? `Container transit state is ${transitState}, not S40_YARD.`
           : 'Container transit state was not returned by Port Houston.';
@@ -584,6 +606,8 @@ const normalizeAvailability = (response) => {
     statusReason,
     transitState,
     stoppedRoad,
+    hasActiveHold,
+    holdStatus,
     terminal: getFirstValue(unit, ['scope.facility_id', 'facility', 'facilityId', 'terminal', 'routing.pod1Id']),
     roadImpediments: impediments,
     lastFreeDay: getFirstValue(unit, ['lastFreeDay', 'lineLastFreeDay', 'lfd']),

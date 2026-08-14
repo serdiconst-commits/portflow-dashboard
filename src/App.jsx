@@ -369,7 +369,7 @@ const getLoadQuickStatus = (load = {}) => {
     return 'Dispatched';
   }
 
-  if (['Available', 'Not Available'].includes(load.availabilityStatus)) {
+  if (String(load.availabilityStatus || '').startsWith('Not Available') || load.availabilityStatus === 'Available') {
     return load.availabilityStatus;
   }
 
@@ -1298,7 +1298,7 @@ const availableLoads = loadsData.filter(
 );
 
 const notAvailableLoads = loadsData.filter(
-  (load) => getAvailabilityStatusKey(load) === 'not available' && !['delivered', 'completed'].includes(getLoadQuickStatusKey(load))
+  (load) => getAvailabilityStatusKey(load).startsWith('not available') && !['delivered', 'completed'].includes(getLoadQuickStatusKey(load))
 );
 
 const [selectedPresetName, setSelectedPresetName] = useState('');
@@ -2605,6 +2605,22 @@ useEffect(() => {
 const [searchTerm, setSearchTerm] = useState('');
 const [statusFilter, setStatusFilter] = useState('All');
 const [paperworkFilter, setPaperworkFilter] = useState('All');
+
+const handleDispatchBoardClick = () => {
+  setActiveView('dispatch');
+  setDashboardFilter('all');
+  setSearchTerm('');
+  setStatusFilter('All');
+  setPaperworkFilter('All');
+  setAppointmentDateFilter('today');
+  setAppointmentDeliveryTypeFilter('all');
+  setCustomAppointmentDate(getTodayDate());
+  setAvailableAppointmentDateFilter('all');
+  setAvailableDeliveryTypeFilter('all');
+  setAvailableCustomAppointmentDate(getTodayDate());
+  setLfdDateFilter('all');
+  setLfdCustomDate(getTodayDate());
+};
 const [selectedDocumentType, setSelectedDocumentType] = useState('POD');
 const [selectedAccountingDocumentType, setSelectedAccountingDocumentType] = useState('POD');
 const [selectedSettlementDriverId, setSelectedSettlementDriverId] = useState('');
@@ -5295,6 +5311,7 @@ const getPortHoustonSummary = (result) => {
     statusReason: availability.statusReason || result?.suggested?.portStatusReason || '',
     transitState: availability.transitState || result?.suggested?.transitState || '',
     stoppedRoad: availability.stoppedRoad ?? result?.suggested?.stoppedRoad ?? null,
+    holdStatus: availability.holdStatus || result?.suggested?.holdStatus || '',
     lastFreeDay: availability.lastFreeDay || '',
     lastGateMove,
     outEir: result?.eir?.out || null,
@@ -5429,10 +5446,9 @@ const handleSmartPortLookup = async () => {
       containerSize: fillEmptyPortField(prev.containerSize, suggested.containerSize),
       shipLine: fillEmptyPortField(prev.shipLine, normalizePortShipLineForForm(suggested.shipLine)),
       bookingNumber: fillEmptyPortField(prev.bookingNumber, suggested.bookingNumber),
-      referenceNumber: fillEmptyPortField(prev.referenceNumber, suggested.billOfLading),
       sealNumber: fillEmptyPortField(prev.sealNumber, suggested.sealNumber),
       lastFreeDay: fillEmptyPortField(prev.lastFreeDay, getLocalDatePortion(suggested.lastFreeDay)),
-      availabilityStatus: fillEmptyPortField(prev.availabilityStatus, suggested.availabilityStatus),
+      availabilityStatus: suggested.availabilityStatus || prev.availabilityStatus,
       pickup: fillEmptyPortField(prev.pickup, suggestedPickup),
       notes:
         suggested.vesselName && !String(prev.notes || '').includes(`Port vessel: ${suggested.vesselName}`)
@@ -9375,7 +9391,7 @@ const baseFilteredLoadsData =
       )
     : dashboardFilter === 'not-available'
     ? activeOperationsLoads.filter(
-        (load) => getAvailabilityStatusKey(load) === 'not available'
+        (load) => getAvailabilityStatusKey(load).startsWith('not available')
       )
     : dashboardFilter === 'dispatched'
     ? activeOperationsLoads.filter(
@@ -11000,7 +11016,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               key={view}
               className={activeView === view ? 'active' : ''}
               onClick={() => {
-                setActiveView(view);
+                if (view === 'dispatch') {
+                  handleDispatchBoardClick();
+                } else {
+                  setActiveView(view);
+                }
                 setIsSidebarOpen(false);
               }}
             >
@@ -13142,6 +13162,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                 <div className="detail-box"><span>Last Free Day</span><strong>{summary.lastFreeDay || 'Not returned'}</strong></div>
                                 <div className="detail-box"><span>Transit State</span><strong>{summary.transitState || 'Not returned'}</strong></div>
                                 <div className="detail-box"><span>Road Hold</span><strong>{summary.stoppedRoad === true ? 'Yes' : summary.stoppedRoad === false ? 'No' : 'Not returned'}</strong></div>
+                                <div className="detail-box"><span>Hold Status</span><strong>{summary.holdStatus || 'No active hold returned'}</strong></div>
                                 <div className="detail-box">
                                   <span>Last Gate Move</span>
                                   <strong>{formatPortHoustonGateMove(summary.lastGateMove)}</strong>
