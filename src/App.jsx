@@ -7209,9 +7209,7 @@ const handleChangeUserRole = async (userId, newRole) => {
           <tr>
             <td>${load.loadDate || '-'}</td>
             <td>${load.id}</td>
-            <td>${load.customer || '-'}</td>
             <td>${load.containerNumber || '-'}</td>
-            <td>${load.referenceNumber || load.bookingNumber || '-'}</td>
             <td>${getSettlementPayValue(load, 'driverRate')}</td>
             <td>${getSettlementPayValue(load, 'detention')}</td>
             <td>${getSettlementPayValue(load, 'lumper')}</td>
@@ -7294,9 +7292,7 @@ const handleChangeUserRole = async (userId, newRole) => {
               <tr>
                 <th>Date</th>
                 <th>Load</th>
-                <th>Customer</th>
                 <th>Container</th>
-                <th>Reference</th>
                 <th>Load Pay</th>
                 <th>Detention</th>
                 <th>Lumper</th>
@@ -7447,9 +7443,7 @@ const handleChangeUserRole = async (userId, newRole) => {
           <tr>
             <td>${escapeHtml(formatAppointmentTime(line.appointmentTime) || '-')}</td>
             <td>${escapeHtml(line.loadId || line.description || '-')}</td>
-            <td>${escapeHtml(line.customer || '-')}</td>
             <td>${escapeHtml(line.containerNumber || '-')}</td>
-            <td>${escapeHtml(line.referenceNumber || '-')}</td>
             <td>${escapeHtml(formatMiles(line.miles))}</td>
             <td>${escapeHtml(line.source || 'auto')}</td>
             <td>${escapeHtml(formatMoney(line.payAmount || 0))}</td>
@@ -7536,15 +7530,13 @@ const handleChangeUserRole = async (userId, newRole) => {
               <tr>
                 <th>Appointment</th>
                 <th>Load</th>
-                <th>Customer</th>
                 <th>Container</th>
-                <th>Reference</th>
                 <th>Miles</th>
                 <th>Source</th>
                 <th>Pay</th>
               </tr>
             </thead>
-            <tbody>${loadsHtml || '<tr><td colspan="8">No loads in this statement</td></tr>'}</tbody>
+            <tbody>${loadsHtml || '<tr><td colspan="6">No loads in this statement</td></tr>'}</tbody>
           </table>
 
           <h2>Deductions / Reimbursements</h2>
