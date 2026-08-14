@@ -2636,6 +2636,7 @@ const [completedLoadCustomDate, setCompletedLoadCustomDate] = useState(getTodayD
 const [completedLoadSearchTerm, setCompletedLoadSearchTerm] = useState('');
 const [selectedCompletedReviewLoadId, setSelectedCompletedReviewLoadId] = useState('');
 const [selectedCompletedDocumentType, setSelectedCompletedDocumentType] = useState('POD');
+const [completedEditingLoadId, setCompletedEditingLoadId] = useState('');
 const [mileageReportYear, setMileageReportYear] = useState(() => getTodayDate().slice(0, 4));
 const [fuelTransactions, setFuelTransactions] = useState([]);
 const [fuelSummary, setFuelSummary] = useState({
@@ -5135,6 +5136,18 @@ const handleEditClick = (event) => {
   }, 50);
 };
 
+const openCompletedLoadEditor = (load) => {
+  if (!load?.id) return;
+  setEditingLoad({
+    ...emptyLoad,
+    ...load,
+    driver: normalizeDriverForStorage(load.driver),
+    documents: load.documents || [],
+    paperwork: load.paperwork || getPaperworkStatusFromDocuments(load.documents || []),
+  });
+  setCompletedEditingLoadId(load.id);
+};
+
 const handleDuplicateLoad = (load) => {
   if (!load) return;
 
@@ -5262,6 +5275,7 @@ const res = await fetch(`${API_BASE}/api/loads/${editingLoad.id}`, {
     setSelectedLoad(data);
     setEditingLoad(data);
     setIsEditing(false);
+    setCompletedEditingLoadId('');
     await fetchSelectedLoadAuditLogs(data.id);
   } catch (error) {
     console.error('Failed to update load:', error);
@@ -15662,6 +15676,16 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             className="secondary-btn compact-btn"
                             onClick={() => {
                               setSelectedCompletedReviewLoadId(load.id);
+                              openCompletedLoadEditor(load);
+                            }}
+                          >
+                            Edit Load
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-btn compact-btn"
+                            onClick={() => {
+                              setSelectedCompletedReviewLoadId(load.id);
                               window.setTimeout(() => {
                                 document.getElementById('completed-load-review-panel')?.scrollIntoView({
                                   behavior: 'smooth',
@@ -15708,6 +15732,17 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     onClick={() => openAccountingExtraChargesEditor(selectedCompletedReviewLoad, parseCustomerExtraCharges(selectedCompletedReviewLoad).length === 0)}
                   >
                     {parseCustomerExtraCharges(selectedCompletedReviewLoad).length > 0 ? 'Edit Charges' : 'Add Charges'}
+                  </button>
+                  <button type="button" className="secondary-btn compact-btn" onClick={() => openCompletedLoadEditor(selectedCompletedReviewLoad)}>
+                    Edit Load
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-btn compact-btn"
+                    onClick={() => handleCheckPortHouston(selectedCompletedReviewLoad)}
+                    disabled={portHoustonCheckingLoadId === selectedCompletedReviewLoad.id}
+                  >
+                    {portHoustonCheckingLoadId === selectedCompletedReviewLoad.id ? 'Refreshing EIR...' : 'Refresh OUT EIR / IN EIR'}
                   </button>
                   <button
                     type="button"
@@ -15758,6 +15793,105 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="detail-box"><span>Customer Extras</span><strong>{formatMoney(getCustomerExtraChargesTotal(selectedCompletedReviewLoad))}</strong></div>
                 <div className="detail-box"><span>Bill Total</span><strong>{formatMoney(getCustomerBillAmount(selectedCompletedReviewLoad))}</strong></div>
               </div>
+
+              {portHoustonChecksByLoad[selectedCompletedReviewLoad.id]?.error && (
+                <p className="documents-empty">Port Houston: {portHoustonChecksByLoad[selectedCompletedReviewLoad.id].error}</p>
+              )}
+              {portHoustonChecksByLoad[selectedCompletedReviewLoad.id]?.result?.eir?.note && (
+                <p className="documents-empty">{portHoustonChecksByLoad[selectedCompletedReviewLoad.id].result.eir.note}</p>
+              )}
+
+              {completedEditingLoadId === selectedCompletedReviewLoad.id && editingLoad?.id === selectedCompletedReviewLoad.id && (
+                <form id="completed-load-edit-form" className="load-form" onSubmit={handleUpdateLoad}>
+                  <div className="edit-load-group">
+                    <div className="edit-load-group-header">
+                      <h4>Edit Complete Load Details</h4>
+                      <span>Update any load detail below, then save the completed load.</span>
+                    </div>
+                    <div className="details-actions">
+                      <button type="submit" className="primary-btn compact-btn">Save Changes</button>
+                      <button type="button" className="secondary-btn compact-btn" onClick={() => setCompletedEditingLoadId('')}>Cancel</button>
+                    </div>
+                  </div>
+
+                  <div className="edit-load-group">
+                    <div className="edit-load-group-header"><h4>Customer & References</h4></div>
+                    <div className="edit-load-grid">
+                      <select name="customer" value={editingLoad.customer || ''} onChange={handleEditInputChange}>
+                        <option value="">Select Customer</option>
+                        {customers.map((customer) => <option key={customer.id} value={customer.name}>{customer.name}</option>)}
+                      </select>
+                      <input name="referenceNumber" placeholder="Broker Reference #" value={editingLoad.referenceNumber || ''} onChange={handleEditInputChange} />
+                      <input name="poNumber" placeholder="PO #" value={editingLoad.poNumber || ''} onChange={handleEditInputChange} />
+                      <input name="pickupNumber" placeholder="Pick Up #" value={editingLoad.pickupNumber || ''} onChange={handleEditInputChange} />
+                      <input name="reservationNumber" placeholder="Reservation #" value={editingLoad.reservationNumber || ''} onChange={handleEditInputChange} />
+                      <input name="sealNumber" placeholder="Seal #" value={editingLoad.sealNumber || ''} onChange={handleEditInputChange} />
+                      <input name="returnNumber" placeholder="Return #" value={editingLoad.returnNumber || ''} onChange={handleEditInputChange} />
+                      <input name="bookingNumber" placeholder="Booking Number" value={editingLoad.bookingNumber || ''} onChange={handleEditInputChange} />
+                    </div>
+                  </div>
+
+                  <div className="edit-load-group">
+                    <div className="edit-load-group-header"><h4>Equipment & Locations</h4></div>
+                    <div className="edit-load-grid">
+                      <input name="containerNumber" placeholder="Container Number" value={editingLoad.containerNumber || ''} onChange={handleEditInputChange} />
+                      <input name="containerSize" placeholder="Container Size" value={editingLoad.containerSize || ''} onChange={handleEditInputChange} />
+                      <select name="shipLine" value={editingLoad.shipLine || ''} onChange={handleEditInputChange}>
+                        <option value="">Select Ship Line</option>
+                        {shipLineOptions.map((line) => <option key={line} value={line}>{line}</option>)}
+                      </select>
+                      <input name="chassisNumber" placeholder="Chassis Number" value={editingLoad.chassisNumber || ''} onChange={handleEditInputChange} />
+                      <input name="pickup" placeholder="Pickup Location" value={editingLoad.pickup || ''} onChange={handleEditInputChange} />
+                      <input name="delivery" placeholder="Delivery Location" value={editingLoad.delivery || ''} onChange={handleEditInputChange} />
+                      <input name="returnLocation" placeholder="Return Location" value={editingLoad.returnLocation || ''} onChange={handleEditInputChange} />
+                      <select name="deliveryType" value={editingLoad.deliveryType || ''} onChange={handleEditInputChange}>
+                        <option value="">Select Delivery Type</option><option value="local">Local Delivery</option><option value="highway">Highway Delivery</option>
+                      </select>
+                      <input type="number" min="0" step="0.1" name="miles" placeholder="Route Miles" value={editingLoad.miles || ''} onChange={handleEditInputChange} />
+                      <label className="checkbox-row">
+                        <input type="checkbox" checked={Boolean(editingLoad.streetTurn)} onChange={(e) => setEditingLoad((prev) => ({ ...prev, streetTurn: e.target.checked }))} />
+                        <span>Street Turn / reuse container</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="edit-load-group">
+                    <div className="edit-load-group-header"><h4>Schedule, Driver & Status</h4></div>
+                    <div className="edit-load-grid">
+                      <label className="edit-load-field"><span>Load Date</span><input type="date" name="loadDate" value={editingLoad.loadDate || ''} onChange={handleEditInputChange} /></label>
+                      <label className="edit-load-field"><span>Appointment</span><input type="datetime-local" name="appointmentTime" value={normalizeDateTimeInputValue(editingLoad.appointmentTime)} onChange={handleEditInputChange} /></label>
+                      <label className="edit-load-field"><span>LFD</span><input type="date" name="lastFreeDay" value={editingLoad.lastFreeDay || ''} onChange={handleEditInputChange} /></label>
+                      <label className="edit-load-field"><span>ETA</span><input type="datetime-local" name="eta" value={normalizeDateTimeInputValue(editingLoad.eta)} onChange={handleEditInputChange} /></label>
+                      <select name="driver" value={editingLoad.driver || ''} onChange={handleEditInputChange}>
+                        <option value="">Select Driver</option>
+                        {driversList.map((driver) => <option key={driver.id} value={driver.id}>{driver.id} - {driver.name}</option>)}
+                      </select>
+                      <input name="truck" placeholder="Truck" value={editingLoad.truck || ''} readOnly />
+                      <select name="status" value={editingLoad.status || 'Completed'} onChange={handleEditInputChange}>
+                        <option value="Dispatched">Dispatched</option><option value="In Transit">In Transit</option><option value="Dropped">Dropped</option><option value="Delivered">Delivered</option><option value="Completed">Completed</option>
+                      </select>
+                      <select name="availabilityStatus" value={editingLoad.availabilityStatus || 'Not Available'} onChange={handleEditInputChange}>
+                        <option value="Available">Available</option><option value="Not Available">Not Available</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="edit-load-group">
+                    <div className="edit-load-group-header"><h4>Rates, Drop Details & Notes</h4></div>
+                    <div className="edit-load-grid">
+                      <input name="rate" placeholder="Load Rate" value={editingLoad.rate || ''} onChange={handleEditInputChange} />
+                      <input name="driverRate" placeholder="Driver Rate" value={editingLoad.driverRate || ''} onChange={handleEditInputChange} />
+                      <input name="detention" placeholder="Customer Detention" value={editingLoad.detention || ''} onChange={handleEditInputChange} />
+                      <input name="lumper" placeholder="Lumper" value={editingLoad.lumper || ''} onChange={handleEditInputChange} />
+                      <input name="fuelAdvance" placeholder="Fuel Advance" value={editingLoad.fuelAdvance || ''} onChange={handleEditInputChange} />
+                      <select name="dropType" value={editingLoad.dropType || ''} onChange={handleEditInputChange}><option value="">Select Drop Type</option><option value="Customer">Customer</option><option value="Yard">Yard / Pre-pull</option></select>
+                      <input name="dropLocation" placeholder="Drop Location" value={editingLoad.dropLocation || ''} onChange={handleEditInputChange} />
+                      <label className="edit-load-field"><span>Drop Date/Time</span><input type="datetime-local" name="dropDateTime" value={normalizeDateTimeInputValue(editingLoad.dropDateTime)} onChange={handleEditInputChange} /></label>
+                      <textarea className="edit-load-wide" name="notes" placeholder="Dispatcher Notes" value={editingLoad.notes || ''} onChange={handleEditInputChange} rows="4" />
+                    </div>
+                  </div>
+                </form>
+              )}
 
               <div className="documents-box accounting-documents-box">
                 <div className="documents-header">
