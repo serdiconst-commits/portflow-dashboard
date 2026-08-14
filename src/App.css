@@ -3884,6 +3884,7 @@ button:disabled {
 .driver-compliance-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 14px; border: 1px solid #dbeafe; border-radius: 14px; background: #f8fbff; }
 .driver-compliance-fields label { display: flex; flex-direction: column; gap: 6px; color: #475569; font-size: 12px; font-weight: 700; }
 .compliance-date-pill { padding: 5px 9px; border-radius: 999px; background: #eff6ff; color: #1d4ed8 !important; font-weight: 700; }
+.settlement-email-history { margin: 0 0 14px; padding: 10px 12px; border-radius: 10px; background: #ecfdf5; color: #065f46; font-size: 13px; }
 @media (max-width: 700px) { .driver-compliance-fields { grid-template-columns: 1fr; } }
 
 .tenant-grid {

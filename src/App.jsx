@@ -2689,6 +2689,7 @@ const [settlementPayDrafts, setSettlementPayDrafts] = useState({});
 const [settlementPayStatus, setSettlementPayStatus] = useState('');
 const [backendSettlements, setBackendSettlements] = useState([]);
 const [activeBackendSettlement, setActiveBackendSettlement] = useState(null);
+const [settlementEmailSending, setSettlementEmailSending] = useState(false);
 const [settlementBackendLoading, setSettlementBackendLoading] = useState(false);
 const [settlementBackendStatus, setSettlementBackendStatus] = useState('');
 const [backendDeductionDraft, setBackendDeductionDraft] = useState({
@@ -4459,6 +4460,37 @@ useEffect(() => {
       setSettlementBackendStatus(`Failed to complete settlement: ${error.message}`);
     } finally {
       setSettlementBackendLoading(false);
+    }
+  };
+
+  const handleSendBackendSettlementEmail = async () => {
+    if (!activeBackendSettlement?.id || settlementEmailSending) return;
+    const driverEmail = activeBackendSettlement.statement?.driver?.email ||
+      driversList.find((driver) => driver.id === activeBackendSettlement.driverId)?.email || '';
+    if (!driverEmail) {
+      alert('This driver does not have an email address in the driver profile.');
+      return;
+    }
+    const confirmed = window.confirm(`Send this completed settlement PDF to ${driverEmail}?`);
+    if (!confirmed) return;
+
+    setSettlementEmailSending(true);
+    setSettlementBackendStatus('Sending settlement PDF...');
+    try {
+      const res = await fetch(`${API_BASE}/api/driver-settlements/${activeBackendSettlement.id}/send-email`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to email settlement.');
+      setActiveBackendSettlement((prev) => prev ? { ...prev, emailedAt: data.emailedAt, emailedTo: data.emailedTo } : prev);
+      setSettlementBackendStatus(`Settlement emailed successfully to ${data.emailedTo}.`);
+      alert(`Settlement sent successfully to ${data.emailedTo}.`);
+    } catch (error) {
+      setSettlementBackendStatus(`Failed to send settlement: ${error.message}`);
+      alert(`Failed to send settlement: ${error.message}`);
+    } finally {
+      setSettlementEmailSending(false);
     }
   };
 
@@ -14134,8 +14166,19 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <button type="button" className="primary-btn" onClick={handlePrintBackendSettlementReport}>
                   Print Report
                 </button>
+                {String(activeBackendSettlement.status || activeBackendSettlement.statement?.settlement?.status || '').trim().toLowerCase() === 'complete' && (
+                  <button type="button" className="primary-btn" onClick={handleSendBackendSettlementEmail} disabled={settlementEmailSending}>
+                    {settlementEmailSending ? 'Sending...' : 'Send to Driver'}
+                  </button>
+                )}
               </div>
             </div>
+
+            {activeBackendSettlement.emailedAt && (
+              <p className="settlement-email-history">
+                Last emailed to <strong>{activeBackendSettlement.emailedTo}</strong> on {formatDateTime(activeBackendSettlement.emailedAt)}
+              </p>
+            )}
 
             {(activeBackendSettlement.notes || activeBackendSettlement.statement?.settlement?.notes) && (
               <div className="settlement-note-preview">

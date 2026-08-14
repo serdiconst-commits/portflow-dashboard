@@ -13,6 +13,7 @@ import {
   updateSettlementLoad,
   updateSettlement,
 } from '../services/driverSettlements.js';
+import { buildSettlementPdf, sendSettlementEmail } from '../settlementEmail.js';
 
 const settlementRoles = new Set(['admin', 'manager', 'dispatcher', 'payroll']);
 
@@ -29,6 +30,13 @@ const sendError = (res, error) => {
   const status = error.status || (error.message?.includes('required') ? 400 : 500);
   res.status(status).json({ error: error.message || 'Settlement request failed.' });
 };
+
+const dbGet = (db, sql, params = []) => new Promise((resolve, reject) => {
+  db.get(sql, params, (error, row) => (error ? reject(error) : resolve(row)));
+});
+const dbRun = (db, sql, params = []) => new Promise((resolve, reject) => {
+  db.run(sql, params, (error) => (error ? reject(error) : resolve()));
+});
 
 export default function createDriverSettlementRoutes(db) {
   const router = express.Router();
@@ -97,6 +105,28 @@ export default function createDriverSettlementRoutes(db) {
       const settlement = await getSettlement(db, req.company.companyId, req.params.id);
       if (!settlement) return res.status(404).json({ error: 'Settlement not found.' });
       res.json(settlement.statement);
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  router.post('/:id/send-email', async (req, res) => {
+    try {
+      const settlement = await getSettlement(db, req.company.companyId, req.params.id);
+      if (!settlement) return res.status(404).json({ error: 'Settlement not found.' });
+      if (String(settlement.status || '').trim().toLowerCase() !== 'complete') {
+        return res.status(409).json({ error: 'Complete the settlement before emailing it to the driver.' });
+      }
+
+      const driver = await dbGet(db, `SELECT id, name, email FROM drivers WHERE id = ? AND companyId = ?`, [settlement.driverId, req.company.companyId]);
+      if (!driver?.email) return res.status(400).json({ error: 'This driver does not have an email address.' });
+      const company = await dbGet(db, `SELECT name, invoiceName, settlementCompanyName FROM companies WHERE id = ?`, [req.company.companyId]);
+      const pdfBuffer = await buildSettlementPdf(settlement, company || {});
+      await sendSettlementEmail({ settlement, company: company || {}, driver, pdfBuffer });
+
+      const emailedAt = new Date().toISOString();
+      await dbRun(db, `UPDATE settlements SET emailedAt = ?, emailedTo = ?, updatedAt = ? WHERE id = ? AND companyId = ?`, [emailedAt, driver.email, emailedAt, settlement.id, req.company.companyId]);
+      res.json({ success: true, emailedAt, emailedTo: driver.email });
     } catch (error) {
       sendError(res, error);
     }
