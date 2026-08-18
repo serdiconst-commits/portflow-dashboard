@@ -1307,14 +1307,20 @@ const notAvailableLoads = loadsData.filter(
 const [selectedPresetName, setSelectedPresetName] = useState('');
 const [selectedLoad, setSelectedLoad] = useState(null);
 const buildDropDetailsDraft = (load = {}) => ({
+  movementMode: load.movementMode || (load.dropType ? 'DropHook' : 'Direct'),
   dropType: load.dropType || '',
   dropLocation: load.dropLocation || '',
   droppedBy: normalizeDriverForStorage(load.droppedBy) || normalizeDriverForStorage(load.driver) || '',
   dropDateTime: normalizeDateTimeInputValue(load.dropDateTime || ''),
-  nextDriver: normalizeDriverForStorage(load.driver) || '',
+  nextDriver: normalizeDriverForStorage(load.hookDriver) || '',
   nextMoveType: load.nextMoveType || 'Delivery',
+  dropPay: load.dropPay || '',
+  pickupPay: load.pickupPay || '',
+  hookReadyAt: normalizeDateTimeInputValue(load.hookReadyAt || ''),
 });
 const [dropDetailsDraft, setDropDetailsDraft] = useState(buildDropDetailsDraft());
+const [newMoveLocationType, setNewMoveLocationType] = useState('');
+const [newMoveLocation, setNewMoveLocation] = useState({ name: '', address: '', city: '', state: '', zip: '' });
 const [dispatchColumnOrder, setDispatchColumnOrder] = useState(() => {
   try {
     return getValidDispatchColumnOrder(
@@ -6328,13 +6334,23 @@ const handleSaveDropDetails = async () => {
   };
 
   try {
-    const res = await fetch(`${API_BASE}/api/loads/${updatedLoad.id}`, {
+    const res = await fetch(`${API_BASE}/api/loads/${updatedLoad.id}/drop-hook`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
       },
-      body: JSON.stringify(updatedLoad),
+      body: JSON.stringify({
+        action: 'mark-dropped',
+        dropType: updatedLoad.dropType,
+        dropLocation: updatedLoad.dropLocation,
+        returnLocation: updatedLoad.returnLocation,
+        dropDriver: updatedLoad.droppedBy,
+        dropDateTime: updatedLoad.dropDateTime,
+        dropPay: dropDetailsDraft.dropPay,
+        pickupPay: dropDetailsDraft.pickupPay,
+        hookReadyAt: dropDetailsDraft.hookReadyAt,
+      }),
     });
 
     if (!res.ok) {
@@ -6364,6 +6380,81 @@ const getDroppedLoadPickup = (load = {}) =>
     : load.returnLocation) ||
   load.pickup ||
   '';
+
+const saveDropHookConfiguration = async (action = 'configure') => {
+  if (!selectedLoad?.id) return null;
+  const dropDriver = normalizeDriverForStorage(dropDetailsDraft.droppedBy || selectedLoad.driver);
+  const hookDriver = normalizeDriverForStorage(dropDetailsDraft.nextDriver);
+  const res = await fetch(`${API_BASE}/api/loads/${selectedLoad.id}/drop-hook`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+    body: JSON.stringify({
+      action,
+      dropType: dropDetailsDraft.dropType || 'Customer',
+      dropLocation: dropDetailsDraft.dropLocation,
+      returnLocation: selectedLoad.returnLocation,
+      dropDriver,
+      hookDriver,
+      dropPay: dropDetailsDraft.dropPay,
+      pickupPay: dropDetailsDraft.pickupPay,
+      hookReadyAt: dropDetailsDraft.hookReadyAt,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to update Drop & Hook.');
+  setSelectedLoad(data);
+  setDropDetailsDraft(buildDropDetailsDraft(data));
+  setLoadsData((prev) => prev.map((load) => (load.id === data.id ? data : load)));
+  return data;
+};
+
+const handleConfigureDropHook = async () => {
+  try {
+    await saveDropHookConfiguration('configure');
+    alert('Drop & Hook plan saved. The first driver will only receive pickup and drop delivery.');
+  } catch (error) {
+    alert(error.message);
+  }
+};
+
+const handleConvertDropHookToDirect = async () => {
+  if (!window.confirm('Convert this load to direct delivery and cancel the Drop & Hook plan?')) return;
+  try {
+    const data = await saveDropHookConfiguration('direct');
+    setDropDetailsDraft(buildDropDetailsDraft(data));
+    alert('Load converted to direct delivery. Original pickup and delivery were restored.');
+  } catch (error) {
+    alert(error.message);
+  }
+};
+
+const handleSaveMoveLocation = async () => {
+  const type = newMoveLocationType;
+  if (!type || !newMoveLocation.name.trim() || !newMoveLocation.address.trim()) {
+    alert('Location name and street address are required.');
+    return;
+  }
+  const customer = customers.find((item) => item.name === selectedLoad?.customer);
+  const res = await fetch(`${API_BASE}/api/locations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+    body: JSON.stringify({ ...newMoveLocation, type, customerId: customer?.id || '' }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    alert(data.error || 'Failed to save location.');
+    return;
+  }
+  const address = formatLocationAddress({ ...newMoveLocation, id: data.id });
+  if (type === 'return') {
+    setSelectedLoad((prev) => ({ ...prev, returnLocation: address }));
+  } else {
+    setDropDetailsDraft((prev) => ({ ...prev, dropLocation: address, dropType: 'Customer' }));
+  }
+  await fetchLocations();
+  setNewMoveLocationType('');
+  setNewMoveLocation({ name: '', address: '', city: '', state: '', zip: '' });
+};
 
 const handleReopenDroppedLoad = async () => {
   if (!selectedLoad?.id) return;
@@ -6404,13 +6495,23 @@ const handleReopenDroppedLoad = async () => {
   };
 
   try {
-    const res = await fetch(`${API_BASE}/api/loads/${updatedLoad.id}`, {
+    const res = await fetch(`${API_BASE}/api/loads/${updatedLoad.id}/drop-hook`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
       },
-      body: JSON.stringify(updatedLoad),
+      body: JSON.stringify({
+        action: 'dispatch-hook',
+        dropType: updatedLoad.dropType,
+        dropLocation: updatedLoad.dropLocation,
+        returnLocation: updatedLoad.returnLocation,
+        dropDriver: updatedLoad.droppedBy,
+        hookDriver: nextDriver,
+        dropPay: dropDetailsDraft.dropPay,
+        pickupPay: dropDetailsDraft.pickupPay,
+        hookReadyAt: dropDetailsDraft.hookReadyAt,
+      }),
     });
 
     const data = await res.json().catch(() => ({}));
@@ -8598,7 +8699,16 @@ const getSavedLocationDisplay = (value = '', options = []) => {
 const getDeliveryDisplay = (value = '') =>
   getSavedLocationDisplay(value, deliveryLocations);
 
+const isDropHookLoad = (load = {}) =>
+  String(load.movementMode || '').trim().toLowerCase() === 'drophook';
+
+const isHookMoveActive = (load = {}) =>
+  isDropHookLoad(load) &&
+  String(load.dropMoveStatus || '').trim().toLowerCase() === 'complete' &&
+  String(load.pickupMoveStatus || '').trim().toLowerCase() === 'dispatched';
+
 const getLoadNextMoveType = (load = {}) => {
+  if (isDropHookLoad(load)) return isHookMoveActive(load) ? 'Return' : 'Delivery';
   const value = String(load.nextMoveType || '').trim().toLowerCase();
   return value === 'return' ? 'Return' : 'Delivery';
 };
@@ -8606,7 +8716,9 @@ const getLoadNextMoveType = (load = {}) => {
 const getDriverDestination = (load = {}) =>
   getLoadNextMoveType(load) === 'Return'
     ? load.returnLocation || load.delivery || ''
-    : load.delivery || '';
+    : isDropHookLoad(load)
+      ? load.dropLocation || load.delivery || ''
+      : load.delivery || '';
            
   const handleSaveNewPickupLocation = async () => {
   try {
@@ -10091,17 +10203,8 @@ const DriverLoadCard = ({ load }) => {
           <span className={`driver-status-pill status-${getDriverStatusClass(load.status)}`}>
             {load.status || 'Assigned'}
           </span>
-          <button
-            type="button"
-            className="driver-location-edit-btn"
-            onClick={() => openLoadLocationEditor(load, 'driver')}
-          >
-            Edit Locations
-          </button>
         </div>
       </div>
-
-      {renderLoadLocationEditor(load, 'driver', 'Edit Pickup, Delivery & Return')}
 
       <div className="driver-info-grid">
         <div className="driver-info-item wide">
@@ -10128,7 +10231,7 @@ const DriverLoadCard = ({ load }) => {
         </div>
         <div className="driver-info-item">
           <span>Appointment</span>
-          <strong>{formatAppointmentTime(load.appointmentTime)}</strong>
+          <strong>{formatAppointmentTime(isHookMoveActive(load) ? load.hookReadyAt || load.appointmentTime : load.appointmentTime)}</strong>
         </div>
         <div className="driver-info-item">
           <span>Container</span>
@@ -10148,7 +10251,9 @@ const DriverLoadCard = ({ load }) => {
         </div>
         <div className="driver-info-item">
           <span>Driver Pay</span>
-          <strong>{load.driverRate ? formatMoney(getDriverPayWithDetention(load)) : '-'}</strong>
+          <strong>{isDropHookLoad(load)
+            ? formatMoney(Number(isHookMoveActive(load) ? load.pickupPay || 0 : load.dropPay || 0))
+            : load.driverRate ? formatMoney(getDriverPayWithDetention(load)) : '-'}</strong>
         </div>
         <div className="driver-info-item">
           <span>PO #</span>
@@ -10172,7 +10277,7 @@ const DriverLoadCard = ({ load }) => {
         </div>
       </div>
 
-      {load.returnLocation && (
+      {load.returnLocation && (!isDropHookLoad(load) || isHookMoveActive(load)) && (
         <a
           className="driver-map-link"
           href={getGoogleMapsLink(load.returnLocation)}
@@ -10210,9 +10315,9 @@ const DriverLoadCard = ({ load }) => {
         <button type="button" onClick={() => handleDriverStatusUpdate(load.id, 'In Transit')}>
           Start
         </button>
-        <button type="button" onClick={() => handleDriverStatusUpdate(load.id, 'Dropped')}>
-          Dropped
-        </button>
+        {(!isDropHookLoad(load) || !isHookMoveActive(load)) && (
+          <button type="button" onClick={() => handleDriverStatusUpdate(load.id, 'Dropped')}>Dropped</button>
+        )}
         <button
           type="button"
           onClick={() => handleDriverStatusUpdate(load.id, 'Delivered')}
@@ -12934,6 +13039,51 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         </div>
                       </div>
 
+                      {getLoadQuickStatusKey(selectedLoad) !== 'dropped' && (
+                        <div className="drop-hook-planner">
+                          <div className="panel-header compact-header">
+                            <div>
+                              <span className="driver-card-kicker">Connected moves</span>
+                              <h3>Drop & Hook Plan</h3>
+                              <p className="panel-subtitle">Plan the first drop and the later hook/return without creating a duplicate load.</p>
+                            </div>
+                            <div className="details-actions">
+                              {(selectedLoad.movementMode === 'DropHook' || selectedLoad.dropType) && (
+                                <button type="button" className="secondary-btn compact-btn" onClick={handleConvertDropHookToDirect}>Convert to Direct</button>
+                              )}
+                              <button type="button" className="primary-btn compact-btn" onClick={handleConfigureDropHook}>Save Drop & Hook Plan</button>
+                            </div>
+                          </div>
+                          <div className="drop-hook-move-grid">
+                            <section className="move-plan-card drop-move-card">
+                              <span className="move-number">Move 1</span><h4>Drop Container</h4>
+                              <label><span>Drop Driver</span><select value={normalizeDriverForStorage(dropDetailsDraft.droppedBy || selectedLoad.driver)} onChange={(e) => setDropDetailsDraft((prev) => ({ ...prev, droppedBy: e.target.value }))}><option value="">Select driver</option>{driversList.map((d) => <option key={d.id} value={d.id}>{d.id} - {d.name}</option>)}</select></label>
+                              <label><span>Drop Location</span><select value={dropDetailsDraft.dropLocation || ''} onChange={(e) => setDropDetailsDraft((prev) => ({ ...prev, dropLocation: e.target.value, dropType: 'Customer' }))}><option value="">Select customer/drop address</option>{deliveryLocations.map((loc) => <option key={loc.id} value={formatLocationAddress(loc)}>{getLocationOptionLabel(loc)}</option>)}</select></label>
+                              <button type="button" className="secondary-btn compact-btn" onClick={() => setNewMoveLocationType('delivery')}>+ Add Drop Address</button>
+                              <label><span>Drop Pay</span><input type="number" min="0" step="0.01" value={dropDetailsDraft.dropPay || ''} onChange={(e) => setDropDetailsDraft((prev) => ({ ...prev, dropPay: e.target.value }))} placeholder="300.00" /></label>
+                              <small>Driver sees: port pickup → drop location.</small>
+                            </section>
+                            <section className="move-plan-card hook-move-card">
+                              <span className="move-number">Move 2</span><h4>Hook & Return</h4>
+                              <label><span>Hook Driver</span><select value={normalizeDriverForStorage(dropDetailsDraft.nextDriver)} onChange={(e) => setDropDetailsDraft((prev) => ({ ...prev, nextDriver: e.target.value }))}><option value="">Assign when ready</option>{driversList.map((d) => <option key={d.id} value={d.id}>{d.id} - {d.name}</option>)}</select></label>
+                              <label><span>Return Location</span><select value={selectedLoad.returnLocation || ''} onChange={(e) => setSelectedLoad((prev) => ({ ...prev, returnLocation: e.target.value }))}><option value="">Select return terminal</option>{returnLocations.map((loc) => <option key={loc.id} value={formatLocationAddress(loc)}>{getLocationOptionLabel(loc)}</option>)}</select></label>
+                              <button type="button" className="secondary-btn compact-btn" onClick={() => setNewMoveLocationType('return')}>+ Add Return Location</button>
+                              <label><span>Pickup Pay</span><input type="number" min="0" step="0.01" value={dropDetailsDraft.pickupPay || ''} onChange={(e) => setDropDetailsDraft((prev) => ({ ...prev, pickupPay: e.target.value }))} placeholder="200.00" /></label>
+                              <label><span>Ready / Hook Appointment</span><input type="datetime-local" value={dropDetailsDraft.hookReadyAt || ''} onChange={(e) => setDropDetailsDraft((prev) => ({ ...prev, hookReadyAt: e.target.value }))} /></label>
+                              <small>Driver sees: previous drop location → return terminal.</small>
+                            </section>
+                          </div>
+                          {newMoveLocationType && (
+                            <div className="new-move-location-form">
+                              <strong>Add {newMoveLocationType === 'return' ? 'Return' : 'Drop'} Location</strong>
+                              {['name', 'address', 'city', 'state', 'zip'].map((field) => <input key={field} placeholder={field === 'address' ? 'Street Address' : field[0].toUpperCase() + field.slice(1)} value={newMoveLocation[field]} onChange={(e) => setNewMoveLocation((prev) => ({ ...prev, [field]: e.target.value }))} />)}
+                              <button type="button" className="primary-btn compact-btn" onClick={handleSaveMoveLocation}>Save Location</button>
+                              <button type="button" className="secondary-btn compact-btn" onClick={() => setNewMoveLocationType('')}>Cancel</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {getLoadQuickStatusKey(selectedLoad) === 'dropped' && (
                         <div className="drop-details-panel">
                           <div className="panel-header compact-header">
@@ -13060,6 +13210,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                 ))}
                               </select>
                             </label>
+                            <label><span>Drop Pay</span><input type="number" min="0" step="0.01" value={dropDetailsDraft.dropPay || ''} onChange={(e) => setDropDetailsDraft((prev) => ({ ...prev, dropPay: e.target.value }))} /></label>
+                            <label><span>Pickup Pay</span><input type="number" min="0" step="0.01" value={dropDetailsDraft.pickupPay || ''} onChange={(e) => setDropDetailsDraft((prev) => ({ ...prev, pickupPay: e.target.value }))} /></label>
+                            <label><span>Return Location</span><select value={selectedLoad.returnLocation || ''} onChange={(e) => setSelectedLoad((prev) => ({ ...prev, returnLocation: e.target.value }))}><option value="">Select return terminal</option>{returnLocations.map((loc) => <option key={loc.id} value={formatLocationAddress(loc)}>{getLocationOptionLabel(loc)}</option>)}</select></label>
+                            <label><span>Ready / Hook Appointment</span><input type="datetime-local" value={dropDetailsDraft.hookReadyAt || ''} onChange={(e) => setDropDetailsDraft((prev) => ({ ...prev, hookReadyAt: e.target.value }))} /></label>
                           </div>
                         </div>
                       )}

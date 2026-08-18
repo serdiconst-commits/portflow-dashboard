@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { dbRun } from '../services/dbUtils.js';
 import { getSummary } from '../services/analyticsService.js';
 import { canUsePayroll, generatePayrollRun, getPayrollRun } from '../services/payrollService.js';
+import { createSettlement } from '../services/driverSettlements.js';
 
 const createDb = async () => {
   const db = new sqlite3.Database(':memory:');
@@ -12,7 +13,9 @@ const createDb = async () => {
   await dbRun(db, `CREATE TABLE loads (
     id TEXT PRIMARY KEY, companyId TEXT, loadDate TEXT, appointmentTime TEXT, customer TEXT,
     driver TEXT, truck TEXT, rate TEXT, driverRate TEXT, detention TEXT, lumper TEXT,
-    fuelAdvance TEXT, status TEXT, referenceNumber TEXT, containerNumber TEXT
+    fuelAdvance TEXT, status TEXT, referenceNumber TEXT, containerNumber TEXT, bookingNumber TEXT,
+    miles REAL, movementMode TEXT, dropLocation TEXT, droppedBy TEXT, dropDateTime TEXT,
+    dropMoveStatus TEXT, dropPay REAL DEFAULT 0, pickupPay REAL DEFAULT 0, hookDriver TEXT
   )`);
   await dbRun(db, `CREATE TABLE invoices (
     id INTEGER PRIMARY KEY AUTOINCREMENT, companyId TEXT, invoiceNumber TEXT, loadId TEXT,
@@ -24,6 +27,23 @@ const createDb = async () => {
     id TEXT PRIMARY KEY, companyId TEXT, userId TEXT, userName TEXT, userRole TEXT, action TEXT,
     entityType TEXT, entityId TEXT, entityLabel TEXT, oldValue TEXT, newValue TEXT,
     changedFields TEXT, ipAddress TEXT, userAgent TEXT, createdAt TEXT NOT NULL
+  )`);
+  await dbRun(db, `CREATE TABLE settlements (
+    id TEXT PRIMARY KEY, companyId TEXT, driverId TEXT, periodStart TEXT, periodEnd TEXT,
+    status TEXT, grossPay REAL DEFAULT 0, deductionsTotal REAL DEFAULT 0, netPay REAL DEFAULT 0,
+    statementJson TEXT, notes TEXT, version INTEGER DEFAULT 1, createdAt TEXT, updatedAt TEXT, createdBy TEXT
+  )`);
+  await dbRun(db, `CREATE TABLE settlement_loads (
+    id TEXT PRIMARY KEY, settlementId TEXT, loadId TEXT, payAmount REAL DEFAULT 0,
+    movesCount INTEGER DEFAULT 1, description TEXT, source TEXT, createdAt TEXT
+  )`);
+  await dbRun(db, `CREATE TABLE deductions (
+    id TEXT PRIMARY KEY, settlement_id TEXT, description TEXT, amount REAL,
+    stage TEXT DEFAULT 'gross_adjustment', added_by TEXT, created_at TEXT
+  )`);
+  await dbRun(db, `CREATE TABLE settlement_audit_logs (
+    id TEXT PRIMARY KEY, settlementId TEXT, action TEXT, oldValue TEXT, newValue TEXT,
+    changedBy TEXT, createdAt TEXT
   )`);
   await dbRun(db, `CREATE TABLE payroll_runs (
     id TEXT PRIMARY KEY, companyId TEXT, payrollNumber TEXT, periodStart TEXT, periodEnd TEXT,
@@ -78,4 +98,31 @@ test('payroll generation calculates net pay with reimbursement and is idempotent
   assert.equal(run.totalReimbursements, 40);
   assert.equal(run.totalNetPay, 540);
   assert.equal(run.items.length, 1);
+});
+
+test('drop and hook pay is attributed to each movement driver', async () => {
+  const db = await createDb();
+  await dbRun(db, `INSERT INTO drivers (id, companyId, name, truck) VALUES ('DRV-HOOK', 'COMP-A', 'Hook Driver', 'A2')`);
+  await dbRun(
+    db,
+    `INSERT INTO loads (
+      id, companyId, loadDate, appointmentTime, status, customer, driver, containerNumber,
+      movementMode, dropLocation, droppedBy, dropDateTime, dropMoveStatus, dropPay, pickupPay
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ['DH-1', 'COMP-A', '2026-07-10', '2026-07-11T10:00:00Z', 'Delivered', 'Drop Customer',
+      'DRV-HOOK', 'CONT-DH-1', 'DropHook', 'Customer Yard', 'DRV-A', '2026-07-10T15:00:00Z',
+      'Complete', 300, 200]
+  );
+
+  const dropSettlement = await createSettlement(
+    db, 'COMP-A', { driverId: 'DRV-A', periodStart: '2026-07-01', periodEnd: '2026-07-31' }, 'USR-A'
+  );
+  const hookSettlement = await createSettlement(
+    db, 'COMP-A', { driverId: 'DRV-HOOK', periodStart: '2026-07-01', periodEnd: '2026-07-31' }, 'USR-A'
+  );
+
+  assert.equal(dropSettlement.statement.totals.grossPay, 300);
+  assert.equal(dropSettlement.statement.loads[0].source, 'drop_move');
+  assert.equal(hookSettlement.statement.totals.grossPay, 200);
+  assert.equal(hookSettlement.statement.loads[0].source, 'hook_move');
 });

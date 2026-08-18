@@ -3999,6 +3999,100 @@ console.log('LOAD AFTER UPDATE =', updatedLoad);
   );
   });
 });
+app.put('/api/loads/:id/drop-hook', authenticate, requireRoles(dispatchLocationRoles), (req, res) => {
+  const companyId = req.company.companyId;
+  const loadId = String(req.params.id || '').trim();
+  const action = String(req.body?.action || 'configure').trim().toLowerCase();
+
+  db.get(`SELECT * FROM loads WHERE id = ? AND companyId = ?`, [loadId, companyId], (findErr, existing) => {
+    if (findErr) return res.status(500).json({ error: findErr.message });
+    if (!existing) return res.status(404).json({ error: 'Load not found.' });
+
+    const originalPickup = String(existing.originalPickup || existing.pickup || '').trim();
+    const originalDelivery = String(existing.originalDelivery || existing.delivery || '').trim();
+    const payload = req.body || {};
+    const dropLocation = String(payload.dropLocation ?? existing.dropLocation ?? '').trim();
+    const returnLocation = String(payload.returnLocation ?? existing.returnLocation ?? '').trim();
+    const dropDriver = String(payload.dropDriver || payload.droppedBy || existing.droppedBy || existing.driver || '').trim();
+    const hookDriver = String(payload.hookDriver || payload.nextDriver || existing.hookDriver || '').trim();
+    const dropPay = Math.max(0, Number.parseFloat(payload.dropPay ?? existing.dropPay ?? 0) || 0);
+    const pickupPay = Math.max(0, Number.parseFloat(payload.pickupPay ?? existing.pickupPay ?? 0) || 0);
+    const hookReadyAt = String(payload.hookReadyAt ?? existing.hookReadyAt ?? '').trim();
+
+    let values;
+    if (action === 'direct') {
+      if (String(existing.dropMoveStatus || '').trim().toLowerCase() === 'complete') {
+        return res.status(409).json({ error: 'This container was already dropped. Dispatch the hook/return move instead of converting it to direct delivery.' });
+      }
+      values = {
+        movementMode: 'Direct', pickup: originalPickup, delivery: originalDelivery,
+        status: existing.status, driver: existing.driver, hookDriver: '',
+        dropType: '', dropLocation: '', droppedBy: '', dropDateTime: '',
+        nextMoveType: 'Delivery', dropPay: 0, pickupPay: 0,
+        dropMoveStatus: 'Canceled', pickupMoveStatus: 'Canceled', hookReadyAt: '',
+      };
+    } else if (action === 'dispatch-hook') {
+      if (!dropLocation || !returnLocation || !hookDriver) {
+        return res.status(400).json({ error: 'Drop location, return location, and hook driver are required.' });
+      }
+      values = {
+        movementMode: 'DropHook', pickup: dropLocation, delivery: originalDelivery,
+        status: 'Dispatched', driver: hookDriver, hookDriver, dropType: payload.dropType || existing.dropType || 'Customer',
+        dropLocation, droppedBy: dropDriver, dropDateTime: existing.dropDateTime || new Date().toISOString(),
+        nextMoveType: 'Return', dropPay, pickupPay, dropMoveStatus: 'Complete',
+        pickupMoveStatus: 'Dispatched', hookReadyAt: hookReadyAt || new Date().toISOString(),
+      };
+    } else if (action === 'mark-dropped') {
+      if (!dropLocation) return res.status(400).json({ error: 'Drop location is required.' });
+      values = {
+        movementMode: 'DropHook', pickup: existing.pickup, delivery: originalDelivery,
+        status: 'Dropped', driver: existing.driver, hookDriver, dropType: payload.dropType || existing.dropType || 'Customer',
+        dropLocation, droppedBy: dropDriver, dropDateTime: payload.dropDateTime || new Date().toISOString(),
+        nextMoveType: 'Return', dropPay, pickupPay, dropMoveStatus: 'Complete',
+        pickupMoveStatus: 'Ready', hookReadyAt,
+      };
+    } else {
+      if (!dropLocation || !returnLocation) {
+        return res.status(400).json({ error: 'Drop location and return location are required for Drop & Hook.' });
+      }
+      values = {
+        movementMode: 'DropHook', pickup: originalPickup, delivery: originalDelivery,
+        status: existing.status, driver: dropDriver || existing.driver, hookDriver,
+        dropType: payload.dropType || existing.dropType || 'Customer', dropLocation,
+        droppedBy: existing.droppedBy || '', dropDateTime: existing.dropDateTime || '',
+        nextMoveType: 'Return', dropPay, pickupPay,
+        dropMoveStatus: existing.dropMoveStatus || 'Pending', pickupMoveStatus: existing.pickupMoveStatus || 'Pending', hookReadyAt,
+      };
+    }
+
+    db.run(
+      `UPDATE loads SET movementMode = ?, originalPickup = ?, originalDelivery = ?, pickup = ?, delivery = ?,
+         returnLocation = ?, status = ?, driver = ?, truck = COALESCE((SELECT truck FROM drivers WHERE id = ? AND companyId = ?), truck),
+         dropType = ?, dropLocation = ?, droppedBy = ?, dropDateTime = ?, nextMoveType = ?,
+         dropPay = ?, pickupPay = ?, dropMoveStatus = ?, pickupMoveStatus = ?, hookDriver = ?, hookReadyAt = ?
+       WHERE id = ? AND companyId = ?`,
+      [values.movementMode, originalPickup, originalDelivery, values.pickup, values.delivery,
+        returnLocation, values.status, values.driver, values.driver, companyId,
+        values.dropType, values.dropLocation, values.droppedBy, values.dropDateTime, values.nextMoveType,
+        values.dropPay, values.pickupPay, values.dropMoveStatus, values.pickupMoveStatus, values.hookDriver, values.hookReadyAt,
+        loadId, companyId],
+      (updateErr) => {
+        if (updateErr) return res.status(500).json({ error: updateErr.message });
+        db.get(`SELECT * FROM loads WHERE id = ? AND companyId = ?`, [loadId, companyId], (readErr, updated) => {
+          if (readErr) return res.status(500).json({ error: readErr.message });
+          writeAuditLog(req, {
+            action: `DROP_HOOK_${action.toUpperCase().replace(/-/g, '_')}`,
+            entityType: 'LOAD', entityId: loadId, entityLabel: updated.containerNumber || loadId,
+            oldValue: existing, newValue: updated,
+            changedFields: { movementMode: { oldValue: existing.movementMode || 'Direct', newValue: updated.movementMode } },
+          });
+          res.json(updated);
+        });
+      }
+    );
+  });
+});
+
 app.get('/api/loads', authenticate, (req, res) => {
   const companyId = req.company.companyId;
   const role = String(req.user?.role || '').trim().toLowerCase();
@@ -5598,18 +5692,28 @@ app.put('/api/loads/:id/status', authenticate, (req, res) => {
          SET status = ?,
              dropDateTime = ?,
              availabilityStatus = '',
-             droppedBy = CASE WHEN ? != '' THEN ? ELSE droppedBy END
+             droppedBy = CASE WHEN ? != '' THEN ? ELSE droppedBy END,
+             dropMoveStatus = CASE WHEN movementMode = 'DropHook' AND ? = 'Dropped' THEN 'Complete' ELSE dropMoveStatus END,
+             pickupMoveStatus = CASE
+               WHEN movementMode = 'DropHook' AND ? = 'Dropped' THEN 'Ready'
+               WHEN movementMode = 'DropHook' AND ? = 'Delivered' THEN 'Complete'
+               ELSE pickupMoveStatus END
          WHERE id = ? AND companyId = ? AND driver = ?`
       : `UPDATE loads
          SET status = ?,
              dropDateTime = ?,
              availabilityStatus = '',
-             droppedBy = CASE WHEN ? != '' THEN ? ELSE droppedBy END
+             droppedBy = CASE WHEN ? != '' THEN ? ELSE droppedBy END,
+             dropMoveStatus = CASE WHEN movementMode = 'DropHook' AND ? = 'Dropped' THEN 'Complete' ELSE dropMoveStatus END,
+             pickupMoveStatus = CASE
+               WHEN movementMode = 'DropHook' AND ? = 'Dropped' THEN 'Ready'
+               WHEN movementMode = 'DropHook' AND ? = 'Delivered' THEN 'Complete'
+               ELSE pickupMoveStatus END
          WHERE id = ? AND companyId = ?`;
 
     const params = isDriver
-      ? [status, effectiveDropDateTime, effectiveDroppedBy, effectiveDroppedBy, loadId, companyId, driverId]
-      : [status, effectiveDropDateTime, effectiveDroppedBy, effectiveDroppedBy, loadId, companyId];
+      ? [status, effectiveDropDateTime, effectiveDroppedBy, effectiveDroppedBy, status, status, status, loadId, companyId, driverId]
+      : [status, effectiveDropDateTime, effectiveDroppedBy, effectiveDroppedBy, status, status, status, loadId, companyId];
 
     db.get(
       `SELECT id, status, dropDateTime, droppedBy, availabilityStatus, containerNumber FROM loads WHERE id = ? AND companyId = ?`,

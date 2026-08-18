@@ -335,29 +335,47 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
       `SELECT *
        FROM loads
        WHERE companyId = ?
-         AND driver = ?
-         AND LOWER(COALESCE(status, '')) IN ('delivered', 'completed')
-         AND DATE(SUBSTR(COALESCE(NULLIF(appointmentTime, ''), loadDate), 1, 10)) BETWEEN DATE(?) AND DATE(?)
-       ORDER BY appointmentTime, id`,
-      [companyId, driverId, periodStart, periodEnd]
+         AND (
+           (driver = ? AND LOWER(COALESCE(status, '')) IN ('delivered', 'completed')
+             AND DATE(SUBSTR(COALESCE(NULLIF(appointmentTime, ''), loadDate), 1, 10)) BETWEEN DATE(?) AND DATE(?))
+           OR
+           (droppedBy = ? AND LOWER(COALESCE(dropMoveStatus, '')) = 'complete'
+             AND DATE(SUBSTR(dropDateTime, 1, 10)) BETWEEN DATE(?) AND DATE(?))
+         )
+       ORDER BY COALESCE(dropDateTime, appointmentTime, loadDate), id`,
+      [companyId, driverId, periodStart, periodEnd, driverId, periodStart, periodEnd]
     );
 
     for (const load of loads) {
-      await dbRun(
-        db,
-        `INSERT INTO settlement_loads (id, settlementId, loadId, payAmount, movesCount, description, source, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          uuidv4(),
-          settlementId,
-          load.id,
-          calculateLoadPay(load, config),
-          Math.max(1, Number.parseInt(load.movesCount || 1, 10) || 1),
-          'Auto-added by appointment period',
-          'auto',
-          now,
-        ]
-      );
+      const isDropHook = String(load.movementMode || '').toLowerCase() === 'drophook';
+      const lines = [];
+      if (isDropHook) {
+        if (String(load.droppedBy || '').trim() === driverId && Number(load.dropPay || 0) > 0) {
+          lines.push({ amount: Number(load.dropPay), description: `Drop move - ${load.dropLocation || load.containerNumber || load.id}`, source: 'drop_move' });
+        }
+        if (
+          String(load.driver || '').trim() === driverId &&
+          ['delivered', 'completed'].includes(String(load.status || '').toLowerCase()) &&
+          Number(load.pickupPay || 0) > 0
+        ) {
+          lines.push({ amount: Number(load.pickupPay), description: `Hook / return move - ${load.dropLocation || load.containerNumber || load.id}`, source: 'hook_move' });
+        }
+      } else if (String(load.driver || '').trim() === driverId) {
+        lines.push({
+          amount: calculateLoadPay(load, config),
+          description: 'Auto-added by appointment period',
+          source: 'auto',
+        });
+      }
+
+      for (const line of lines) {
+        await dbRun(
+          db,
+          `INSERT INTO settlement_loads (id, settlementId, loadId, payAmount, movesCount, description, source, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [uuidv4(), settlementId, load.id, line.amount, 1, line.description, line.source, now]
+        );
+      }
     }
 
     await dbRun(db, 'COMMIT');
