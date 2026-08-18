@@ -582,6 +582,24 @@ db.run(`ALTER TABLE loads ADD COLUMN nextMoveType TEXT`, (err) => {
     console.error('Error adding nextMoveType column:', err.message);
   }
 });
+
+[
+  ['movementMode', "TEXT DEFAULT 'Direct'"],
+  ['originalPickup', 'TEXT'],
+  ['originalDelivery', 'TEXT'],
+  ['dropPay', 'REAL DEFAULT 0'],
+  ['pickupPay', 'REAL DEFAULT 0'],
+  ['dropMoveStatus', "TEXT DEFAULT 'Pending'"],
+  ['pickupMoveStatus', "TEXT DEFAULT 'Pending'"],
+  ['hookDriver', 'TEXT'],
+  ['hookReadyAt', 'TEXT'],
+].forEach(([column, definition]) => {
+  db.run(`ALTER TABLE loads ADD COLUMN ${column} ${definition}`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error(`Error adding ${column} column to loads:`, err.message);
+    }
+  });
+});
 db.run(`ALTER TABLE loads ADD COLUMN streetTurn TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding streetTurn column:', err.message);
