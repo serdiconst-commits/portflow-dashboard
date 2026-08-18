@@ -15,7 +15,7 @@ const createDb = async () => {
     driver TEXT, truck TEXT, rate TEXT, driverRate TEXT, detention TEXT, lumper TEXT,
     fuelAdvance TEXT, status TEXT, referenceNumber TEXT, containerNumber TEXT, bookingNumber TEXT,
     miles REAL, movementMode TEXT, dropLocation TEXT, droppedBy TEXT, dropDateTime TEXT,
-    dropMoveStatus TEXT, dropPay REAL DEFAULT 0, pickupPay REAL DEFAULT 0, hookDriver TEXT
+    dropMoveStatus TEXT, dropPay REAL DEFAULT 0, pickupPay REAL DEFAULT 0, hookDriver TEXT, deletedAt TEXT
   )`);
   await dbRun(db, `CREATE TABLE invoices (
     id INTEGER PRIMARY KEY AUTOINCREMENT, companyId TEXT, invoiceNumber TEXT, loadId TEXT,
@@ -75,6 +75,7 @@ const createDb = async () => {
 test('analytics summary is isolated by companyId', async () => {
   const db = await createDb();
   await dbRun(db, `INSERT INTO loads (id, companyId, loadDate, status, rate, driverRate, customer, driver, truck) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, ['A1', 'COMP-A', '2026-07-10', 'Delivered', '$1000.00', '$400.00', 'A Customer', 'DRV-A', 'A1']);
+  await dbRun(db, `INSERT INTO loads (id, companyId, loadDate, status, rate, driverRate, customer, driver, truck, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ['A-DELETED', 'COMP-A', '2026-07-10', 'Delivered', '$5000.00', '$2000.00', 'Deleted Customer', 'DRV-A', 'A1', '2026-07-11T10:00:00Z']);
   await dbRun(db, `INSERT INTO loads (id, companyId, loadDate, status, rate, driverRate, customer, driver, truck) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, ['B1', 'COMP-B', '2026-07-10', 'Delivered', '$9000.00', '$4000.00', 'B Customer', 'DRV-B', 'B1']);
   const summary = await getSummary(db, 'COMP-A', { startDate: '2026-07-01', endDate: '2026-07-31' });
   assert.equal(summary.data.totalRevenue, 1000);
@@ -89,6 +90,7 @@ test('driver role cannot use administrative payroll helper', () => {
 test('payroll generation calculates net pay with reimbursement and is idempotent', async () => {
   const db = await createDb();
   await dbRun(db, `INSERT INTO loads (id, companyId, loadDate, status, rate, driverRate, lumper, customer, driver, truck, referenceNumber, containerNumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ['A1', 'COMP-A', '2026-07-10', 'Delivered', '$1000.00', '$500.00', '$40.00', 'A Customer', 'DRV-A', 'A1', 'REF-A1', 'CONT-A1']);
+  await dbRun(db, `INSERT INTO loads (id, companyId, loadDate, status, rate, driverRate, customer, driver, truck, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ['A-DELETED-PAY', 'COMP-A', '2026-07-10', 'Delivered', '$2000.00', '$999.00', 'Deleted Customer', 'DRV-A', 'A1', '2026-07-11T10:00:00Z']);
   await dbRun(db, `INSERT INTO documents (id, loadId, category) VALUES (?, ?, ?)`, [uuidv4(), 'A1', 'POD']);
   const first = await generatePayrollRun(db, 'COMP-A', { periodStart: '2026-07-01', periodEnd: '2026-07-31' }, { id: 'USR-A', role: 'payroll' });
   const second = await generatePayrollRun(db, 'COMP-A', { periodStart: '2026-07-01', periodEnd: '2026-07-31' }, { id: 'USR-A', role: 'payroll' });

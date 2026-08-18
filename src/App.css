@@ -2732,6 +2732,39 @@ td {
   max-width: 100%;
 }
 
+.deleted-loads-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.deleted-load-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.deleted-load-card h4,
+.deleted-load-card p {
+  margin: 4px 0;
+}
+
+.deleted-load-card small {
+  color: #64748b;
+}
+
+@media (max-width: 720px) {
+  .deleted-load-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .form-actions {
   display: flex;
   gap: 10px;

@@ -203,10 +203,10 @@ const roleCanAccessView = (role, view) => {
   if (normalizedRole === 'driver') return view === 'driver';
   if (normalizedRole === 'payroll') return ['businessDashboard', 'payroll', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
   if (normalizedRole === 'manager') {
-    return ['dispatch', 'live-tracking', 'completed', 'drivers', 'customers', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
+    return ['dispatch', 'live-tracking', 'completed', 'deleted-loads', 'drivers', 'customers', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
   }
   if (normalizedRole === 'dispatcher') {
-    return ['dispatch', 'live-tracking', 'completed', 'drivers', 'customers', 'settings'].includes(view);
+    return ['dispatch', 'live-tracking', 'completed', 'deleted-loads', 'drivers', 'customers', 'settings'].includes(view);
   }
   return view === 'dispatch';
 };
@@ -1296,6 +1296,8 @@ const [activeView, setActiveView] = useState(
 const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
 const [loadsData, setLoadsData] = useState([]);
+const [deletedLoads, setDeletedLoads] = useState([]);
+const [deletedLoadsLoading, setDeletedLoadsLoading] = useState(false);
 const availableLoads = loadsData.filter(
   (load) => getAvailabilityStatusKey(load) === 'available' && !['delivered', 'completed'].includes(getLoadQuickStatusKey(load))
 );
@@ -3797,6 +3799,24 @@ const fetchLoads = async () => {
   }
 };
 
+const fetchDeletedLoads = async () => {
+  if (!authToken || !roleCanAccessView(currentUser?.role, 'deleted-loads')) return;
+  setDeletedLoadsLoading(true);
+  try {
+    const res = await fetch(`${API_BASE}/api/loads?deleted=1`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      cache: 'no-store',
+    });
+    const data = await res.json().catch(() => []);
+    if (!res.ok) throw new Error(data.error || 'Failed to fetch deleted loads');
+    setDeletedLoads(Array.isArray(data) ? normalizeLoadedLoads(data) : []);
+  } catch (error) {
+    console.error('Error loading deleted loads:', error);
+  } finally {
+    setDeletedLoadsLoading(false);
+  }
+};
+
 const fetchDriverLocations = async () => {
   if (!authToken || !roleCanAccessView(currentUser?.role, 'dispatch')) return;
 
@@ -3975,6 +3995,10 @@ useEffect(() => {
   if (activeView === 'drivers') {
     fetchDrivers();
   }
+}, [activeView, authToken, isDemoMode]);
+
+useEffect(() => {
+  if (activeView === 'deleted-loads' && !isDemoMode) fetchDeletedLoads();
 }, [activeView, authToken, isDemoMode]);
 
 useEffect(() => {
@@ -5692,6 +5716,7 @@ const handleAddManualSettlementLoad = async (loadId) => {
 
 const handleRemoveManualSettlementLoad = async (loadId) => {
   const load = loadsData.find((item) => item.id === loadId);
+  if (!window.confirm(`Remove ${load?.containerNumber || loadId} from this settlement?`)) return;
   const backendLine = activeBackendSettlement?.statement?.loads?.find(
     (item) => item.loadId === loadId && ['manual', 'outside_period', 'cross_driver'].includes(item.source)
   );
@@ -5810,6 +5835,7 @@ const handleAddSettlementCustomDeduction = async () => {
 };
 
 const handleRemoveSettlementCustomDeduction = (deductionId) => {
+  if (!window.confirm('Remove this deduction?')) return;
   setSettlementCustomDeductions((prev) => ({
     ...prev,
     [settlementCustomDeductionKey]: (prev[settlementCustomDeductionKey] || []).filter(
@@ -5838,6 +5864,7 @@ const handleRemoveSavedBackendDeductionReason = () => {
     setSettlementBackendStatus('Select or type a saved description to remove.');
     return;
   }
+  if (!window.confirm(`Remove the saved description “${targetReason}”?`)) return;
 
   setSavedDeductionReasons((prev) =>
     prev.filter((reason) => reason.trim().toLowerCase() !== targetReason.toLowerCase())
@@ -6014,6 +6041,7 @@ const handleAddBackendDeduction = async () => {
 
 const handleRemoveBackendDeduction = async (deductionId) => {
   if (!activeBackendSettlement?.id || !deductionId) return;
+  if (!window.confirm('Remove this settlement adjustment?')) return;
 
   setSettlementBackendLoading(true);
   try {
@@ -6147,7 +6175,7 @@ const handleDeleteLoad = async () => {
   if (!selectedLoad) return;
 
   const confirmDelete = window.confirm(
-    `Are you sure you want to delete load ${selectedLoad.id}?`
+    `Move load ${selectedLoad.id} to Deleted Loads? You can restore it later.`
   );
   if (!confirmDelete) return;
 
@@ -6169,9 +6197,28 @@ const handleDeleteLoad = async () => {
     setSelectedLoad(null);
     setIsEditing(false);
     setShowForm(false);
+    if (activeView === 'deleted-loads') await fetchDeletedLoads();
+    alert(`Load ${selectedLoad.id} was moved to Deleted Loads and can be restored.`);
   } catch (error) {
     console.error('Failed to delete load:', error);
     alert(`Failed to delete load: ${error.message}`);
+  }
+};
+
+const handleRestoreDeletedLoad = async (load) => {
+  if (!load?.id) return;
+  if (!window.confirm(`Restore load ${load.id} to PortFlow?`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${load.id}/restore`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Failed to restore load');
+    await Promise.all([fetchDeletedLoads(), fetchLoads()]);
+    alert(`Load ${load.id} was restored.`);
+  } catch (error) {
+    alert(`Failed to restore load: ${error.message}`);
   }
 };
 
@@ -7980,6 +8027,7 @@ const handleAddAccountingExtraCharge = (load) => {
 
 const handleRemoveAccountingExtraCharge = (load, index) => {
   if (!load?.id) return;
+  if (!window.confirm('Remove this extra charge?')) return;
   const nextRows = getAccountingExtraChargeDraft(load).filter((_, rowIndex) => rowIndex !== index);
   setAccountingExtraChargeDrafts((prev) => ({ ...prev, [load.id]: nextRows }));
   setAccountingExtraChargeStatus('');
@@ -11151,6 +11199,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           ['dispatch', 'Dispatch Board'],
           ['live-tracking', 'Live Tracking'],
           ['completed', 'Completed Loads'],
+          ['deleted-loads', 'Deleted Loads'],
           ['settlements', 'Driver Settlements'],
           ['businessDashboard', t('businessDashboard')],
           ['payroll', 'Payroll'],
@@ -11247,6 +11296,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             dispatch: 'Dispatch Board',
             'live-tracking': 'Live Tracking',
             completed: 'Completed Loads',
+            'deleted-loads': 'Deleted Loads',
             settlements: 'Driver Settlements',
             customers: 'Customers',
             drivers: 'Drivers',
@@ -13262,8 +13312,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="detail-box"><span>Pick Up Location</span><strong>{selectedLoad.pickup}</strong></div>
                         <div className="detail-box"><span>Delivery Location</span><strong>{getDeliveryDisplay(selectedLoad.delivery) || '—'}</strong></div>
                         <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedLoad.appointmentTime)}</strong></div>
-                        <div className="detail-box"><span>LFD</span><strong>{selectedLoad.lastFreeDay || selectedLoad.lfd || 'â€”'}</strong></div>
-                        <div className="detail-box"><span>ETA</span><strong>{formatAppointmentTime(selectedLoad.eta)}</strong></div>
+                        <div className="detail-box"><span>LFD</span><strong>{selectedLoad.lastFreeDay || selectedLoad.lfd || ''}</strong></div>
+                        <div className="detail-box"><span>ETA</span><strong>{selectedLoad.eta ? formatAppointmentTime(selectedLoad.eta) : ''}</strong></div>
                         <div className="detail-box"><span>Return Location</span><strong>{selectedLoad.returnLocation}</strong></div>
                         <div className="detail-box"><span>Route Miles</span><strong>{formatMiles(selectedLoad.miles)}</strong></div>
                         <div className="detail-box">
@@ -15812,6 +15862,42 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           ) : (
             <div className="empty-state">
               <p>No driver locations yet. Ask a driver to open the driver app and tap Start under Live tracking.</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {activeView === 'deleted-loads' && (
+        <section className="panel deleted-loads-panel">
+          <div className="panel-header">
+            <div>
+              <h3>Deleted Loads</h3>
+              <span>Loads here are hidden from Dispatch, Completed Loads, Accounting, and drivers.</span>
+            </div>
+            <button type="button" className="secondary-btn" onClick={fetchDeletedLoads} disabled={deletedLoadsLoading}>
+              {deletedLoadsLoading ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
+
+          {deletedLoads.length > 0 ? (
+            <div className="deleted-loads-list">
+              {deletedLoads.map((load) => (
+                <article key={load.id} className="deleted-load-card">
+                  <div>
+                    <span className="driver-card-kicker">{load.id}</span>
+                    <h4>{load.containerNumber || load.referenceNumber || 'Load without container'}</h4>
+                    <p>{load.customer || 'No customer'} · {load.pickup || 'No pickup'} → {load.delivery || 'No delivery'}</p>
+                    <small>Deleted {formatDateTime(load.deletedAt)}{load.deletedBy ? ` by ${load.deletedBy}` : ''}</small>
+                  </div>
+                  <button type="button" className="primary-btn compact-btn" onClick={() => handleRestoreDeletedLoad(load)}>
+                    Restore Load
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">
+              <p>{deletedLoadsLoading ? 'Loading deleted loads...' : 'There are no deleted loads.'}</p>
             </div>
           )}
         </section>

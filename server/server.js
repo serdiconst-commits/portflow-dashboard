@@ -4097,13 +4097,19 @@ app.get('/api/loads', authenticate, (req, res) => {
   const companyId = req.company.companyId;
   const role = String(req.user?.role || '').trim().toLowerCase();
   const driverId = String(req.user?.driverId || '').trim();
+  const deletedOnly = String(req.query?.deleted || '') === '1';
+
+  if (deletedOnly && role === 'driver') {
+    return res.status(403).json({ error: 'Drivers cannot access deleted loads.' });
+  }
 
   if (role === 'driver') {
     db.all(
       `SELECT * FROM loads
        WHERE companyId = ?
        AND TRIM(LOWER(driver)) = TRIM(LOWER(?))
-       AND COALESCE(isDriverReleased, 1) = 1`,
+       AND COALESCE(isDriverReleased, 1) = 1
+       AND COALESCE(deletedAt, '') = ''`,
       [companyId, driverId],
       (err, rows) => {
       if (err) {
@@ -4124,7 +4130,10 @@ app.get('/api/loads', authenticate, (req, res) => {
   }
 
   db.all(
-    `SELECT * FROM loads WHERE companyId = ?`,
+    `SELECT * FROM loads
+     WHERE companyId = ?
+       AND ${deletedOnly ? "COALESCE(deletedAt, '') != ''" : "COALESCE(deletedAt, '') = ''"}
+     ORDER BY ${deletedOnly ? 'deletedAt DESC' : 'loadDate DESC, id DESC'}`,
     [companyId],
     (err, rows) => {
       if (err) {
@@ -5443,7 +5452,7 @@ app.delete('/api/documents/:id', authenticate, (req, res) => {
     }
   );
 });
-app.delete('/api/loads/:id', authenticate, (req, res) => {
+app.delete('/api/loads/:id', authenticate, requireRoles(dispatchLocationRoles), (req, res) => {
   const companyId = req.company.companyId;
   const loadId = req.params.id;
 
@@ -5461,9 +5470,10 @@ app.delete('/api/loads/:id', authenticate, (req, res) => {
       }
 
       db.run(
-        `DELETE FROM loads
-         WHERE id = ? AND companyId = ?`,
-        [loadId, companyId],
+        `UPDATE loads
+         SET deletedAt = ?, deletedBy = ?, isDriverReleased = 0
+         WHERE id = ? AND companyId = ? AND COALESCE(deletedAt, '') = ''`,
+        [new Date().toISOString(), String(req.user?.id || req.user?.userId || req.user?.email || ''), loadId, companyId],
         function (err) {
       if (err) {
         console.error('Error deleting load:', err.message);
@@ -5475,7 +5485,7 @@ app.delete('/api/loads/:id', authenticate, (req, res) => {
       }
 
       writeAuditLog(req, {
-        action: 'DELETE',
+        action: 'SOFT_DELETE',
         entityType: 'LOAD',
         entityId: loadId,
         entityLabel: existingLoad.containerNumber || loadId,
@@ -5484,11 +5494,38 @@ app.delete('/api/loads/:id', authenticate, (req, res) => {
         changedFields: {},
       });
 
-      res.json({ success: true, changes: this.changes });
+      res.json({ success: true, softDeleted: true, changes: this.changes });
         }
       );
     }
   );
+});
+
+app.put('/api/loads/:id/restore', authenticate, requireRoles(dispatchLocationRoles), (req, res) => {
+  const companyId = req.company.companyId;
+  const loadId = String(req.params.id || '').trim();
+
+  db.get(`SELECT * FROM loads WHERE id = ? AND companyId = ?`, [loadId, companyId], (findErr, existingLoad) => {
+    if (findErr) return res.status(500).json({ error: findErr.message });
+    if (!existingLoad || !String(existingLoad.deletedAt || '').trim()) {
+      return res.status(404).json({ error: 'Deleted load not found.' });
+    }
+
+    db.run(
+      `UPDATE loads SET deletedAt = '', deletedBy = '' WHERE id = ? AND companyId = ?`,
+      [loadId, companyId],
+      function restoreLoad(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        writeAuditLog(req, {
+          action: 'RESTORE', entityType: 'LOAD', entityId: loadId,
+          entityLabel: existingLoad.containerNumber || loadId,
+          oldValue: { deletedAt: existingLoad.deletedAt, deletedBy: existingLoad.deletedBy },
+          newValue: { deletedAt: '', deletedBy: '' },
+        });
+        res.json({ success: true, restored: true, id: loadId });
+      }
+    );
+  });
 });
 
 app.put('/api/loads/:id/container-number', authenticate, (req, res) => {

@@ -36,6 +36,7 @@ export async function getSummary(db, companyId, query = {}) {
     `SELECT id, customer, driver, truck, rate, driverRate, detention, lumper, fuelAdvance, status
      FROM loads
      WHERE companyId = ?
+       AND COALESCE(deletedAt, '') = ''
        AND ${dateExpr} BETWEEN DATE(?) AND DATE(?)`,
     [companyId, period.startDate, period.endDate]
   );
@@ -51,7 +52,7 @@ export async function getSummary(db, companyId, query = {}) {
     db,
     `SELECT COUNT(DISTINCT customer) AS count
      FROM loads
-     WHERE companyId = ? AND ${dateExpr} BETWEEN DATE(?) AND DATE(?) AND TRIM(COALESCE(customer, '')) != ''`,
+     WHERE companyId = ? AND COALESCE(deletedAt, '') = '' AND ${dateExpr} BETWEEN DATE(?) AND DATE(?) AND TRIM(COALESCE(customer, '')) != ''`,
     [companyId, period.startDate, period.endDate]
   );
   const normalizedCompleted = loadRows.filter((load) =>
@@ -86,6 +87,7 @@ export async function getSummary(db, companyId, query = {}) {
      FROM loads l
      LEFT JOIN invoices i ON i.loadId = l.id AND i.companyId = l.companyId
      WHERE l.companyId = ?
+       AND COALESCE(l.deletedAt, '') = ''
        AND LOWER(COALESCE(l.status, '')) IN ('delivered', 'completed')
        AND ${dateExpr.replaceAll('appointmentTime', 'l.appointmentTime').replaceAll('loadDate', 'l.loadDate')} BETWEEN DATE(?) AND DATE(?)
        AND i.id IS NULL`,
@@ -128,7 +130,7 @@ export async function getMonthlyRevenue(db, companyId, query = {}) {
     `SELECT SUBSTR(COALESCE(NULLIF(appointmentTime, ''), loadDate), 1, 7) AS month,
             rate, driverRate, status
      FROM loads
-     WHERE companyId = ? AND ${dateExpr} BETWEEN DATE(?) AND DATE(?)`,
+     WHERE companyId = ? AND COALESCE(deletedAt, '') = '' AND ${dateExpr} BETWEEN DATE(?) AND DATE(?)`,
     [companyId, period.startDate, period.endDate]
   );
   const invoiceRows = await dbAll(
@@ -176,7 +178,7 @@ export async function getLoadsByMonth(db, companyId, query = {}) {
     db,
     `SELECT SUBSTR(COALESCE(NULLIF(appointmentTime, ''), loadDate), 1, 7) AS month, status, COUNT(*) AS count
      FROM loads
-     WHERE companyId = ? AND ${dateExpr} BETWEEN DATE(?) AND DATE(?)
+     WHERE companyId = ? AND COALESCE(deletedAt, '') = '' AND ${dateExpr} BETWEEN DATE(?) AND DATE(?)
      GROUP BY month, status`,
     [companyId, period.startDate, period.endDate]
   );
@@ -199,6 +201,7 @@ export async function getTopCustomers(db, companyId, query = {}) {
     `SELECT customer, COUNT(*) AS loads, GROUP_CONCAT(rate, '|') AS rates
      FROM loads
      WHERE companyId = ?
+       AND COALESCE(deletedAt, '') = ''
        AND LOWER(COALESCE(status, '')) IN ('delivered', 'completed')
        AND ${dateExpr} BETWEEN DATE(?) AND DATE(?)
      GROUP BY customer
@@ -226,6 +229,7 @@ export async function getDriverEfficiency(db, companyId, query = {}) {
      FROM loads l
      LEFT JOIN drivers d ON d.id = l.driver AND d.companyId = l.companyId
      WHERE l.companyId = ?
+       AND COALESCE(l.deletedAt, '') = ''
        AND LOWER(COALESCE(l.status, '')) IN ('delivered', 'completed')
        AND ${dateExpr.replaceAll('appointmentTime', 'l.appointmentTime').replaceAll('loadDate', 'l.loadDate')} BETWEEN DATE(?) AND DATE(?)`,
     [companyId, period.startDate, period.endDate]
@@ -273,6 +277,7 @@ export async function getPayrollTrend(db, companyId, query = {}) {
             driver, driverRate, id
      FROM loads
      WHERE companyId = ?
+       AND COALESCE(deletedAt, '') = ''
        AND LOWER(COALESCE(status, '')) IN ('delivered', 'completed')
        AND ${dateExpr} BETWEEN DATE(?) AND DATE(?)`,
     [companyId, period.startDate, period.endDate]
@@ -302,6 +307,7 @@ export async function getReviewItems(db, companyId, query = {}) {
      FROM loads l
      LEFT JOIN invoices i ON i.loadId = l.id AND i.companyId = l.companyId
      WHERE l.companyId = ? AND LOWER(COALESCE(l.status, '')) IN ('delivered', 'completed')
+       AND COALESCE(l.deletedAt, '') = ''
        AND ${dateExpr.replaceAll('appointmentTime', 'l.appointmentTime').replaceAll('loadDate', 'l.loadDate')} BETWEEN DATE(?) AND DATE(?)
        AND i.id IS NULL`,
     [companyId, period.startDate, period.endDate]
@@ -311,6 +317,7 @@ export async function getReviewItems(db, companyId, query = {}) {
     `SELECT id, referenceNumber, containerNumber, driver
      FROM loads
      WHERE companyId = ? AND LOWER(COALESCE(status, '')) IN ('delivered', 'completed')
+       AND COALESCE(deletedAt, '') = ''
        AND ${dateExpr} BETWEEN DATE(?) AND DATE(?)
        AND COALESCE(driverRate, '') IN ('', '$0.00', '0', 0)`,
     [companyId, period.startDate, period.endDate]
@@ -320,6 +327,7 @@ export async function getReviewItems(db, companyId, query = {}) {
     `SELECT id, referenceNumber, containerNumber, rate, driverRate
      FROM loads
      WHERE companyId = ? AND LOWER(COALESCE(status, '')) IN ('delivered', 'completed')
+       AND COALESCE(deletedAt, '') = ''
        AND ${dateExpr} BETWEEN DATE(?) AND DATE(?)`,
     [companyId, period.startDate, period.endDate]
   );
