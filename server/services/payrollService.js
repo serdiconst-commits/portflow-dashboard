@@ -128,6 +128,7 @@ export async function generatePayrollRun(db, companyId, input = {}, actor = {}) 
     db,
     `SELECT * FROM loads
      WHERE companyId = ?
+       AND COALESCE(deletedAt, '') = ''
        AND DATE(SUBSTR(COALESCE(NULLIF(appointmentTime, ''), loadDate), 1, 10)) BETWEEN DATE(?) AND DATE(?)
      ORDER BY driver, appointmentTime, loadDate, id`,
     [companyId, startDate, endDate]

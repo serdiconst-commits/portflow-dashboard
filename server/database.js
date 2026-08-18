@@ -593,6 +593,8 @@ db.run(`ALTER TABLE loads ADD COLUMN nextMoveType TEXT`, (err) => {
   ['pickupMoveStatus', "TEXT DEFAULT 'Pending'"],
   ['hookDriver', 'TEXT'],
   ['hookReadyAt', 'TEXT'],
+  ['deletedAt', 'TEXT'],
+  ['deletedBy', 'TEXT'],
 ].forEach(([column, definition]) => {
   db.run(`ALTER TABLE loads ADD COLUMN ${column} ${definition}`, (err) => {
     if (err && !err.message.includes('duplicate column name')) {

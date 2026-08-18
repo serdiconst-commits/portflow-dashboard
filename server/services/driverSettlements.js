@@ -335,6 +335,7 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
       `SELECT *
        FROM loads
        WHERE companyId = ?
+         AND COALESCE(deletedAt, '') = ''
          AND (
            (driver = ? AND LOWER(COALESCE(status, '')) IN ('delivered', 'completed')
              AND DATE(SUBSTR(COALESCE(NULLIF(appointmentTime, ''), loadDate), 1, 10)) BETWEEN DATE(?) AND DATE(?))
@@ -424,7 +425,7 @@ export async function addSettlementLoad(db, companyId, settlementId, input = {},
 
   const loadId = String(input.loadId || '').trim();
   const load = loadId
-    ? await dbGet(db, `SELECT * FROM loads WHERE id = ? AND companyId = ?`, [loadId, companyId])
+    ? await dbGet(db, `SELECT * FROM loads WHERE id = ? AND companyId = ? AND COALESCE(deletedAt, '') = ''`, [loadId, companyId])
     : null;
   const payAmount = parseMoney(input.payAmount);
   const movesCount = Math.max(1, Number.parseInt(input.movesCount || load?.movesCount || 1, 10) || 1);
