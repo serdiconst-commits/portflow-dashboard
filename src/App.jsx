@@ -13692,11 +13692,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               </div>
             </section>
 
-            <section className="panel">
+            <section className="panel paperwork-alerts-panel">
               <div className="panel-header"><h3>Paperwork Alerts</h3></div>
-              <div className="alerts-list">
+              <div className="alerts-list paperwork-alerts-list">
                 {paperworkAlerts.map((load) => (
-                  <div key={load.id} className="alert-card">
+                  <div key={load.id} className="alert-card paperwork-alert-card">
                     <strong>{load.id}</strong>
                     <p>
   Driver:{' '}

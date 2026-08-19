@@ -2371,6 +2371,13 @@ button {
   border: 1px solid transparent;
 }
 
+.sheet-paperwork {
+  min-width: 0;
+  padding: 2px 6px;
+  font-size: 9px;
+  line-height: 1.1;
+}
+
 .sheet-status.dispatched {
   background: var(--pf-status-dispatched-bg);
   color: var(--pf-status-dispatched-text);
@@ -2585,6 +2592,37 @@ td {
 .alert-card p {
   margin: 6px 0 0;
   font-size: 14px;
+}
+
+.paperwork-alerts-panel {
+  padding: 10px;
+}
+
+.paperwork-alerts-panel .panel-header {
+  margin-bottom: 6px;
+}
+
+.paperwork-alerts-panel .panel-header h3 {
+  font-size: 13px;
+}
+
+.paperwork-alerts-list {
+  gap: 4px;
+}
+
+.paperwork-alert-card {
+  padding: 6px 8px;
+  border-radius: 7px;
+}
+
+.paperwork-alert-card strong {
+  font-size: 10px;
+}
+
+.paperwork-alert-card p {
+  margin: 1px 0 0;
+  font-size: 9px;
+  line-height: 1.2;
 }
 
 @media (max-width: 1000px) {
@@ -5369,8 +5407,8 @@ button:disabled {
 }
 
 .load-card .paperwork-badges span {
-  font-size: 11px;
-  padding: 3px 8px;
+  font-size: 9px;
+  padding: 2px 5px;
 }
 .business-dashboard-panel {
   display: grid;
