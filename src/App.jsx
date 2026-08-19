@@ -610,9 +610,6 @@ const parseAuthJson = (key) => {
 };
 const loginPathRequested =
   typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/login';
-if (loginPathRequested) {
-  clearAuthSession();
-}
 
 const isInvalidTokenError = (message = '') =>
   String(message).toLowerCase().includes('invalid token') ||
@@ -1668,7 +1665,7 @@ const handleLogin = async (e) => {
 
     setLoginError('');
     window.setTimeout(() => {
-      window.location.reload();
+      window.location.replace(isDriverApp || data.user?.role === 'driver' ? '/driver' : '/');
     }, 80);
   } catch (error) {
     console.error('Login failed:', error);
