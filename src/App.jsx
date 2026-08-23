@@ -10295,7 +10295,7 @@ const NotificationStack = () =>
     </div>
   ) : null;
 
-const DriverLoadCard = ({ load }) => {
+const renderDriverLoadCard = (load) => {
   const selectedFile = uploadFileByLoad[load.id] || uploadFileRef.current[load.id];
   const uploadStatus = driverUploadStatusByLoad[load.id];
   const missingDocuments = getMissingDriverDocuments(load);
@@ -10304,7 +10304,7 @@ const DriverLoadCard = ({ load }) => {
   const driverDestinationLabel = getLoadNextMoveType(load) === 'Return' ? 'Return Destination' : 'Delivery';
 
   return (
-    <article className="driver-load-card">
+    <article key={load.id} className="driver-load-card">
       <div className="driver-load-card-header">
         <div>
           <span className="driver-card-kicker">Load {load.id}</span>
@@ -10782,9 +10782,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         </section>
       ) : (
         <div className="driver-load-list">
-          {driverVisibleLoads.map((load) => (
-            <DriverLoadCard key={load.id} load={load} />
-          ))}
+          {driverVisibleLoads.map(renderDriverLoadCard)}
         </div>
       )}
     </main>
