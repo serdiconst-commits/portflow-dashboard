@@ -3588,6 +3588,9 @@ const formatAuditValue = (value) => {
   return String(value);
 };
 
+const formatAuditFieldLabel = (field) =>
+  field === 'duplicatedFromLoadId' ? 'Source Load' : field;
+
 const fetchAuditLogs = async () => {
   if (!authToken) return;
 
@@ -5238,7 +5241,6 @@ const handleDuplicateLoad = (load) => {
   if (!load) return;
 
   const driver = normalizeDriverForStorage(load.driver);
-  const duplicateNote = `Duplicated from load ${load.id || 'unknown'} on ${new Date().toLocaleString()}.`;
   const existingNotes = String(load.notes || '').trim();
 
   setNewLoad({
@@ -5264,7 +5266,8 @@ const handleDuplicateLoad = (load) => {
     completedAt: '',
     customerExtraCharges: [],
     customerExtraChargesJson: '[]',
-    notes: existingNotes ? `${duplicateNote}\n\n${existingNotes}` : duplicateNote,
+    notes: existingNotes,
+    duplicatedFromLoadId: load.id || '',
     streetTurn: false,
     dropType: '',
     dropLocation: '',
@@ -13701,7 +13704,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                     ) : (
                                       changedEntries.map(([field, change]) => (
                                         <div key={field} className="audit-change">
-                                          <span>{field}</span>
+                                          <span>{formatAuditFieldLabel(field)}</span>
                                           <strong>{formatAuditValue(change?.oldValue)} → {formatAuditValue(change?.newValue)}</strong>
                                         </div>
                                       ))
@@ -15909,7 +15912,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   ) : (
                     changedEntries.slice(0, 4).map(([field, change]) => (
                       <div key={field} className="audit-change">
-                        <span>{field}</span>
+                        <span>{formatAuditFieldLabel(field)}</span>
                         <strong>{formatAuditValue(change?.oldValue)} → {formatAuditValue(change?.newValue)}</strong>
                       </div>
                     ))

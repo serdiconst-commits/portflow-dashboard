@@ -4967,19 +4967,29 @@ dropDateTime,
                     return res.status(500).json({ error: getErr.message });
                   }
 
+                  const duplicatedFromLoadId = String(l.duplicatedFromLoadId || '').trim();
+                  const createdLoadFields = Object.fromEntries(
+                    Object.entries(auditLogSafeValue(row) || {}).map(([field, value]) => [
+                      field,
+                      { oldValue: '', newValue: value },
+                    ])
+                  );
+
                   writeAuditLog(req, {
-                    action: 'CREATE',
+                    action: duplicatedFromLoadId ? 'DUPLICATE' : 'CREATE',
                     entityType: 'LOAD',
                     entityId: generatedLoadId,
                     entityLabel: generatedLoadId,
                     oldValue: null,
-                    newValue: row,
-                    changedFields: Object.fromEntries(
-                      Object.entries(auditLogSafeValue(row) || {}).map(([field, value]) => [
-                        field,
-                        { oldValue: '', newValue: value },
-                      ])
-                    ),
+                    newValue: duplicatedFromLoadId
+                      ? { ...row, duplicatedFromLoadId }
+                      : row,
+                    changedFields: duplicatedFromLoadId
+                      ? {
+                          duplicatedFromLoadId: { oldValue: '', newValue: duplicatedFromLoadId },
+                          ...createdLoadFields,
+                        }
+                      : createdLoadFields,
                   });
 
                   res.json(row);
