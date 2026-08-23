@@ -3150,6 +3150,115 @@ app.put('/api/users/:id/role', authenticate, requireRoles(adminRoles), (req, res
   );
 });
 
+app.put('/api/users/:id/credentials', authenticate, requireRoles(adminRoles), (req, res) => {
+  const companyId = req.company.companyId;
+  const userId = String(req.params.id || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+  if (!/^\S+@\S+\.\S+$/.test(email)) {
+    return res.status(400).json({ error: 'Enter a valid email address.' });
+  }
+  if (password && password.length < 6) {
+    return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+  }
+
+  db.get(
+    `SELECT id, name, email, role, driverId FROM users WHERE id = ? AND companyId = ?`,
+    [userId, companyId],
+    async (lookupErr, existingUser) => {
+      if (lookupErr) return res.status(500).json({ error: lookupErr.message });
+      if (!existingUser) return res.status(404).json({ error: 'User not found.' });
+
+      try {
+        const passwordHash = password ? await bcrypt.hash(password, 10) : null;
+        const params = passwordHash
+          ? [email, passwordHash, userId, companyId]
+          : [email, userId, companyId];
+        const sql = passwordHash
+          ? `UPDATE users SET email = ?, password = ? WHERE id = ? AND companyId = ?`
+          : `UPDATE users SET email = ? WHERE id = ? AND companyId = ?`;
+
+        db.run(sql, params, function (updateErr) {
+          if (updateErr) {
+            const duplicateEmail = updateErr.message?.includes('UNIQUE constraint failed');
+            return res.status(duplicateEmail ? 400 : 500).json({
+              error: duplicateEmail ? 'That email is already used by another user.' : updateErr.message,
+            });
+          }
+
+          const finish = () => {
+            writeAuditLog(req, {
+              action: 'update',
+              entityType: 'user',
+              entityId: userId,
+              entityLabel: existingUser.name || email,
+              oldValue: { email: existingUser.email },
+              newValue: { email, passwordChanged: Boolean(passwordHash) },
+            });
+            res.json({ success: true, user: { ...existingUser, email } });
+          };
+
+          if (existingUser.driverId) {
+            const driverSql = passwordHash
+              ? `UPDATE drivers SET email = ?, password = ? WHERE id = ? AND companyId = ?`
+              : `UPDATE drivers SET email = ? WHERE id = ? AND companyId = ?`;
+            const driverParams = passwordHash
+              ? [email, passwordHash, existingUser.driverId, companyId]
+              : [email, existingUser.driverId, companyId];
+            return db.run(driverSql, driverParams, (driverErr) => {
+              if (driverErr) return res.status(500).json({ error: driverErr.message });
+              finish();
+            });
+          }
+
+          finish();
+        });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  );
+});
+
+app.delete('/api/users/:id', authenticate, requireRoles(adminRoles), (req, res) => {
+  const companyId = req.company.companyId;
+  const userId = String(req.params.id || '').trim();
+
+  if (userId === req.user?.id) {
+    return res.status(400).json({ error: 'You cannot delete your own account.' });
+  }
+
+  db.get(
+    `SELECT id, name, email, role FROM users WHERE id = ? AND companyId = ?`,
+    [userId, companyId],
+    (lookupErr, user) => {
+      if (lookupErr) return res.status(500).json({ error: lookupErr.message });
+      if (!user) return res.status(404).json({ error: 'User not found.' });
+      if (normalizeRole(user.role) === 'owner') {
+        return res.status(400).json({ error: 'The owner account cannot be deleted.' });
+      }
+
+      db.run(
+        `DELETE FROM users WHERE id = ? AND companyId = ?`,
+        [userId, companyId],
+        function (deleteErr) {
+          if (deleteErr) return res.status(500).json({ error: deleteErr.message });
+          writeAuditLog(req, {
+            action: 'delete',
+            entityType: 'user',
+            entityId: userId,
+            entityLabel: user.name || user.email,
+            oldValue: user,
+          });
+          res.json({ success: true });
+        }
+      );
+    }
+  );
+});
+
 app.post('/api/staff-users', authenticate, requireRoles(adminRoles), async (req, res) => {
   const companyId = req.company.companyId;
   const { name, email, password, role = 'dispatcher', isActive = true } = req.body;

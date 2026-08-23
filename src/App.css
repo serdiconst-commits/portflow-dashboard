@@ -4200,6 +4200,33 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.user-credentials-form {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(240px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  flex: 1;
+  max-width: 760px;
+}
+
+.user-credentials-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.user-credentials-form input {
+  width: 100%;
+}
+
+.user-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -4494,6 +4521,15 @@ button:disabled {
   .user-controls .secondary-btn,
   .role-select {
     width: 100%;
+  }
+
+  .user-credentials-form {
+    grid-template-columns: 1fr;
+    max-width: none;
+  }
+
+  .user-edit-actions button {
+    flex: 1;
   }
 }
 
