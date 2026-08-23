@@ -1141,6 +1141,9 @@ const deliveryAutocompleteRef = useRef(null);
 const returnInputRef = useRef(null);
 const returnAutocompleteRef = useRef(null);
 const [allUsers, setAllUsers] = useState([]);
+const [editingUserId, setEditingUserId] = useState('');
+const [userCredentialsForm, setUserCredentialsForm] = useState({ email: '', password: '' });
+const [savingUserId, setSavingUserId] = useState('');
 const [locations, setLocations] = useState([]);
 const newDeliveryAddressInputRef = useRef(null);
 const newDeliveryAutocompleteRef = useRef(null);
@@ -7269,6 +7272,69 @@ const handleChangeUserRole = async (userId, newRole) => {
   } catch (error) {
     console.error('Failed to update role:', error);
     alert(`Failed to update role: ${error.message}`);
+  }
+};
+
+const startEditingUser = (user) => {
+  setEditingUserId(user.id);
+  setUserCredentialsForm({ email: user.email || '', password: '' });
+};
+
+const handleSaveUserCredentials = async (e, user) => {
+  e.preventDefault();
+  setSavingUserId(user.id);
+
+  try {
+    const res = await fetch(`${API_BASE}/api/users/${encodeURIComponent(user.id)}/credentials`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(userCredentialsForm),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to update user');
+
+    if (currentUser?.id === user.id) {
+      const updatedCurrentUser = { ...currentUser, email: userCredentialsForm.email.trim() };
+      setCurrentUser(updatedCurrentUser);
+      saveAuthSession(authToken, updatedCurrentUser, company);
+    }
+
+    setEditingUserId('');
+    setUserCredentialsForm({ email: '', password: '' });
+    await fetchAllUsers();
+    if (user.role === 'driver') await fetchDrivers();
+    alert('User login updated successfully');
+  } catch (error) {
+    console.error('Failed to update user:', error);
+    alert(`Failed to update user: ${error.message}`);
+  } finally {
+    setSavingUserId('');
+  }
+};
+
+const handleDeleteUser = async (user) => {
+  const confirmed = window.confirm(
+    `Permanently delete ${user.name} (${user.email})?\n\nThis removes the login account from Users and cannot be undone.`
+  );
+  if (!confirmed) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/users/${encodeURIComponent(user.id)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to delete user');
+
+    if (editingUserId === user.id) setEditingUserId('');
+    await fetchAllUsers();
+    alert('User account deleted successfully');
+  } catch (error) {
+    console.error('Failed to delete user:', error);
+    alert(`Failed to delete user: ${error.message}`);
   }
 };
   const handleExportSettlementCsv = () => {
@@ -15364,6 +15430,43 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <span>{user.email}</span>
               </div>
 
+              {editingUserId === user.id ? (
+                <form className="user-credentials-form" onSubmit={(e) => handleSaveUserCredentials(e, user)}>
+                  <label>
+                    <span>Email</span>
+                    <input
+                      type="email"
+                      value={userCredentialsForm.email}
+                      onChange={(e) => setUserCredentialsForm((prev) => ({ ...prev, email: e.target.value }))}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>New password</span>
+                    <input
+                      type="password"
+                      value={userCredentialsForm.password}
+                      onChange={(e) => setUserCredentialsForm((prev) => ({ ...prev, password: e.target.value }))}
+                      placeholder="Leave blank to keep current password"
+                      minLength={6}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                  <div className="user-edit-actions">
+                    <button type="submit" className="primary-btn compact-btn" disabled={savingUserId === user.id}>
+                      {savingUserId === user.id ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-btn compact-btn"
+                      onClick={() => setEditingUserId('')}
+                      disabled={savingUserId === user.id}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
               <div className="user-controls">
                 {user.role === 'carrier' ? (
                   <span className="role-label">Main Account</span>
@@ -15387,6 +15490,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   {user.isActive ? 'Active' : 'Inactive'}
                 </span>
 
+                <button
+                  type="button"
+                  className="secondary-btn compact-btn"
+                  onClick={() => startEditingUser(user)}
+                >
+                  Edit Login
+                </button>
+
                 {user.role !== 'carrier' && (
                   <button
                     type="button"
@@ -15396,7 +15507,18 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     {user.isActive ? 'Deactivate' : 'Activate'}
                   </button>
                 )}
+
+                {user.role !== 'owner' && currentUser?.id !== user.id && (
+                  <button
+                    type="button"
+                    className="danger-btn compact-btn"
+                    onClick={() => handleDeleteUser(user)}
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
+              )}
             </div>
           ))}
         </div>
