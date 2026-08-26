@@ -16390,6 +16390,17 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <div className="document-meta">
                             <span className="document-badge">{doc.category || doc.type || 'Document'}</span>
                             <span>{formatDateTime(doc.uploadedAt)}</span>
+                            <select
+                              value={doc.category || doc.type || 'Other'}
+                              onChange={(e) => handleDocumentCategoryChange(doc.id, e.target.value)}
+                              className="document-row-select"
+                            >
+                              {documentTypes.map((docType) => (
+                                <option key={docType} value={docType}>
+                                  {docType}
+                                </option>
+                              ))}
+                            </select>
                           </div>
                         </div>
                         <div className="document-actions">
@@ -17527,12 +17538,24 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <p>{doc.size} • {normalizeDocType(doc.type)}</p>
                           <div className="document-meta">
                             <span className="document-badge">{doc.category}</span>
+                            <select
+                              value={doc.category || doc.type || 'Other'}
+                              onChange={(e) => handleDocumentCategoryChange(doc.id, e.target.value)}
+                              className="document-row-select"
+                            >
+                              {documentTypes.map((docType) => (
+                                <option key={docType} value={docType}>
+                                  {docType}
+                                </option>
+                              ))}
+                            </select>
                           </div>
                         </div>
 
                         <div className="document-actions">
                           <button className="secondary-btn" onClick={() => handleOpenDocument(doc)}>Open</button>
                           <button className="secondary-btn" onClick={() => handleDownloadDocument(doc)}>Download</button>
+                          <button className="secondary-btn" onClick={() => requestDocumentDeletion(doc)}>Remove</button>
                         </div>
                       </div>
                     ))}
