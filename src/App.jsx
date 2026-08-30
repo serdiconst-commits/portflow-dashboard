@@ -87,6 +87,8 @@ function LoadLocationEditor({
   );
 }
 
+const LEGACY_DROP_HOOK_UI_ENABLED = false;
+
 export default function App() {
 const rawApiBase = import.meta.env.VITE_API_BASE || '';
 const API_BASE = (() => {
@@ -13469,7 +13471,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <option value="PRE_PULL_LIVE">Pre-Pull Live Load</option>
                             <option value="DROP_AND_PICK">Drop &amp; Pick</option>
                           </select></label>
-                          {!['DROP_AND_PICK', 'PRE_PULL_LIVE'].includes(editingLoad.workflowType) ? <>
+                          {LEGACY_DROP_HOOK_UI_ENABLED ? <>
                           <select name="dropType" value={editingLoad.dropType || ''} onChange={handleEditInputChange}>
                             <option value="">Select Drop Type</option>
                             <option value="Customer">Customer</option>
@@ -13627,7 +13629,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         </div>
                       </div>
 
-                      {!['DROP_AND_PICK', 'PRE_PULL_LIVE'].includes(selectedLoad.workflowType) && getLoadQuickStatusKey(selectedLoad) !== 'dropped' && (
+                      {LEGACY_DROP_HOOK_UI_ENABLED && getLoadQuickStatusKey(selectedLoad) !== 'dropped' && (
                         <div className="drop-hook-planner">
                           <div className="panel-header compact-header">
                             <div>
@@ -13672,7 +13674,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         </div>
                       )}
 
-                      {!['DROP_AND_PICK', 'PRE_PULL_LIVE'].includes(selectedLoad.workflowType) && getLoadQuickStatusKey(selectedLoad) === 'dropped' && (
+                      {LEGACY_DROP_HOOK_UI_ENABLED && getLoadQuickStatusKey(selectedLoad) === 'dropped' && (
                         <div className="drop-details-panel">
                           <div className="panel-header compact-header">
                             <div>
