@@ -1328,6 +1328,8 @@ const notAvailableLoads = loadsData.filter(
 
 const [selectedPresetName, setSelectedPresetName] = useState('');
 const [selectedLoad, setSelectedLoad] = useState(null);
+const [readyPickupOpen, setReadyPickupOpen] = useState(false);
+const [moveAssignmentDrafts, setMoveAssignmentDrafts] = useState({});
 const buildDropDetailsDraft = (load = {}) => ({
   movementMode: load.movementMode || (load.dropType ? 'DropHook' : 'Direct'),
   dropType: load.dropType || '',
@@ -4988,6 +4990,35 @@ const pickupQueue = loadsData.flatMap((load) =>
     .map((move) => ({ load, move }))
 );
 
+const selectedPickupReturnMove = (selectedLoad?.moves || []).find(
+  (move) =>
+    move.moveType === 'PICKUP_RETURN' &&
+    ['Waiting Customer', 'Ready for Pickup'].includes(move.status)
+);
+
+const openReadyPickupModal = () => {
+  if (!selectedPickupReturnMove) {
+    alert('The pickup movement is not available for this load yet.');
+    return;
+  }
+  setMoveAssignmentDrafts((prev) => ({
+    ...prev,
+    [selectedPickupReturnMove.id]: {
+      ...(prev[selectedPickupReturnMove.id] || {}),
+      returnLocation:
+        prev[selectedPickupReturnMove.id]?.returnLocation ??
+        selectedPickupReturnMove.destination ??
+        selectedLoad?.returnLocation ??
+        '',
+      driverRate:
+        prev[selectedPickupReturnMove.id]?.driverRate ??
+        selectedPickupReturnMove.driverRate ??
+        '',
+    },
+  }));
+  setReadyPickupOpen(true);
+};
+
 const markMoveReadyForPickup = async (moveId) => {
   try {
     const res = await fetch(`${API_BASE}/api/load-moves/${moveId}/ready`, {
@@ -5035,6 +5066,7 @@ const assignPickupMove = async (moveId) => {
     });
     await fetchLoads();
     setActiveView('dispatch');
+    setReadyPickupOpen(false);
   } catch (error) {
     alert(error.message);
   }
@@ -13266,6 +13298,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onClick={() => {
                   setSelectedLoad(null);
                   setIsEditing(false);
+                  setReadyPickupOpen(false);
                 }}
               />
             )}
@@ -13320,6 +13353,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         onClick={() => {
                           setSelectedLoad(null);
                           setIsEditing(false);
+                          setReadyPickupOpen(false);
                         }}
                       >
                         Close
@@ -13628,6 +13662,143 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           </select>
                         </div>
                       </div>
+
+                      {selectedLoad.workflowType === 'DROP_AND_PICK' &&
+                        getLoadQuickStatusKey(selectedLoad) === 'dropped' &&
+                        selectedPickupReturnMove && (
+                          <section className="ready-pickup-callout">
+                            <div>
+                              <span>Container dropped</span>
+                              <strong>{selectedLoad.containerNumber || selectedLoad.id}</strong>
+                              <p>{selectedPickupReturnMove.origin || selectedLoad.dropLocation || selectedLoad.delivery}</p>
+                            </div>
+                            <button type="button" className="primary-btn" onClick={openReadyPickupModal}>
+                              Ready for Pickup
+                            </button>
+                          </section>
+                        )}
+
+                      {readyPickupOpen && selectedPickupReturnMove && (
+                        <div className="modal-overlay ready-pickup-overlay" onClick={() => setReadyPickupOpen(false)}>
+                          <div
+                            className="modal-content ready-pickup-modal"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="ready-pickup-title"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <div className="modal-header">
+                              <div>
+                                <span className="driver-card-kicker">Drop &amp; Pick</span>
+                                <h3 id="ready-pickup-title">Ready for Pickup</h3>
+                                <p className="panel-subtitle">
+                                  {selectedLoad.containerNumber || selectedLoad.id}
+                                </p>
+                              </div>
+                              <button type="button" className="secondary-btn" onClick={() => setReadyPickupOpen(false)}>
+                                Close
+                              </button>
+                            </div>
+
+                            <div className="ready-pickup-location-summary">
+                              <span>Pickup Location</span>
+                              <strong>
+                                {selectedPickupReturnMove.origin || selectedLoad.dropLocation || selectedLoad.delivery || '—'}
+                              </strong>
+                              <small>
+                                Dropped by {getDriverLabel(selectedLoad.droppedBy)} · {formatDateTime(selectedLoad.dropDateTime)}
+                              </small>
+                            </div>
+
+                            <div className="ready-pickup-form-grid">
+                              <label>
+                                <span>Return Location</span>
+                                <input
+                                  type="text"
+                                  list="ready-pickup-return-options"
+                                  placeholder="Select or enter return location"
+                                  value={moveAssignmentDrafts[selectedPickupReturnMove.id]?.returnLocation ?? selectedPickupReturnMove.destination ?? selectedLoad.returnLocation ?? ''}
+                                  onChange={(event) =>
+                                    setMoveAssignmentDrafts((prev) => ({
+                                      ...prev,
+                                      [selectedPickupReturnMove.id]: {
+                                        ...(prev[selectedPickupReturnMove.id] || {}),
+                                        returnLocation: event.target.value,
+                                      },
+                                    }))
+                                  }
+                                />
+                              </label>
+                              <datalist id="ready-pickup-return-options">
+                                {returnLocations.map((location) => {
+                                  const address = formatLocationAddress(location);
+                                  return <option key={location.id} value={address}>{getLocationOptionLabel(location)}</option>;
+                                })}
+                              </datalist>
+
+                              <label>
+                                <span>Pickup Driver</span>
+                                <select
+                                  value={moveAssignmentDrafts[selectedPickupReturnMove.id]?.driverId || ''}
+                                  onChange={(event) =>
+                                    setMoveAssignmentDrafts((prev) => ({
+                                      ...prev,
+                                      [selectedPickupReturnMove.id]: {
+                                        ...(prev[selectedPickupReturnMove.id] || {}),
+                                        driverId: event.target.value,
+                                      },
+                                    }))
+                                  }
+                                >
+                                  <option value="">Select driver</option>
+                                  {driversList.map((driver) => (
+                                    <option key={driver.id} value={driver.id}>{driver.id} - {driver.name}</option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <label>
+                                <span>Driver Rate</span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  placeholder="0.00"
+                                  value={moveAssignmentDrafts[selectedPickupReturnMove.id]?.driverRate ?? selectedPickupReturnMove.driverRate ?? ''}
+                                  onChange={(event) =>
+                                    setMoveAssignmentDrafts((prev) => ({
+                                      ...prev,
+                                      [selectedPickupReturnMove.id]: {
+                                        ...(prev[selectedPickupReturnMove.id] || {}),
+                                        driverRate: event.target.value,
+                                      },
+                                    }))
+                                  }
+                                />
+                              </label>
+                            </div>
+
+                            <div className="ready-pickup-actions">
+                              {selectedPickupReturnMove.status === 'Waiting Customer' ? (
+                                <button
+                                  type="button"
+                                  className="primary-btn"
+                                  onClick={() => markMoveReadyForPickup(selectedPickupReturnMove.id)}
+                                >
+                                  Mark Ready for Pickup
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="primary-btn"
+                                  onClick={() => assignPickupMove(selectedPickupReturnMove.id)}
+                                >
+                                  Assign Driver
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {LEGACY_DROP_HOOK_UI_ENABLED && getLoadQuickStatusKey(selectedLoad) !== 'dropped' && (
                         <div className="drop-hook-planner">
