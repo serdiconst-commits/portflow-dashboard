@@ -149,6 +149,8 @@ const getDateStringWithOffsetInAppTimeZone = (offsetDays = 0) => {
 };
 const isDriverWebPath = typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/driver';
 const isDriverApp = APP_PORTAL === 'driver' || isDriverWebPath;
+const isIphoneDriverApp =
+  isDriverApp && Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
 
 const [driverForm, setDriverForm] = useState({
   id: '',
@@ -236,16 +238,16 @@ const shipLineOptions = [
 ];
 const loadPresets = [
   {
-    name: 'Bayport Import',
-    pickup: 'Bayport Container Terminal',
-    returnLocation: 'Bayport Container Terminal',
+    name: 'Pre-Pull Live Load',
+    workflowType: 'PRE_PULL_LIVE',
+    dropType: 'Yard',
     status: 'Dispatched',
     availabilityStatus: 'Not Available',
   },
   {
-    name: 'Barbours Cut Import',
-    pickup: 'Barbours Cut Terminal',
-    returnLocation: 'Barbours Cut Terminal',
+    name: 'Drop & Pick',
+    workflowType: 'DROP_AND_PICK',
+    dropType: 'Customer',
     status: 'Dispatched',
     availabilityStatus: 'Not Available',
   },
@@ -437,6 +439,13 @@ const formatMiles = (value) => {
 };
 
 const getRouteMileStops = (load = {}) => {
+  const workflowType = String(load.workflowType || 'LIVE_DELIVERY').trim().toUpperCase();
+  if (workflowType === 'PRE_PULL_LIVE') {
+    return [load.pickup, load.dropLocation, load.delivery, load.returnLocation]
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+  }
+
   const nextMoveType = String(load.nextMoveType || '').trim().toLowerCase();
   const destination = nextMoveType === 'return'
     ? load.returnLocation || load.delivery
@@ -897,6 +906,7 @@ const getMissingDriverDocuments = (load) => {
     delivery: '',
     streetTurn: false,
     deliveryType: '',
+    workflowType: 'LIVE_DELIVERY',
     referenceNumber: '',
     poNumber: '',
     pickupNumber: '',
@@ -1168,6 +1178,14 @@ const [availableCustomAppointmentDate, setAvailableCustomAppointmentDate] = useS
 const [lfdDateFilter, setLfdDateFilter] = useState('all');
 const [lfdCustomDate, setLfdCustomDate] = useState(getTodayDate());
 const [driverMobileTab, setDriverMobileTab] = useState('active');
+const [driverSettlements, setDriverSettlements] = useState([]);
+const [driverSettlementDetails, setDriverSettlementDetails] = useState({});
+const [driverPaymentsStatus, setDriverPaymentsStatus] = useState('');
+const [driverProfile, setDriverProfile] = useState(null);
+const [driverProfileStatus, setDriverProfileStatus] = useState('');
+const [driverProfileDocumentType, setDriverProfileDocumentType] = useState('DRIVER LICENSE');
+const [driverProfileDocumentFile, setDriverProfileDocumentFile] = useState(null);
+const [driverProfileUploading, setDriverProfileUploading] = useState(false);
 const [driverTrackingEnabled, setDriverTrackingEnabled] = useState(false);
 const [driverTrackingStatus, setDriverTrackingStatus] = useState('Location sharing is off.');
 const [driverTrackingHelp, setDriverTrackingHelp] = useState('');
@@ -2640,6 +2658,107 @@ const [settlementEndDate, setSettlementEndDate] = useState('');
 const [settlementNote, setSettlementNote] = useState('');
 const [settlementContainerSearch, setSettlementContainerSearch] = useState('');
 const [settlementManualLoadSearch, setSettlementManualLoadSearch] = useState('');
+
+const fetchDriverSettlements = async () => {
+  if (!authToken || currentUser?.role !== 'driver') return;
+  setDriverPaymentsStatus('Loading paystubs...');
+  try {
+    const res = await fetch(`${API_BASE}/api/driver-settlements/self`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      cache: 'no-store',
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to load paystubs.');
+    setDriverSettlements(Array.isArray(data) ? data : []);
+    setDriverPaymentsStatus('');
+  } catch (error) {
+    console.error('Driver payments error:', error);
+    setDriverPaymentsStatus(error.message);
+  }
+};
+
+const fetchDriverSettlementDetails = async (settlementId) => {
+  if (driverSettlementDetails[settlementId]) {
+    setDriverSettlementDetails((prev) => ({ ...prev, [settlementId]: null }));
+    return;
+  }
+  setDriverPaymentsStatus('Loading paystub details...');
+  try {
+    const res = await fetch(`${API_BASE}/api/driver-settlements/self/${encodeURIComponent(settlementId)}`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      cache: 'no-store',
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to load paystub details.');
+    setDriverSettlementDetails((prev) => ({ ...prev, [settlementId]: data }));
+    setDriverPaymentsStatus('');
+  } catch (error) {
+    console.error('Driver payment details error:', error);
+    setDriverPaymentsStatus(error.message);
+  }
+};
+
+const fetchDriverProfile = async () => {
+  if (!authToken || currentUser?.role !== 'driver') return;
+  setDriverProfileStatus('Loading profile...');
+  try {
+    const res = await fetch(`${API_BASE}/api/driver-profile`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      cache: 'no-store',
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to load profile.');
+    setDriverProfile(data);
+    setDriverProfileStatus('');
+  } catch (error) {
+    console.error('Driver profile error:', error);
+    setDriverProfileStatus(error.message);
+  }
+};
+
+const handleDriverProfileDocumentUpload = async (event) => {
+  event.preventDefault();
+  if (!driverProfileDocumentFile) {
+    setDriverProfileStatus('Choose a document first.');
+    return;
+  }
+  setDriverProfileUploading(true);
+  setDriverProfileStatus('Uploading document...');
+  try {
+    const formData = new FormData();
+    formData.append('type', driverProfileDocumentType);
+    formData.append('file', driverProfileDocumentFile);
+    const res = await fetch(`${API_BASE}/api/driver-profile/documents`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${authToken}` },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to upload document.');
+    setDriverProfileDocumentFile(null);
+    setDriverProfileStatus('Document uploaded. Dispatch can now review it.');
+    await fetchDriverProfile();
+  } catch (error) {
+    console.error('Driver profile upload error:', error);
+    setDriverProfileStatus(error.message);
+  } finally {
+    setDriverProfileUploading(false);
+  }
+};
+
+const handleOpenDriverProfileDocument = async (document) => {
+  try {
+    const res = await fetch(`${API_BASE}${document.url}`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!res.ok) throw new Error('Unable to open document.');
+    const blobUrl = URL.createObjectURL(await res.blob());
+    window.open(blobUrl, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+  } catch (error) {
+    setDriverProfileStatus(error.message);
+  }
+};
 const [settlementDeductionReasonInput, setSettlementDeductionReasonInput] = useState('');
 const [settlementCalculatorInputs, setSettlementCalculatorInputs] = useState({
   dispatchRate: '10',
@@ -4024,6 +4143,8 @@ useEffect(() => {
   fetchDriverLocations();
   if (currentUser?.role === 'driver') {
     fetchDriverFuelHistory();
+    fetchDriverSettlements();
+    fetchDriverProfile();
     setFuelForm((prev) => ({
       ...prev,
       truckId: prev.truckId || getDriverDefaultTruck(),
@@ -4134,7 +4255,10 @@ useEffect(() => {
   const filteredSettlementLoads = useMemo(() => {
     const periodLoads = loadsData.filter((load) => {
       const matchesDriver = activeSettlementDriverId
-        ? normalizeDriverForStorage(load.driver) === activeSettlementDriverId
+        ? normalizeDriverForStorage(load.driver) === activeSettlementDriverId ||
+          (load.moves || []).some((move) =>
+            [move.driverId, move.completedBy].some((value) => normalizeDriverForStorage(value) === activeSettlementDriverId)
+          )
         : true;
       const settlementAppointmentDate = getSettlementAppointmentDate(load);
       const matchesStart =
@@ -4149,7 +4273,11 @@ useEffect(() => {
       const manualLoad = loadsData.find(
         (load) =>
           load.id === loadId &&
-          (!activeSettlementDriverId || normalizeDriverForStorage(load.driver) === activeSettlementDriverId)
+          (!activeSettlementDriverId ||
+            normalizeDriverForStorage(load.driver) === activeSettlementDriverId ||
+            (load.moves || []).some((move) =>
+              [move.driverId, move.completedBy].some((value) => normalizeDriverForStorage(value) === activeSettlementDriverId)
+            ))
       );
       if (manualLoad) loadMap.set(manualLoad.id, manualLoad);
     });
@@ -4177,7 +4305,21 @@ useEffect(() => {
     settlementCustomDeductions[settlementCustomDeductionKey] || [];
 
   const settlementTripPayTotalNumber = filteredSettlementLoads.reduce(
-    (sum, load) => sum + parseMoney(load.driverRate),
+    (sum, load) => {
+      const driverMoves = (load.moves || []).filter((move) =>
+        [move.driverId, move.completedBy].some(
+          (value) => normalizeDriverForStorage(value) === activeSettlementDriverId
+        )
+      );
+      if (driverMoves.length > 0) {
+        return sum + driverMoves.reduce((moveSum, move) => moveSum + parseMoney(move.driverRate), 0);
+      }
+      return sum + (
+        normalizeDriverForStorage(load.driver) === activeSettlementDriverId
+          ? parseMoney(load.driverRate)
+          : 0
+      );
+    },
     0
   );
 
@@ -4211,8 +4353,21 @@ useEffect(() => {
     (sum, load) => sum + parseMoney(load.detention),
     0
   );
+  const settlementCalculationLoads = filteredSettlementLoads.map((load) => {
+    const driverMoves = (load.moves || []).filter((move) =>
+      [move.driverId, move.completedBy].some(
+        (value) => normalizeDriverForStorage(value) === activeSettlementDriverId
+      )
+    );
+    if (!driverMoves.length) return load;
+    return {
+      ...load,
+      rate: driverMoves.reduce((sum, move) => sum + parseMoney(move.driverRate), 0),
+      driverRate: driverMoves.reduce((sum, move) => sum + parseMoney(move.driverRate), 0),
+    };
+  });
   const settlementCalculation = calculateSettlement({
-    loads: filteredSettlementLoads,
+    loads: settlementCalculationLoads,
     dispatchRate: parseMoney(settlementCalculatorInputs.dispatchRate) / 100,
     driverSplitRate: parseMoney(settlementCalculatorInputs.driverSplitRate) / 100,
     insurance: settlementCalculatorInputs.insurance,
@@ -4824,6 +4979,82 @@ const getAccountingDeliveryFilterDate = () => {
   if (accountingDeliveryDateFilter === 'custom') return accountingDeliveryCustomDate;
   return getRelativeDateString(0);
 };
+
+const pickupQueue = loadsData.flatMap((load) =>
+  (load.moves || [])
+    .filter((move) => ['Waiting Customer', 'Ready for Pickup'].includes(move.status))
+    .map((move) => ({ load, move }))
+);
+
+const markMoveReadyForPickup = async (moveId) => {
+  try {
+    const res = await fetch(`${API_BASE}/api/load-moves/${moveId}/ready`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to mark container ready for pickup');
+    await fetchLoads();
+  } catch (error) {
+    alert(error.message);
+  }
+};
+
+const assignPickupMove = async (moveId) => {
+  const draft = moveAssignmentDrafts[moveId] || {};
+  const queueItem = pickupQueue.find(({ move }) => move.id === moveId);
+  const returnLocation = String(
+    draft.returnLocation ?? queueItem?.move?.destination ?? queueItem?.load?.returnLocation ?? ''
+  ).trim();
+  if (!draft.driverId) {
+    alert('Choose a driver first.');
+    return;
+  }
+  if (!returnLocation) {
+    alert('Add the return location before assigning a driver.');
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/load-moves/${moveId}/assign`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({
+        driverId: draft.driverId,
+        driverRate: draft.driverRate || '',
+        returnLocation,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to assign pickup movement');
+    setMoveAssignmentDrafts((prev) => {
+      const next = { ...prev };
+      delete next[moveId];
+      return next;
+    });
+    await fetchLoads();
+    setActiveView('dispatch');
+  } catch (error) {
+    alert(error.message);
+  }
+};
+
+const saveMoveDriverRate = async (moveId, currentRate = '') => {
+  const driverRate = moveAssignmentDrafts[moveId]?.driverRate ?? currentRate;
+  try {
+    const res = await fetch(`${API_BASE}/api/load-moves/${moveId}/rate`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ driverRate }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save movement pay');
+    await fetchLoads();
+    setSettlementPayStatus('Movement pay saved and recorded in the audit.');
+  } catch (error) {
+    setSettlementPayStatus(error.message);
+  }
+};
+
 const filteredAccountingLoads = completedAccountingLoads.filter((load) => {
   const targetDeliveryDate = getAccountingDeliveryFilterDate();
   const matchesDeliveryDate = targetDeliveryDate ? getAccountingDeliveryDate(load) === targetDeliveryDate : true;
@@ -5120,10 +5351,24 @@ const handleAddLoad = async (e) => {
     );
     return;
   }
+  if (newLoad.workflowType === 'PRE_PULL_LIVE' && !String(newLoad.dropLocation || '').trim()) {
+    alert('Choose the main yard / pre-pull drop location.');
+    return;
+  }
   try {
-    await saveLocationIfNotExists(newLoad.pickup, 'pickup');
-    await saveLocationIfNotExists(newLoad.delivery, 'delivery');
-    await saveLocationIfNotExists(newLoad.returnLocation, 'return');
+    Promise.allSettled([
+      saveLocationIfNotExists(newLoad.pickup, 'pickup'),
+      saveLocationIfNotExists(newLoad.delivery, 'delivery'),
+      saveLocationIfNotExists(newLoad.returnLocation, 'return'),
+      ...(newLoad.workflowType === 'PRE_PULL_LIVE'
+        ? [saveLocationIfNotExists(newLoad.dropLocation, 'yard')]
+        : []),
+    ]).then((results) => {
+      const failed = results.filter((result) => result.status === 'rejected');
+      if (failed.length > 0) {
+        console.warn('Load saved while some locations could not be added to the location catalog.');
+      }
+    });
     const savedMiles = await getLoadMilesForSave(newLoad, 'new');
 
     const loadToAdd = {
@@ -5295,6 +5540,24 @@ const handleUpdateLoad = async (e) => {
   if (!editingLoad?.id) {
     alert('Unable to edit this load. Please select the load again and try Edit Load one more time.');
     setIsEditing(false);
+    return;
+  }
+
+  if (editingLoad.workflowType === 'PRE_PULL_LIVE' && !String(editingLoad.dropLocation || '').trim()) {
+    alert('Choose the main yard / pre-pull drop location.');
+    return;
+  }
+
+  const previousWorkflow = selectedLoad?.workflowType || 'LIVE_DELIVERY';
+  const workflowChanged = previousWorkflow !== (editingLoad.workflowType || 'LIVE_DELIVERY');
+  const movementAlreadyStarted = ['in transit', 'arrived at pickup', 'loaded'].includes(
+    String(selectedLoad?.status || '').trim().toLowerCase()
+  );
+  if (
+    workflowChanged &&
+    movementAlreadyStarted &&
+    !window.confirm('This movement has already started. Change only the remaining movement plan and preserve the completed history?')
+  ) {
     return;
   }
 
@@ -5650,7 +5913,14 @@ const handleAddManualSettlementLoad = async (loadId) => {
   const load = loadsData.find((item) => item.id === loadId);
   if (!load) return;
 
-  const currentPay = getSettlementPayValue(load, 'driverRate');
+  const settlementDriverMoves = (load.moves || []).filter((move) =>
+    [move.driverId, move.completedBy].some(
+      (value) => normalizeDriverForStorage(value) === normalizeDriverForStorage(activeSettlementDriverId)
+    )
+  );
+  const currentPay = settlementDriverMoves.length
+    ? formatMoney(settlementDriverMoves.reduce((sum, move) => sum + parseMoney(move.driverRate), 0))
+    : getSettlementPayValue(load, 'driverRate');
   const enteredPay = window.prompt(
     `Driver pay for ${load.containerNumber || load.id}`,
     currentPay
@@ -5661,6 +5931,7 @@ const handleAddManualSettlementLoad = async (loadId) => {
   const originalLoadDriver = getDriverLabel(load.driver);
   const settlementDriverLabel = getDriverLabel(activeSettlementDriverId);
   const isCrossDriverAdjustment =
+    settlementDriverMoves.length === 0 &&
     normalizeDriverForStorage(load.driver) !== normalizeDriverForStorage(activeSettlementDriverId);
   const backendSettlement = await ensureBackendSettlement();
   if (!backendSettlement?.id) return;
@@ -5675,11 +5946,12 @@ const handleAddManualSettlementLoad = async (loadId) => {
       body: JSON.stringify({
         loadId,
         payAmount: enteredPay,
-        movesCount: load.movesCount || 1,
+        movesCount: settlementDriverMoves.length || load.movesCount || 1,
         description: [
           outsidePeriod ? 'Outside-period load' : 'Manual load add',
           isCrossDriverAdjustment ? `cross-driver adjustment from ${originalLoadDriver || 'unassigned driver'} to ${settlementDriverLabel}` : '',
           priorSettlementLine ? 'already listed in this settlement statement' : '',
+          settlementDriverMoves.length ? `${settlementDriverMoves.length} movement(s) for this driver` : '',
           `appointment ${formatAppointmentTime(load.appointmentTime) || 'not set'}`,
         ].filter(Boolean).join(' - '),
         source: isCrossDriverAdjustment ? 'cross_driver' : outsidePeriod ? 'outside_period' : 'manual',
@@ -8960,6 +9232,36 @@ const setDriverEquipmentDraft = (loadId, field, value) => {
   };
 };
 
+const resetDriverEditor = () => {
+  setEditingDriverId('');
+  setDriverForm({
+    id: '',
+    name: '',
+    email: '',
+    password: '',
+    phone: '',
+    truck: '',
+    isActive: true,
+    licenseExpirationDate: '',
+    twicExpirationDate: '',
+  });
+};
+
+const getExpirationDisplay = (dateValue) => {
+  if (!dateValue) return { label: 'Not provided', tone: 'missing' };
+  const today = getDateStringInAppTimeZone();
+  const [targetYear, targetMonth, targetDay] = dateValue.split('-').map(Number);
+  const [todayYear, todayMonth, todayDay] = today.split('-').map(Number);
+  const days = Math.round(
+    (Date.UTC(targetYear, targetMonth - 1, targetDay) - Date.UTC(todayYear, todayMonth - 1, todayDay)) /
+      86400000
+  );
+  if (days < 0) return { label: `Expired ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago`, tone: 'expired' };
+  if (days === 0) return { label: 'Expires today', tone: 'warning' };
+  if (days <= 5) return { label: `${days} day${days === 1 ? '' : 's'} remaining`, tone: 'warning' };
+  return { label: `Valid until ${dateValue}`, tone: 'valid' };
+};
+
 const getDriverEquipmentDraft = (loadId, field) =>
   driverEquipmentDraftsRef.current[loadId]?.[field] ?? '';
 
@@ -10158,7 +10460,8 @@ const sortDriverLoads = (loads = []) =>
 
 const driverActiveLoads = sortDriverLoads((loadsData || []).filter((load) => {
   const status = String(load.status || '').trim().toLowerCase();
-  return driverMatchesCurrentUser(load.driver, currentUser) && !['delivered', 'dropped'].includes(status);
+  const assignedDriver = load.currentMove?.driverId || load.driver;
+  return driverMatchesCurrentUser(assignedDriver, currentUser) && !['delivered', 'dropped'].includes(status);
 }));
 
 const driverCompletedLoads = sortDriverLoads((loadsData || []).filter((load) => {
@@ -10299,13 +10602,21 @@ const NotificationStack = () =>
   ) : null;
 
 const renderDriverLoadCard = (load) => {
+  const currentMove = load.currentMove || null;
+  const moveOrigin = currentMove?.origin || load.pickup;
+  const moveDestination = currentMove?.destination || load.delivery;
+  const requiresDropAction = ['PRE_PULL', 'DROP'].includes(currentMove?.moveType);
+  const isPickupReturnMove = currentMove?.moveType === 'PICKUP_RETURN';
+  const pickupLabel = 'Pick Up Location';
+  const destinationLabel = isPickupReturnMove
+    ? 'Return Location'
+    : requiresDropAction
+      ? 'Delivery / Drop Location'
+      : 'Delivery Location';
   const selectedFile = uploadFileByLoad[load.id] || uploadFileRef.current[load.id];
   const uploadStatus = driverUploadStatusByLoad[load.id];
   const missingDocuments = getMissingDriverDocuments(load);
   const paperworkComplete = hasRequiredDriverDocuments(load);
-  const driverDestination = getDriverDestination(load);
-  const driverDestinationLabel = getLoadNextMoveType(load) === 'Return' ? 'Return Destination' : 'Delivery';
-
   return (
     <article key={load.id} className="driver-load-card">
       <div className="driver-load-card-header">
@@ -10322,22 +10633,20 @@ const renderDriverLoadCard = (load) => {
 
       <div className="driver-info-grid">
         <div className="driver-info-item wide">
-          <span>Pickup</span>
-          {load.pickup ? (
-            <a href={getGoogleMapsLink(load.pickup)} target="_blank" rel="noopener noreferrer">
-              {load.pickup}
+          <span>{pickupLabel}</span>
+          {moveOrigin ? (
+            <a href={getGoogleMapsLink(moveOrigin)} target="_blank" rel="noopener noreferrer">
+              {moveOrigin}
             </a>
           ) : (
             <strong>-</strong>
           )}
         </div>
         <div className="driver-info-item wide">
-          <span>{driverDestinationLabel}</span>
-          {driverDestination ? (
-            <a href={getGoogleMapsLink(driverDestination)} target="_blank" rel="noopener noreferrer">
-              {getLoadNextMoveType(load) === 'Return'
-                ? driverDestination
-                : getDeliveryDisplay(driverDestination)}
+          <span>{destinationLabel}</span>
+          {moveDestination ? (
+            <a href={getGoogleMapsLink(moveDestination)} target="_blank" rel="noopener noreferrer">
+              {getDeliveryDisplay(moveDestination)}
             </a>
           ) : (
             <strong>-</strong>
@@ -10435,7 +10744,7 @@ const renderDriverLoadCard = (load) => {
         <button
           type="button"
           onClick={() => handleDriverStatusUpdate(load.id, 'Delivered')}
-          disabled={!paperworkComplete}
+          disabled={!paperworkComplete || requiresDropAction}
         >
           Complete
         </button>
@@ -10497,9 +10806,120 @@ const renderDriverLoadCard = (load) => {
   );
 };
 
+const renderDriverPaymentsPanel = () => (
+  <section className="driver-account-panel">
+    <div className="driver-section-heading">
+      <div>
+        <span>Paystubs</span>
+        <strong>Settlement history</strong>
+      </div>
+      <button type="button" onClick={fetchDriverSettlements}>Refresh</button>
+    </div>
+    {driverPaymentsStatus && <p className="driver-panel-status">{driverPaymentsStatus}</p>}
+    {driverSettlements.length === 0 ? (
+      <div className="driver-empty-state">
+        <strong>No paystubs yet.</strong>
+        <p>Settlements created by payroll will appear here.</p>
+      </div>
+    ) : (
+      <div className="driver-payment-list">
+        {driverSettlements.map((settlement) => {
+          const details = driverSettlementDetails[settlement.id];
+          const statement = details?.statement;
+          return (
+            <article className="driver-payment-card" key={settlement.id}>
+              <button type="button" className="driver-payment-summary" onClick={() => fetchDriverSettlementDetails(settlement.id)}>
+                <span>
+                  <small>{settlement.periodStart} - {settlement.periodEnd}</small>
+                  <strong>{settlement.status || 'Draft'}</strong>
+                </span>
+                <b>{formatMoney(settlement.netPay)}</b>
+              </button>
+              {statement && (
+                <div className="driver-payment-details">
+                  <div><span>Total Load Pay</span><strong>{formatMoney(statement.totals?.grossPay)}</strong></div>
+                  <div><span>Deductions</span><strong>-{formatMoney(statement.totals?.netDeductionsTotal)}</strong></div>
+                  <div className="driver-payment-net"><span>Net Pay</span><strong>{formatMoney(statement.totals?.netPay)}</strong></div>
+                  <h3>Loads</h3>
+                  {(statement.loads || []).map((loadLine) => (
+                    <div className="driver-payment-load" key={loadLine.settlementLoadId}>
+                      <span>{loadLine.loadId || loadLine.description || 'Payment'}</span>
+                      <strong>{formatMoney(loadLine.payAmount)}</strong>
+                    </div>
+                  ))}
+                  {(statement.netDeductions || []).map((deduction) => (
+                    <div className="driver-payment-load deduction" key={deduction.id}>
+                      <span>{deduction.description}</span>
+                      <strong>{formatMoney(deduction.amount)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    )}
+  </section>
+);
+
+const renderDriverProfilePanel = () => (
+  <section className="driver-account-panel">
+    <div className="driver-profile-hero">
+      <div className="driver-profile-avatar">{String(driverProfile?.driver?.name || currentUser?.name || 'D').charAt(0).toUpperCase()}</div>
+      <div>
+        <span>My Profile</span>
+        <strong>{driverProfile?.driver?.name || currentUser?.name}</strong>
+        <p>{driverProfile?.driver?.email || currentUser?.email}</p>
+      </div>
+    </div>
+    {driverProfileStatus && <p className="driver-panel-status">{driverProfileStatus}</p>}
+    <div className="driver-profile-grid">
+      <div><span>Driver ID</span><strong>{driverProfile?.driver?.id || currentUser?.driverId || '-'}</strong></div>
+      <div><span>Phone</span><strong>{driverProfile?.driver?.phone || '-'}</strong></div>
+      <div><span>Truck</span><strong>{driverProfile?.equipment?.truck || 'Not assigned'}</strong></div>
+      <div><span>Status</span><strong>{driverProfile?.driver?.isActive === 0 ? 'Inactive' : 'Active'}</strong></div>
+      <div><span>License expires</span><strong>{driverProfile?.driver?.licenseExpirationDate || 'Not entered'}</strong></div>
+      <div><span>TWIC expires</span><strong>{driverProfile?.driver?.twicExpirationDate || 'Not entered'}</strong></div>
+    </div>
+    <form className="driver-profile-upload" onSubmit={handleDriverProfileDocumentUpload}>
+      <div className="driver-section-heading">
+        <div><span>Documents</span><strong>Upload for dispatch review</strong></div>
+      </div>
+      <select value={driverProfileDocumentType} onChange={(event) => setDriverProfileDocumentType(event.target.value)}>
+        <option value="DRIVER LICENSE">Driver License</option>
+        <option value="TWIC">TWIC</option>
+        <option value="REGISTRATION">Registration</option>
+        <option value="INSURANCE">Insurance</option>
+        <option value="ANNUAL INSPECTION">Annual Inspection</option>
+        <option value="OTHER">Other</option>
+      </select>
+      <label className="driver-profile-file">
+        <span>{driverProfileDocumentFile?.name || 'Choose PDF or photo'}</span>
+        <input type="file" accept="image/*,.pdf" onChange={(event) => setDriverProfileDocumentFile(event.target.files?.[0] || null)} />
+      </label>
+      <button type="submit" className="driver-upload-submit" disabled={driverProfileUploading}>
+        {driverProfileUploading ? 'Uploading...' : 'Upload Document'}
+      </button>
+    </form>
+    <div className="driver-profile-documents">
+      {(driverProfile?.documents || []).length === 0 ? (
+        <p>No profile documents uploaded yet.</p>
+      ) : (
+        driverProfile.documents.map((document) => (
+          <button type="button" key={document.id} onClick={() => handleOpenDriverProfileDocument(document)}>
+            <span><strong>{document.type}</strong><small>{document.name}</small></span>
+            <b>Open</b>
+          </button>
+        ))
+      )}
+    </div>
+  </section>
+);
+
 if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') {
   return (
-    <main className="driver-mobile-shell">
+    <main className={`driver-mobile-shell${isIphoneDriverApp ? ' iphone-driver-shell' : ''}`}>
       <header className="driver-app-header">
         <div>
           <span className="driver-app-eyebrow">PortFlow Driver</span>
@@ -10635,9 +11055,29 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         >
           Fuel
         </button>
+        <button
+          type="button"
+          className={driverMobileTab === 'payments' ? 'active' : ''}
+          onClick={() => {
+            setDriverMobileTab('payments');
+            fetchDriverSettlements();
+          }}
+        >
+          Paystubs
+        </button>
+        <button
+          type="button"
+          className={driverMobileTab === 'profile' ? 'active' : ''}
+          onClick={() => {
+            setDriverMobileTab('profile');
+            fetchDriverProfile();
+          }}
+        >
+          Profile
+        </button>
       </nav>
 
-      {driverMobileTab === 'fuel' ? (
+      {driverMobileTab === 'payments' ? renderDriverPaymentsPanel() : driverMobileTab === 'profile' ? renderDriverProfilePanel() : driverMobileTab === 'fuel' ? (
         <section className="driver-fuel-panel">
           <div className="driver-paperwork-header">
             <div>
@@ -11671,6 +12111,20 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </option>
   ))}
 </select>
+  <label className="edit-load-field">
+    <span>Load Workflow</span>
+    <select name="workflowType" value={newLoad.workflowType || 'LIVE_DELIVERY'} onChange={handleInputChange}>
+      <option value="LIVE_DELIVERY">Live Delivery</option>
+      <option value="PRE_PULL_LIVE">Pre-Pull Live Load</option>
+      <option value="DROP_AND_PICK">Drop &amp; Pick</option>
+    </select>
+  </label>
+  {newLoad.workflowType === 'PRE_PULL_LIVE' && (
+    <label className="edit-load-field">
+      <span>Main Yard / Pre-Pull Drop Location</span>
+      <input name="dropLocation" value={newLoad.dropLocation || ''} onChange={handleInputChange} placeholder="Where the first driver will drop the container" required />
+    </label>
+  )}
   <input
     type="date"
     name="loadDate"
@@ -13010,6 +13464,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <span>Drop type, location, driver, and drop time</span>
                         </div>
                         <div className="edit-load-grid">
+                          <label className="edit-load-field"><span>Load Workflow</span><select name="workflowType" value={editingLoad.workflowType || 'LIVE_DELIVERY'} onChange={handleEditInputChange}>
+                            <option value="LIVE_DELIVERY">Live Delivery</option>
+                            <option value="PRE_PULL_LIVE">Pre-Pull Live Load</option>
+                            <option value="DROP_AND_PICK">Drop &amp; Pick</option>
+                          </select></label>
+                          {!['DROP_AND_PICK', 'PRE_PULL_LIVE'].includes(editingLoad.workflowType) ? <>
                           <select name="dropType" value={editingLoad.dropType || ''} onChange={handleEditInputChange}>
                             <option value="">Select Drop Type</option>
                             <option value="Customer">Customer</option>
@@ -13032,6 +13492,16 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <span>Drop Date/Time</span>
                             <input type="datetime-local" name="dropDateTime" value={editingLoad.dropDateTime || ''} onChange={handleEditInputChange} />
                           </label>
+                          </> : (
+                            <div className="edit-load-field edit-load-wide">
+                              <span>Automatic movement history</span>
+                              <strong>
+                                {editingLoad.dropLocation
+                                  ? `${editingLoad.dropLocation} · ${getDriverLabel(editingLoad.droppedBy)} · ${formatDateTime(editingLoad.dropDateTime)}`
+                                  : 'Drop location, driver, and time will be recorded automatically when the driver presses Drop.'}
+                              </strong>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -13087,6 +13557,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       <div className="quick-actions-grid">
                         <div className="quick-driver-box">
                           <label htmlFor="quick-driver-select">Quick Driver Change</label>
+                          {selectedLoad.workflowType === 'DROP_AND_PICK' && getLoadQuickStatusKey(selectedLoad) === 'dropped' ? (
+                            <p className="documents-empty">Use Ready for Pickup after adding the return location.</p>
+                          ) : (
                           <select
   id="quick-driver-select"
   value={normalizeDriverForStorage(selectedLoad.driver)}
@@ -13100,6 +13573,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </option>
   ))}
 </select>
+                          )}
                         </div>
 
                         <div className="quick-driver-box driver-release-box">
@@ -13153,7 +13627,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         </div>
                       </div>
 
-                      {getLoadQuickStatusKey(selectedLoad) !== 'dropped' && (
+                      {!['DROP_AND_PICK', 'PRE_PULL_LIVE'].includes(selectedLoad.workflowType) && getLoadQuickStatusKey(selectedLoad) !== 'dropped' && (
                         <div className="drop-hook-planner">
                           <div className="panel-header compact-header">
                             <div>
@@ -13198,7 +13672,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         </div>
                       )}
 
-                      {getLoadQuickStatusKey(selectedLoad) === 'dropped' && (
+                      {!['DROP_AND_PICK', 'PRE_PULL_LIVE'].includes(selectedLoad.workflowType) && getLoadQuickStatusKey(selectedLoad) === 'dropped' && (
                         <div className="drop-details-panel">
                           <div className="panel-header compact-header">
                             <div>
@@ -14016,6 +14490,25 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
             {selectedSettlementLoad && (
               <>
+                {(selectedSettlementLoad.moves || []).filter((move) =>
+                  !activeSettlementDriverId || [move.driverId, move.completedBy].some((value) => normalizeDriverForStorage(value) === activeSettlementDriverId)
+                ).map((move) => (
+                  <div key={move.id} className="settlement-move-pay-row">
+                    <div>
+                      <span>Movement {move.sequence}: {move.moveType.replaceAll('_', ' ')}</span>
+                      <strong>{move.origin || '—'} → {move.destination || '—'}</strong>
+                      <small>{move.status} · {getDriverLabel(move.completedBy || move.driverId)}</small>
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      aria-label={`Pay for movement ${move.sequence}`}
+                      value={moveAssignmentDrafts[move.id]?.driverRate ?? move.driverRate ?? ''}
+                      onChange={(e) => setMoveAssignmentDrafts((prev) => ({ ...prev, [move.id]: { ...(prev[move.id] || {}), driverRate: e.target.value } }))}
+                    />
+                    <button type="button" className="secondary-btn compact-btn" onClick={() => saveMoveDriverRate(move.id, move.driverRate)}>Save Move Pay</button>
+                  </div>
+                ))}
                 <label className="settlement-entry-field">
                   <span>Load Pay</span>
                   <input
@@ -15055,6 +15548,15 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           : 'Dates will be saved; configure the Render email variables to send automatic alerts.'}</span>
       </div>
 
+      <div className={`compliance-email-banner ${driverComplianceStatus.emailConfigured ? 'ready' : 'setup'}`}>
+        <strong>{driverComplianceStatus.emailConfigured ? 'Email reminders active' : 'Email setup required'}</strong>
+        <span>
+          {driverComplianceStatus.emailConfigured
+            ? `Drivers receive one reminder during the ${driverComplianceStatus.reminderDays}-day expiration window.`
+            : 'Expiration dates will be saved, but automatic emails need the Render email variables.'}
+        </span>
+      </div>
+
       <form className="load-form admin-form" onSubmit={handleSaveDriver}>
         <input
           type="text"
@@ -15066,43 +15568,25 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           }
         />
 
-        <input
-          type="text"
-          placeholder="Driver Name"
-          value={driverForm.name}
-          onChange={(e) =>
-            setDriverForm((prev) => ({ ...prev, name: e.target.value }))
-          }
-          required
-        />
+          <label>
+            <span>Full name</span>
+            <input type="text" placeholder="Driver Name" value={driverForm.name} onChange={(e) => setDriverForm((prev) => ({ ...prev, name: e.target.value }))} required />
+          </label>
 
-        <input
-          type="email"
-          placeholder="Driver Email"
-          value={driverForm.email}
-          onChange={(e) =>
-            setDriverForm((prev) => ({ ...prev, email: e.target.value }))
-          }
-          required
-        />
+          <label>
+            <span>Email for alerts</span>
+            <input type="email" placeholder="driver@email.com" value={driverForm.email} onChange={(e) => setDriverForm((prev) => ({ ...prev, email: e.target.value }))} required />
+          </label>
 
-        <input
-          type="tel"
-          placeholder="Driver Phone"
-          value={driverForm.phone}
-          onChange={(e) =>
-            setDriverForm((prev) => ({ ...prev, phone: e.target.value }))
-          }
-        />
+          <label>
+            <span>Phone</span>
+            <input type="tel" placeholder="Driver Phone" value={driverForm.phone} onChange={(e) => setDriverForm((prev) => ({ ...prev, phone: e.target.value }))} />
+          </label>
 
-        <input
-          type="text"
-          placeholder="Truck Number"
-          value={driverForm.truck}
-          onChange={(e) =>
-            setDriverForm((prev) => ({ ...prev, truck: e.target.value }))
-          }
-        />
+          <label>
+            <span>Truck number</span>
+            <input type="text" placeholder="Truck Number" value={driverForm.truck} onChange={(e) => setDriverForm((prev) => ({ ...prev, truck: e.target.value }))} />
+          </label>
 
         <input
           type="password"
@@ -15149,7 +15633,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       </form>
     </section>
 
-    <section className="panel">
+    <section className="panel driver-directory-panel">
       <div className="panel-header">
         <h3>Saved Drivers</h3>
         <span>{driversList.length} drivers</span>
@@ -16184,6 +16668,21 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     {parseCustomerExtraCharges(selectedCompletedReviewLoad).length > 0 ? 'Edit Charges' : 'Add Charges'}
                   </button>
                   <button type="button" className="secondary-btn compact-btn" onClick={() => openCompletedLoadEditor(selectedCompletedReviewLoad)}>
+                    Edit Load
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-btn compact-btn"
+                    onClick={() => handleCheckPortHouston(selectedCompletedReviewLoad)}
+                    disabled={portHoustonCheckingLoadId === selectedCompletedReviewLoad.id}
+                  >
+                    {portHoustonCheckingLoadId === selectedCompletedReviewLoad.id ? 'Refreshing EIR...' : 'Refresh OUT EIR / IN EIR'}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn compact-btn"
+                    onClick={() => openCompletedLoadEditor(selectedCompletedReviewLoad)}
+                  >
                     Edit Load
                   </button>
                   <button

@@ -40,6 +40,34 @@ const dbRun = (db, sql, params = []) => new Promise((resolve, reject) => {
 
 export default function createDriverSettlementRoutes(db) {
   const router = express.Router();
+
+  router.get('/self', async (req, res) => {
+    try {
+      if (req.user?.role !== 'driver' || !req.user?.driverId) {
+        return res.status(403).json({ error: 'Only driver accounts can view their payments.' });
+      }
+      const rows = await listSettlements(db, req.company.companyId, { driverId: req.user.driverId });
+      res.json(rows);
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  router.get('/self/:id', async (req, res) => {
+    try {
+      if (req.user?.role !== 'driver' || !req.user?.driverId) {
+        return res.status(403).json({ error: 'Only driver accounts can view their payments.' });
+      }
+      const settlement = await getSettlement(db, req.company.companyId, req.params.id);
+      if (!settlement || settlement.driverId !== req.user.driverId) {
+        return res.status(404).json({ error: 'Settlement not found.' });
+      }
+      res.json(settlement);
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
   router.use(requireSettlementAccess);
 
   router.get('/', async (req, res) => {
