@@ -607,6 +607,10 @@ button {
   color: #111827;
 }
 
+.driver-mobile-shell.iphone-driver-shell {
+  padding-top: max(48px, calc(env(safe-area-inset-top, 0px) + 20px)) !important;
+}
+
 .driver-app-header {
   display: flex;
   align-items: flex-start;
@@ -828,6 +832,243 @@ button {
 .driver-load-list {
   display: grid;
   gap: 14px;
+}
+
+.driver-account-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.driver-section-heading,
+.driver-profile-hero,
+.driver-payment-summary,
+.driver-payment-details > div,
+.driver-profile-documents button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.driver-section-heading {
+  padding: 2px 2px 0;
+}
+
+.driver-section-heading span,
+.driver-profile-hero span,
+.driver-profile-grid span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.driver-section-heading strong,
+.driver-profile-hero strong {
+  display: block;
+  color: #0f172a;
+  font-size: 19px;
+}
+
+.driver-section-heading button {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  color: #1d4ed8;
+  font-weight: 800;
+}
+
+.driver-panel-status {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.driver-payment-list,
+.driver-profile-documents {
+  display: grid;
+  gap: 10px;
+}
+
+.driver-payment-card,
+.driver-profile-hero,
+.driver-profile-grid,
+.driver-profile-upload,
+.driver-profile-documents {
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.driver-payment-summary {
+  width: 100%;
+  padding: 16px;
+  border: 0;
+  background: transparent;
+  color: #0f172a;
+  text-align: left;
+}
+
+.driver-payment-summary small,
+.driver-payment-summary strong {
+  display: block;
+}
+
+.driver-payment-summary small {
+  color: #64748b;
+}
+
+.driver-payment-summary b {
+  color: #166534;
+  font-size: 19px;
+}
+
+.driver-payment-details {
+  padding: 0 16px 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.driver-payment-details > div {
+  padding: 9px 0;
+  color: #475569;
+}
+
+.driver-payment-details .driver-payment-net {
+  margin-top: 3px;
+  border-top: 1px solid #cbd5e1;
+  color: #0f172a;
+  font-size: 17px;
+}
+
+.driver-payment-details h3 {
+  margin: 12px 0 2px;
+  font-size: 14px;
+}
+
+.driver-payment-details .driver-payment-load {
+  font-size: 13px;
+}
+
+.driver-payment-load.deduction strong {
+  color: #b91c1c;
+}
+
+.driver-profile-hero {
+  justify-content: flex-start;
+  padding: 16px;
+}
+
+.driver-profile-hero p {
+  margin: 2px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.driver-profile-avatar {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 16px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.driver-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  background: #e2e8f0;
+}
+
+.driver-profile-grid > div {
+  min-width: 0;
+  padding: 13px;
+  background: #fff;
+}
+
+.driver-profile-grid strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.driver-profile-upload {
+  display: grid;
+  gap: 10px;
+  padding: 15px;
+}
+
+.driver-profile-upload select,
+.driver-profile-file {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fff;
+  color: #0f172a;
+}
+
+.driver-profile-file {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-weight: 700;
+}
+
+.driver-profile-file input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.driver-profile-documents {
+  padding: 10px;
+}
+
+.driver-profile-documents > p {
+  margin: 6px;
+  color: #64748b;
+  text-align: center;
+}
+
+.driver-profile-documents button {
+  width: 100%;
+  padding: 11px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  color: #0f172a;
+  text-align: left;
+}
+
+.driver-profile-documents button strong,
+.driver-profile-documents button small {
+  display: block;
+}
+
+.driver-profile-documents button small {
+  max-width: 220px;
+  overflow: hidden;
+  color: #64748b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.driver-profile-documents button b {
+  color: #2563eb;
 }
 
 .driver-load-card,
@@ -5719,4 +5960,40 @@ button:disabled {
   .settlement-note-save {
     width: 100%;
   }
+}
+.ready-pickup-panel {
+  margin: 18px;
+}
+
+.move-assignment-fields {
+  display: grid;
+  gap: 8px;
+  min-width: 190px;
+}
+
+.settlement-move-pay-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(120px, 180px) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.settlement-move-pay-row > div {
+  display: grid;
+  gap: 4px;
+}
+
+.settlement-move-pay-row span,
+.settlement-move-pay-row small {
+  color: #64748b;
+}
+
+@media (max-width: 760px) {
+  .ready-pickup-panel { margin: 10px; }
+  .settlement-move-pay-row { grid-template-columns: 1fr; }
 }

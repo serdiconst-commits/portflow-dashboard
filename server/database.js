@@ -69,6 +69,22 @@ db.run(`
   ON driver_locations(companyId, updatedAt)
 `);
 db.run(`
+  CREATE TABLE IF NOT EXISTS driver_documents (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    driverId TEXT NOT NULL,
+    type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    filePath TEXT NOT NULL,
+    mimeType TEXT,
+    uploadedAt TEXT NOT NULL
+  )
+`);
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_driver_documents_company_driver
+  ON driver_documents(companyId, driverId, uploadedAt)
+`);
+db.run(`
   CREATE TABLE IF NOT EXISTS fuel_transactions (
     id TEXT PRIMARY KEY,
     companyId TEXT NOT NULL,
@@ -440,6 +456,7 @@ db.run(`
   pickup TEXT,
   delivery TEXT,
   deliveryType TEXT,
+  workflowType TEXT,
   appointmentTime TEXT,
   eta TEXT,
   returnLocation TEXT,
@@ -575,6 +592,11 @@ db.run(`ALTER TABLE loads ADD COLUMN customerExtraChargesJson TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN deliveryType TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding deliveryType column:', err.message);
+  }
+});
+db.run(`ALTER TABLE loads ADD COLUMN workflowType TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding workflowType column:', err.message);
   }
 });
 db.run(`ALTER TABLE loads ADD COLUMN nextMoveType TEXT`, (err) => {
@@ -714,6 +736,39 @@ db.run(`
     }
   });
 });
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS load_moves (
+    id TEXT PRIMARY KEY,
+    companyId TEXT NOT NULL,
+    loadId TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    moveType TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Planned',
+    origin TEXT,
+    destination TEXT,
+    driverId TEXT,
+    driverRate TEXT,
+    assignedAt TEXT,
+    startedAt TEXT,
+    completedAt TEXT,
+    completedBy TEXT,
+    readyAt TEXT,
+    notes TEXT,
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL,
+    UNIQUE(companyId, loadId, sequence),
+    FOREIGN KEY (loadId) REFERENCES loads(id) ON DELETE CASCADE
+  )
+`);
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_load_moves_company_load
+  ON load_moves(companyId, loadId, sequence)
+`);
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_load_moves_driver_status
+  ON load_moves(companyId, driverId, status)
+`);
 
 db.run(`
   CREATE TABLE IF NOT EXISTS settlements (
