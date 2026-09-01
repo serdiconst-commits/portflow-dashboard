@@ -4996,27 +4996,45 @@ const selectedPickupReturnMove = (selectedLoad?.moves || []).find(
     ['Waiting Customer', 'Ready for Pickup'].includes(move.status)
 );
 
-const openReadyPickupModal = () => {
-  if (!selectedPickupReturnMove) {
-    alert('The pickup movement is not available for this load yet.');
-    return;
-  }
+const openReadyPickupModal = async () => {
+  let pickupMove = selectedPickupReturnMove;
+  try {
+    if (!pickupMove) {
+      const res = await fetch(`${API_BASE}/api/loads/${selectedLoad.id}/pickup-return`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to prepare the pickup movement.');
+      pickupMove = data;
+      const addPickupMove = (load) => ({
+        ...load,
+        moves: [...(load.moves || []).filter((move) => move.id !== pickupMove.id), pickupMove]
+          .sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0)),
+      });
+      setSelectedLoad((prev) => (prev?.id === selectedLoad.id ? addPickupMove(prev) : prev));
+      setLoadsData((prev) => prev.map((load) => (load.id === selectedLoad.id ? addPickupMove(load) : load)));
+    }
+
   setMoveAssignmentDrafts((prev) => ({
     ...prev,
-    [selectedPickupReturnMove.id]: {
-      ...(prev[selectedPickupReturnMove.id] || {}),
+    [pickupMove.id]: {
+      ...(prev[pickupMove.id] || {}),
       returnLocation:
-        prev[selectedPickupReturnMove.id]?.returnLocation ??
-        selectedPickupReturnMove.destination ??
+        prev[pickupMove.id]?.returnLocation ??
+        pickupMove.destination ??
         selectedLoad?.returnLocation ??
         '',
       driverRate:
-        prev[selectedPickupReturnMove.id]?.driverRate ??
-        selectedPickupReturnMove.driverRate ??
+        prev[pickupMove.id]?.driverRate ??
+        pickupMove.driverRate ??
         '',
     },
   }));
   setReadyPickupOpen(true);
+  } catch (error) {
+    alert(error.message);
+  }
 };
 
 const markMoveReadyForPickup = async (moveId) => {
@@ -13669,9 +13687,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         </div>
                       </div>
 
-                      {selectedLoad.workflowType === 'DROP_AND_PICK' &&
-                        getLoadQuickStatusKey(selectedLoad) === 'dropped' &&
-                        selectedPickupReturnMove && (
+                      {String(selectedLoad.workflowType || '').trim().toUpperCase() === 'DROP_AND_PICK' &&
+                        getLoadQuickStatusKey(selectedLoad) === 'dropped' && (
                           <section className="ready-pickup-callout">
                             <div>
                               <span>Container dropped</span>

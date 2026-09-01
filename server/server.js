@@ -4593,6 +4593,100 @@ app.put('/api/loads/:id/locations', authenticate, (req, res) => {
   });
 });
 
+app.post('/api/loads/:id/pickup-return', authenticate, requireRoles(dispatchLocationRoles), (req, res) => {
+  const companyId = req.company.companyId;
+  const loadId = String(req.params.id || '').trim();
+
+  db.get(
+    `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
+    [loadId, companyId],
+    (loadErr, load) => {
+      if (loadErr) return res.status(500).json({ error: loadErr.message });
+      if (!load) return res.status(404).json({ error: 'Load not found.' });
+      if (
+        normalizeLoadWorkflow(load.workflowType) !== 'DROP_AND_PICK' ||
+        String(load.status || '').trim().toLowerCase() !== 'dropped'
+      ) {
+        return res.status(409).json({ error: 'This load is not a dropped Drop & Pick container.' });
+      }
+
+      db.get(
+        `SELECT * FROM load_moves
+         WHERE companyId = ? AND loadId = ? AND moveType = 'PICKUP_RETURN'
+         ORDER BY sequence DESC LIMIT 1`,
+        [companyId, loadId],
+        (moveErr, existingMove) => {
+          if (moveErr) return res.status(500).json({ error: moveErr.message });
+          if (existingMove) {
+            if (!['Waiting Customer', 'Ready for Pickup'].includes(existingMove.status)) {
+              return res.status(409).json({ error: 'The pickup movement has already advanced beyond Ready for Pickup.' });
+            }
+            return res.json(existingMove);
+          }
+
+          db.get(
+            `SELECT COALESCE(MAX(sequence), 0) AS lastSequence
+             FROM load_moves WHERE companyId = ? AND loadId = ?`,
+            [companyId, loadId],
+            (sequenceErr, row) => {
+              if (sequenceErr) return res.status(500).json({ error: sequenceErr.message });
+              const now = new Date().toISOString();
+              const move = {
+                id: uuidv4(),
+                companyId,
+                loadId,
+                sequence: (Number(row?.lastSequence) || 0) + 1,
+                moveType: 'PICKUP_RETURN',
+                status: 'Waiting Customer',
+                origin: String(load.dropLocation || load.delivery || '').trim(),
+                destination: String(load.returnLocation || '').trim(),
+                driverId: '',
+                driverRate: '',
+                assignedAt: '',
+                startedAt: '',
+                completedAt: '',
+                completedBy: '',
+                readyAt: '',
+                notes: '',
+                createdAt: now,
+                updatedAt: now,
+              };
+
+              db.run(
+                `INSERT INTO load_moves (
+                  id, companyId, loadId, sequence, moveType, status, origin, destination,
+                  driverId, driverRate, assignedAt, startedAt, completedAt, completedBy,
+                  readyAt, notes, createdAt, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', '', '', '', '', ?, ?)`,
+                [
+                  move.id, companyId, loadId, move.sequence, move.moveType, move.status,
+                  move.origin, move.destination, now, now,
+                ],
+                (insertErr) => {
+                  if (insertErr) return res.status(500).json({ error: insertErr.message });
+                  writeAuditLog(req, {
+                    action: 'MOVE_PLAN_REPAIRED',
+                    entityType: 'LOAD_MOVE',
+                    entityId: move.id,
+                    entityLabel: load.containerNumber || loadId,
+                    newValue: {
+                      moveType: move.moveType,
+                      status: move.status,
+                      origin: move.origin,
+                      destination: move.destination,
+                    },
+                  });
+                  res.status(201).json(move);
+                }
+              );
+            }
+          );
+        }
+      );
+    }
+  );
+});
+
 app.put('/api/load-moves/:id/ready', authenticate, requireRoles(dispatchLocationRoles), (req, res) => {
   const companyId = req.company.companyId;
   const moveId = String(req.params.id || '').trim();
