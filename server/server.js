@@ -4090,6 +4090,12 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
         return res.status(404).json({ error: 'Load not found' });
       }
 
+      const nextWorkflowType = normalizeLoadWorkflow(l.workflowType || existingLoad.workflowType);
+      const nextDropLocation = String(l.dropLocation ?? existingLoad.dropLocation ?? '').trim();
+      if (nextWorkflowType === 'PRE_PULL_LIVE' && !nextDropLocation) {
+        return res.status(400).json({ error: 'Choose the main yard / pre-pull drop location.' });
+      }
+
       normalizeDriverAssignment(companyId, l.driver, (driverErr, normalizedDriver) => {
         if (driverErr) {
           console.error('Error normalizing driver:', driverErr.message);
@@ -4098,7 +4104,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
 
         if (
           normalizedDriver &&
-          normalizeLoadWorkflow(l.workflowType || existingLoad.workflowType) === 'DROP_AND_PICK' &&
+          nextWorkflowType === 'DROP_AND_PICK' &&
           String(existingLoad.status || '').trim().toLowerCase() === 'dropped'
         ) {
           return res.status(409).json({
@@ -4179,7 +4185,7 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           l.pickup || '',
           l.delivery || '',
           l.deliveryType || '',
-          l.workflowType || existingLoad.workflowType || 'LIVE_DELIVERY',
+          nextWorkflowType,
           l.appointmentTime || '',
           l.eta || '',
           l.returnLocation || '',
@@ -4255,7 +4261,20 @@ console.log('LOAD AFTER UPDATE =', updatedLoad);
                 });
               }
 
-              res.json(updatedLoad);
+              syncLoadMoves(updatedLoad, (moveErr) => {
+                if (moveErr) {
+                  console.error('Error syncing load moves after workflow edit:', moveErr.message);
+                  return res.status(500).json({ error: 'Load updated, but its movement plan could not be saved.' });
+                }
+
+                attachMovesToLoads([updatedLoad], (attachErr, rows) => {
+                  if (attachErr) {
+                    console.error('Error reading load moves after workflow edit:', attachErr.message);
+                    return res.status(500).json({ error: 'Load updated, but its movement plan could not be read.' });
+                  }
+                  res.json(rows[0]);
+                });
+              });
             }
           );
         }

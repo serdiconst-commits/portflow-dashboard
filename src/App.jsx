@@ -5584,13 +5584,22 @@ const handleUpdateLoad = async (e) => {
 
   const previousWorkflow = selectedLoad?.workflowType || 'LIVE_DELIVERY';
   const workflowChanged = previousWorkflow !== (editingLoad.workflowType || 'LIVE_DELIVERY');
-  const movementAlreadyStarted = ['in transit', 'arrived at pickup', 'loaded'].includes(
-    String(selectedLoad?.status || '').trim().toLowerCase()
+  const protectedMoveStatuses = new Set([
+    'assigned',
+    'arrived at pickup',
+    'loaded',
+    'in transit',
+    'completed',
+    'ready for pickup',
+  ]);
+  const movementPlanAlreadyExists = Boolean(String(selectedLoad?.driver || '').trim()) || (
+    Array.isArray(selectedLoad?.moves) &&
+    selectedLoad.moves.some((move) => protectedMoveStatuses.has(String(move?.status || '').trim().toLowerCase()))
   );
   if (
     workflowChanged &&
-    movementAlreadyStarted &&
-    !window.confirm('This movement has already started. Change only the remaining movement plan and preserve the completed history?')
+    movementPlanAlreadyExists &&
+    !window.confirm('This load already has a driver or movement history. Change the remaining movement plan and preserve completed history?')
   ) {
     return;
   }
@@ -10686,6 +10695,14 @@ const renderDriverLoadCard = (load) => {
             <strong>-</strong>
           )}
         </div>
+        {load.returnLocation && !requiresDropAction && !isPickupReturnMove && (
+          <div className="driver-info-item wide">
+            <span>Return Location</span>
+            <a href={getGoogleMapsLink(load.returnLocation)} target="_blank" rel="noopener noreferrer">
+              {load.returnLocation}
+            </a>
+          </div>
+        )}
         <div className="driver-info-item">
           <span>Appointment</span>
           <strong>{formatAppointmentTime(isHookMoveActive(load) ? load.hookReadyAt || load.appointmentTime : load.appointmentTime)}</strong>
@@ -10733,17 +10750,6 @@ const renderDriverLoadCard = (load) => {
           <strong>{load.returnNumber || '-'}</strong>
         </div>
       </div>
-
-      {load.returnLocation && (!isDropHookLoad(load) || isHookMoveActive(load)) && (
-        <a
-          className="driver-map-link"
-          href={getGoogleMapsLink(load.returnLocation)}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Open return location
-        </a>
-      )}
 
       <div className="driver-container-update">
         <label htmlFor={`container-${load.id}`}>Container Number</label>
@@ -16841,21 +16847,6 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     {parseCustomerExtraCharges(selectedCompletedReviewLoad).length > 0 ? 'Edit Charges' : 'Add Charges'}
                   </button>
                   <button type="button" className="secondary-btn compact-btn" onClick={() => openCompletedLoadEditor(selectedCompletedReviewLoad)}>
-                    Edit Load
-                  </button>
-                  <button
-                    type="button"
-                    className="primary-btn compact-btn"
-                    onClick={() => handleCheckPortHouston(selectedCompletedReviewLoad)}
-                    disabled={portHoustonCheckingLoadId === selectedCompletedReviewLoad.id}
-                  >
-                    {portHoustonCheckingLoadId === selectedCompletedReviewLoad.id ? 'Refreshing EIR...' : 'Refresh OUT EIR / IN EIR'}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-btn compact-btn"
-                    onClick={() => openCompletedLoadEditor(selectedCompletedReviewLoad)}
-                  >
                     Edit Load
                   </button>
                   <button
