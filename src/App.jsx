@@ -13693,7 +13693,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <div>
                               <span>Container dropped</span>
                               <strong>{selectedLoad.containerNumber || selectedLoad.id}</strong>
-                              <p>{selectedPickupReturnMove.origin || selectedLoad.dropLocation || selectedLoad.delivery}</p>
+                              <p>{selectedPickupReturnMove?.origin || selectedLoad.dropLocation || selectedLoad.delivery}</p>
                             </div>
                             <button type="button" className="primary-btn" onClick={openReadyPickupModal}>
                               Ready for Pickup
