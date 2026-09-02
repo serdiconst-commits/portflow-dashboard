@@ -50,6 +50,12 @@ services:
         value: "15"
       - key: PORT_HOUSTON_AUTO_AVAILABILITY_BATCH_SIZE
         value: "100"
+      - key: PORT_HOUSTON_AUTO_EIR_ENABLED
+        value: "true"
+      - key: PORT_HOUSTON_AUTO_EIR_INTERVAL_MINUTES
+        value: "15"
+      - key: PORT_HOUSTON_AUTO_EIR_BATCH_SIZE
+        value: "100"
       - key: RESEND_API_KEY
         sync: false
       - key: DRIVER_COMPLIANCE_FROM_EMAIL

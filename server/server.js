@@ -1430,6 +1430,131 @@ const startAutomaticPortHoustonAvailabilityChecks = () => {
   setInterval(runAutomaticPortHoustonAvailabilityCheck, intervalMs);
 };
 
+const autoEirEnabled =
+  String(process.env.PORT_HOUSTON_AUTO_EIR_ENABLED || '').trim().toLowerCase() === 'true';
+const autoEirIntervalMinutes = Math.max(
+  5,
+  Number.parseInt(process.env.PORT_HOUSTON_AUTO_EIR_INTERVAL_MINUTES || '15', 10) || 15
+);
+const autoEirBatchSize = Math.max(
+  1,
+  Number.parseInt(process.env.PORT_HOUSTON_AUTO_EIR_BATCH_SIZE || '100', 10) || 100
+);
+let autoEirCheckRunning = false;
+let autoEirOffset = 0;
+
+const queryLoadsForAutomaticEirCheck = (offset) =>
+  new Promise((resolve, reject) => {
+    db.all(
+      `SELECT l.*
+       FROM loads l
+       WHERE TRIM(COALESCE(l.containerNumber, '')) <> ''
+         AND EXISTS (
+           SELECT 1 FROM companies c
+           WHERE c.id = l.companyId
+             AND (
+               TRIM(COALESCE(c.portHoustonUsername, '')) <> ''
+               OR TRIM(COALESCE(c.portHoustonCredentialsJson, '')) <> ''
+             )
+         )
+         AND (
+           NOT EXISTS (
+             SELECT 1 FROM documents d
+             WHERE d.loadId = l.id
+               AND UPPER(TRIM(COALESCE(d.category, ''))) = 'IN EIR'
+           )
+           OR NOT EXISTS (
+             SELECT 1 FROM documents d
+             WHERE d.loadId = l.id
+               AND UPPER(TRIM(COALESCE(d.category, ''))) = 'OUT EIR'
+           )
+         )
+       ORDER BY COALESCE(l.loadDate, '') DESC, l.id DESC
+       LIMIT ? OFFSET ?`,
+      [autoEirBatchSize, offset],
+      (err, rows) => (err ? reject(err) : resolve(rows || []))
+    );
+  });
+
+const getLoadsForAutomaticEirCheck = async () => {
+  let loads = await queryLoadsForAutomaticEirCheck(autoEirOffset);
+  if (!loads.length && autoEirOffset > 0) {
+    autoEirOffset = 0;
+    loads = await queryLoadsForAutomaticEirCheck(0);
+  }
+  autoEirOffset = loads.length < autoEirBatchSize ? 0 : autoEirOffset + loads.length;
+  return loads;
+};
+
+const runAutomaticPortHoustonEirCheck = async () => {
+  if (!autoEirEnabled || autoEirCheckRunning) return;
+  autoEirCheckRunning = true;
+
+  try {
+    const loads = await getLoadsForAutomaticEirCheck();
+    let saved = 0;
+
+    for (const load of loads) {
+      const containerNumber = String(load.containerNumber || '').trim().toUpperCase();
+      const facility = getLoadPortHoustonFacility(load);
+      try {
+        const credentials = await getCompanyPortHoustonCredentials(load.companyId, facility);
+        const gateHistory = await getGateHistory(containerNumber, credentials, facility);
+        const transactionNumbers = extractGateTransactionNumbersFromHistory(gateHistory);
+        if (!transactionNumbers.length) continue;
+
+        const gateTransactions = await getGateTransactionsByNumbers(
+          transactionNumbers,
+          credentials,
+          facility
+        );
+
+        for (const transaction of gateTransactions.transactions || []) {
+          if (String(transaction.status || '').trim().toUpperCase() !== 'COMPLETE') continue;
+          const category = getPortHoustonEirCategory(transaction);
+          const transactionId = getPortHoustonTransactionId(transaction);
+          if (!category || !transactionId || transaction.hasDocuments !== true) continue;
+
+          const document = await downloadGateTransactionDocument(transactionId, credentials);
+          const savedDocument = await ensureDownloadedPortHoustonDocument({
+            loadId: load.id,
+            companyId: load.companyId,
+            category,
+            transaction,
+            document,
+          });
+          if (savedDocument) saved += 1;
+        }
+      } catch (error) {
+        console.error(
+          `[port-houston-auto-eir] ${containerNumber || load.id}: ${error.message}`
+        );
+      }
+    }
+
+    console.log(
+      `[port-houston-auto-eir] Checked ${loads.length} load(s); synced ${saved} EIR document(s).`
+    );
+  } catch (error) {
+    console.error('[port-houston-auto-eir] Check failed:', error.message);
+  } finally {
+    autoEirCheckRunning = false;
+  }
+};
+
+const startAutomaticPortHoustonEirChecks = () => {
+  if (!autoEirEnabled) {
+    console.log('[port-houston-auto-eir] Disabled.');
+    return;
+  }
+  const intervalMs = autoEirIntervalMinutes * 60 * 1000;
+  console.log(
+    `[port-houston-auto-eir] Enabled every ${autoEirIntervalMinutes} minute(s), up to ${autoEirBatchSize} load(s) per run.`
+  );
+  setTimeout(runAutomaticPortHoustonEirCheck, 30_000);
+  setInterval(runAutomaticPortHoustonEirCheck, intervalMs);
+};
+
 const getAuditAccessFilter = (role) => {
   const normalizedRole = normalizeRole(role);
   if (adminRoles.has(normalizedRole)) return { clause: '', params: [] };
@@ -6577,5 +6702,6 @@ if (isProduction) {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
   startAutomaticPortHoustonAvailabilityChecks();
+  startAutomaticPortHoustonEirChecks();
   startDriverExpirationReminderChecks(db);
 });
