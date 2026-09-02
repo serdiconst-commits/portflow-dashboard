@@ -6279,9 +6279,14 @@ const updateCurrentMoveForLoadStatus = (req, loadId, status, callback) => {
             (nextErr, nextMove) => {
               if (nextErr) return callback(nextErr);
               const waitingForCustomer = nextMove?.status === 'Waiting Customer';
+              const nextLoadStatus = status === 'Delivered'
+                ? 'Delivered'
+                : waitingForCustomer
+                  ? 'Dropped'
+                  : (nextMove ? 'Pending' : status);
               db.run(
                 `UPDATE loads SET driver = '', truck = '', status = ? WHERE id = ? AND companyId = ?`,
-                [waitingForCustomer ? 'Dropped' : (nextMove ? 'Pending' : status), loadId, companyId],
+                [nextLoadStatus, loadId, companyId],
                 (loadErr) => callback(loadErr || null)
               );
             }
