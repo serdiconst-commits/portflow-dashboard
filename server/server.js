@@ -1660,6 +1660,7 @@ app.post('/api/port-houston/eir-upload', requirePortHoustonInternalToken, upload
   try {
     const load = await findLoadForPortHoustonMapping(mapping);
     if (!load) {
+      fs.unlink(req.file.path, () => {});
       return res.status(404).json({
         ok: false,
         error: 'No matching load found for EIR upload.',
@@ -1670,8 +1671,25 @@ app.post('/api/port-houston/eir-upload', requirePortHoustonInternalToken, upload
     const id = uuidv4();
     const uploadedAt = new Date().toISOString();
     const savedPath = req.file.path;
-    const savedName = req.file.originalname || `${category.replace(/\s+/g, '-').toLowerCase()}-${id}.pdf`;
+    const transactionNumber = String(req.body.transactionNumber || req.body.transactionGkey || '').trim();
+    const savedName = req.file.originalname || `${category.replace(/\s+/g, '-').toLowerCase()}-${transactionNumber || id}.pdf`;
     const size = `${(fs.statSync(savedPath).size / 1024).toFixed(1)} KB`;
+
+    if (transactionNumber) {
+      const existing = await new Promise((resolve, reject) => {
+        db.get(
+          `SELECT * FROM documents
+           WHERE loadId = ? AND category = ? AND name LIKE ?
+           ORDER BY uploadedAt DESC LIMIT 1`,
+          [load.id, category, `%${transactionNumber}%`],
+          (err, row) => (err ? reject(err) : resolve(row || null))
+        );
+      });
+      if (existing) {
+        fs.unlink(savedPath, () => {});
+        return res.json({ ok: true, duplicate: true, document: existing });
+      }
+    }
 
     await new Promise((resolve, reject) => {
       db.run(

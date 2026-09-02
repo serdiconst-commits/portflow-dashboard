@@ -14,8 +14,8 @@ export const getEirCategoryFromSubType = (
   subType: unknown,
 ): "IN EIR" | "OUT EIR" | "" => {
   const normalized = normalize(subType).toUpperCase();
-  if (["RI", "RM", "DE", "RC", "RB"].includes(normalized)) return "IN EIR";
-  if (["RO", "DM", "DI", "RE"].includes(normalized)) return "OUT EIR";
+  if (["RM", "DE"].includes(normalized)) return "IN EIR";
+  if (["DI", "RE"].includes(normalized)) return "OUT EIR";
   return "";
 };
 
@@ -25,10 +25,10 @@ export const getShipmentStatusFromTransaction = (
   const subType = normalize(transaction.subType).toUpperCase();
   const stageId = normalize(transaction.stageId).toLowerCase();
 
-  if (subType === "RO" || subType === "DM" || stageId.includes("outgate")) {
+  if (subType === "DI" || subType === "RE" || stageId.includes("outgate")) {
     return "Picked Up";
   }
-  if (subType === "RI" || stageId.includes("ingate")) {
+  if (subType === "DE" || subType === "RM" || stageId.includes("ingate")) {
     return "At Port";
   }
   return "Dispatched";

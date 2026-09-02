@@ -16,6 +16,8 @@ import type { JsonObject, TruckTransactionPayload } from "../types.js";
 const router = express.Router();
 
 const normalize = (value: unknown) => String(value || "").trim();
+const wait = (milliseconds: number) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const getWebhookSecret = () => process.env.PORT_HOUSTON_WEBHOOK_SECRET || "";
 
@@ -134,10 +136,21 @@ const handleTruckTransaction = async (event: TruckTransactionPayload) => {
     };
   }
 
-  const document = await downloadEirDocument(
-    transactionId,
-    normalize(transaction.subType),
-  );
+  let document;
+  let lastError: unknown;
+  for (const delay of [0, 5_000, 15_000, 30_000]) {
+    if (delay) await wait(delay);
+    try {
+      document = await downloadEirDocument(
+        transactionId,
+        normalize(transaction.subType),
+      );
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (!document) throw lastError;
   const eirUpload = await uploadEirToTms(mapping, document);
 
   return {
@@ -167,33 +180,32 @@ router.post("/webhook/porthouston", async (req, res) => {
 
   const events = collectEvents(req.body);
   console.log(`[porthouston-webhook] Received ${events.length} event(s).`);
+  res.status(202).json({ ok: true, accepted: events.length });
 
-  const results = [];
-  for (const event of events) {
-    try {
-      console.log("[porthouston-webhook] Event audit:", JSON.stringify(event));
+  void (async () => {
+    for (const event of events) {
+      try {
+        console.log("[porthouston-webhook] Event audit:", JSON.stringify(event));
 
-      if (isTruckTransactionEvent(event)) {
-        results.push(
-          await handleTruckTransaction(event as TruckTransactionPayload),
-        );
-        continue;
+        if (isTruckTransactionEvent(event)) {
+          await handleTruckTransaction(event as TruckTransactionPayload);
+          continue;
+        }
+
+        if (isSslHoldEvent(event)) {
+          await handleSslHold(event);
+          continue;
+        }
+
+        console.log("[porthouston-webhook] Event skipped.", {
+          type: getEventName(event) || "Unknown",
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[porthouston-webhook] Event handling failed:", message);
       }
-
-      if (isSslHoldEvent(event)) {
-        results.push(await handleSslHold(event));
-        continue;
-      }
-
-      results.push({ type: getEventName(event) || "Unknown", skipped: true });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("[porthouston-webhook] Event handling failed:", message);
-      results.push({ ok: false, error: message });
     }
-  }
-
-  res.json({ ok: true, processed: results.length, results });
+  })();
 });
 
 router.post("/subscriptions/default", async (_req, res) => {
