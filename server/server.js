@@ -1501,13 +1501,15 @@ const runAutomaticPortHoustonEirCheck = async () => {
         const credentials = await getCompanyPortHoustonCredentials(load.companyId, facility);
         const gateHistory = await getGateHistory(containerNumber, credentials, facility);
         const transactionNumbers = extractGateTransactionNumbersFromHistory(gateHistory);
-        if (!transactionNumbers.length) continue;
 
-        const gateTransactions = await getGateTransactionsByNumbers(
-          transactionNumbers,
+        const containerGateTransactions = await getGateTransactionsByContainer(
+          containerNumber,
           credentials,
           facility
         );
+        const gateTransactions = containerGateTransactions.transactions?.length
+          ? containerGateTransactions
+          : await getGateTransactionsByNumbers(transactionNumbers, credentials, facility);
 
         for (const transaction of gateTransactions.transactions || []) {
           if (String(transaction.status || '').trim().toUpperCase() !== 'COMPLETE') continue;
