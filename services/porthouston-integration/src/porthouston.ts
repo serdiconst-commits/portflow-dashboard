@@ -16,6 +16,11 @@ const TOKEN_REFRESH_SAFETY_MS = 60_000;
 const REQUEST_RETRY_COUNT = 2;
 
 const getEnv = (key: string, fallback = "") => process.env[key] || fallback;
+const normalizeCredentialValue = (value = "") => {
+  const trimmed = String(value || "").trim();
+  const quoteMatch = trimmed.match(/^(['"])(.*)\1$/);
+  return quoteMatch ? quoteMatch[2].trim() : trimmed;
+};
 
 const normalizeBaseUrl = (url: string) => (url.endsWith("/") ? url : `${url}/`);
 
@@ -53,8 +58,10 @@ const client: AxiosInstance = axios.create({
 let tokenState: TokenState | null = null;
 
 const getCredentials = () => {
-  const clientId = getEnv("PORT_HOUSTON_CLIENT_ID");
-  const clientSecret = getEnv("PORT_HOUSTON_CLIENT_SECRET");
+  const clientId = normalizeCredentialValue(getEnv("PORT_HOUSTON_CLIENT_ID"));
+  const clientSecret = normalizeCredentialValue(
+    getEnv("PORT_HOUSTON_CLIENT_SECRET"),
+  );
 
   if (!clientId || !clientSecret) {
     throw new Error(
@@ -91,53 +98,58 @@ export async function authenticate(forceRefresh = false): Promise<string> {
 
   const { clientId, clientSecret } = getCredentials();
   const authUrl = getEnv("PORT_HOUSTON_AUTH_URL", getDefaultAuthUrl());
-  const form = new URLSearchParams({
-    grant_type: "client_credentials",
-    client_id: clientId,
-    client_secret: clientSecret,
-  });
-
-  try {
-    const response = await axios.post<JsonObject>(authUrl, form.toString(), {
-      timeout: 30_000,
+  const attempts: Array<{
+    method: string;
+    headers: Record<string, string>;
+    body: URLSearchParams;
+  }> = [
+    {
+      method: "form body",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+    },
+    {
+      method: "basic auth",
       headers: {
-        Accept: "application/json",
+        Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
+      body: new URLSearchParams({ grant_type: "client_credentials" }),
+    },
+  ];
+
+  const failures = [];
+  for (const attempt of attempts) {
+    const response = await fetch(authUrl, {
+      method: "POST",
+      headers: { Accept: "application/json", ...attempt.headers },
+      body: attempt.body,
+      signal: AbortSignal.timeout(30_000),
     });
-
-    const accessToken = getAccessTokenFromResponse(response.data);
-    const expiresIn = parseExpiresIn(response.data.expires_in);
-    tokenState = {
-      accessToken,
-      expiresAt: Date.now() + expiresIn * 1000,
-    };
-    return accessToken;
-  } catch {
-    const response = await axios.post<JsonObject>(
-      authUrl,
-      new URLSearchParams({ grant_type: "client_credentials" }).toString(),
-      {
-        timeout: 30_000,
-        auth: {
-          username: clientId,
-          password: clientSecret,
-        },
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-      },
-    );
-
-    const accessToken = getAccessTokenFromResponse(response.data);
-    const expiresIn = parseExpiresIn(response.data.expires_in);
-    tokenState = {
-      accessToken,
-      expiresAt: Date.now() + expiresIn * 1000,
-    };
-    return accessToken;
+    const data = (await response.json().catch(() => ({}))) as JsonObject;
+    if (response.ok && data.access_token) {
+      const accessToken = getAccessTokenFromResponse(data);
+      const expiresIn = parseExpiresIn(data.expires_in);
+      tokenState = {
+        accessToken,
+        expiresAt: Date.now() + expiresIn * 1000,
+      };
+      return accessToken;
+    }
+    failures.push({
+      method: attempt.method,
+      status: response.status,
+      error: String(data.error || ""),
+    });
   }
+
+  throw new Error(
+    `Port Houston authentication failed: ${JSON.stringify(failures)}`,
+  );
 }
 
 const requestPortHouston = async <T = unknown>(
