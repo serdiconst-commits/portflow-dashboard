@@ -24,6 +24,19 @@ test('extracts gate transaction nbr from equipment history batch number', () => 
   );
 });
 
+test('ignores non-gate batch numbers from equipment history', () => {
+  assert.deepEqual(
+    extractGateTransactionNumbersFromHistory({
+      events: [
+        { relatedBatchNbr: '167702914', eventTypeId: 'UNIT_CREATE' },
+        { relatedBatchNbr: '170418976', eventTypeId: 'UNIT_VGM_ASSIGNED' },
+        { relatedBatchNbr: null, eventTypeId: 'UNIT_OUT_GATE' },
+      ],
+    }),
+    []
+  );
+});
+
 test('normalizes subtype casing and rejects unknown EIR subtypes', () => {
   assert.equal(getPortHoustonEirCategoryFromSubType(' di '), 'OUT EIR');
   assert.equal(getPortHoustonEirCategoryFromSubType(''), '');

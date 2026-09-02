@@ -679,6 +679,7 @@ const extractTransactionNumbersFromText = (value = '') => {
 export const extractGateTransactionNumbersFromHistory = (gateHistory = {}) => {
   const events = Array.isArray(gateHistory?.events) ? gateHistory.events : [];
   return [...new Set(events.flatMap((event) => [
+    /(?:GATE|DELIVER|RECEIVE)/i.test(String(event.eventTypeId || '')) &&
     /^\d{5,}$/.test(String(event.relatedBatchNbr || '').trim())
       ? String(event.relatedBatchNbr).trim()
       : '',
