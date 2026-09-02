@@ -679,10 +679,13 @@ const extractTransactionNumbersFromText = (value = '') => {
 export const extractGateTransactionNumbersFromHistory = (gateHistory = {}) => {
   const events = Array.isArray(gateHistory?.events) ? gateHistory.events : [];
   return [...new Set(events.flatMap((event) => [
+    /^\d{5,}$/.test(String(event.relatedBatchNbr || '').trim())
+      ? String(event.relatedBatchNbr).trim()
+      : '',
     ...extractTransactionNumbersFromText(event.note),
     ...extractTransactionNumbersFromText(event.eventTypeId),
     ...extractTransactionNumbersFromText(event.relatedEntityId),
-  ]))];
+  ]).filter(Boolean))];
 };
 
 export const getContainerAvailability = async (containerNumber, credentials = {}, facility = '') => {
