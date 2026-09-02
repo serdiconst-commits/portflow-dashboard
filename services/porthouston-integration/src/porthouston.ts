@@ -9,6 +9,7 @@ import type {
   PortHoustonSubscriptionPayload,
   RetrievedEirDocument,
 } from "./types.js";
+import { getEirCategoryFromSubType } from "./tms.js";
 
 const DEFAULT_API_BASE_URL = "https://api.america.naviscloudops.com/v3/";
 const TOKEN_REFRESH_SAFETY_MS = 60_000;
@@ -309,18 +310,16 @@ const getEirDocumentEndpoint = (transactionId: string) => {
   return evpPath(`road/gatetransactions/${encodeURIComponent(transactionId)}/documents`);
 };
 
-const getEirCategory = (subType = ""): "IN EIR" | "OUT EIR" => {
-  const normalized = subType.trim().toUpperCase();
-  return ["RI", "RM", "RE", "RC", "RB"].includes(normalized) ? "IN EIR" : "OUT EIR";
-};
-
 export const downloadEirDocument = async (
   transactionId: string,
   subType = "",
 ): Promise<RetrievedEirDocument> => {
   const endpoint = getEirDocumentEndpoint(transactionId);
   const { data, contentType } = await requestPortHoustonBuffer(endpoint);
-  const category = getEirCategory(subType);
+  const category = getEirCategoryFromSubType(subType);
+  if (!category) {
+    throw new Error(`Unsupported Port Houston EIR subtype: ${subType || "missing"}`);
+  }
   const extension = contentType.includes("image") ? "jpg" : "pdf";
 
   return {

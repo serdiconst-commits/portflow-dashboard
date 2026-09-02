@@ -87,8 +87,15 @@ const ASSOCIATED_EQUIPMENT_FIELDS = [
   'category',
 ].join(',');
 
-const OUT_GATE_SUBTYPES = ['RO', 'DM', 'DI', 'DE'];
-const IN_GATE_SUBTYPES = ['RI', 'RM', 'RE', 'RC', 'RB'];
+export const PORT_HOUSTON_OUT_GATE_SUBTYPES = Object.freeze(['RO', 'DM', 'DI', 'RE']);
+export const PORT_HOUSTON_IN_GATE_SUBTYPES = Object.freeze(['RI', 'RM', 'DE', 'RC', 'RB']);
+
+export const getPortHoustonEirCategoryFromSubType = (value = '') => {
+  const subType = String(value || '').trim().toUpperCase();
+  if (PORT_HOUSTON_IN_GATE_SUBTYPES.includes(subType)) return 'IN EIR';
+  if (PORT_HOUSTON_OUT_GATE_SUBTYPES.includes(subType)) return 'OUT EIR';
+  return '';
+};
 
 const DEFAULT_API_BASE = 'https://api.america.naviscloudops.com/v3/evp';
 const DEFAULT_AUTH_URL =
@@ -628,11 +635,7 @@ const normalizeGateTransaction = (record = {}) => ({
   gkey: getFirstValue(record, ['gkey']),
   nbr: getFirstValue(record, ['nbr']),
   subType: String(getFirstValue(record, ['subType']) || '').trim().toUpperCase(),
-  eirType: IN_GATE_SUBTYPES.includes(String(getFirstValue(record, ['subType']) || '').trim().toUpperCase())
-    ? 'IN EIR'
-    : OUT_GATE_SUBTYPES.includes(String(getFirstValue(record, ['subType']) || '').trim().toUpperCase())
-      ? 'OUT EIR'
-      : '',
+  eirType: getPortHoustonEirCategoryFromSubType(getFirstValue(record, ['subType'])),
   status: getFirstValue(record, ['status']),
   stageId: getFirstValue(record, ['stageId']),
   handled: getFirstValue(record, ['handled']),
@@ -887,11 +890,11 @@ export const getGateTransactionsByContainer = async (containerNumber, credential
   return {
     transactions: sortedTransactions,
     outEirTransaction: sortedTransactions.find((item) =>
-      OUT_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
-    ) || sortedTransactions.find((item) => OUT_GATE_SUBTYPES.includes(item.subType)) || null,
+      PORT_HOUSTON_OUT_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
+    ) || sortedTransactions.find((item) => PORT_HOUSTON_OUT_GATE_SUBTYPES.includes(item.subType)) || null,
     inEirTransaction: sortedTransactions.find((item) =>
-      IN_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
-    ) || sortedTransactions.find((item) => IN_GATE_SUBTYPES.includes(item.subType)) || null,
+      PORT_HOUSTON_IN_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
+    ) || sortedTransactions.find((item) => PORT_HOUSTON_IN_GATE_SUBTYPES.includes(item.subType)) || null,
     lookupMethod,
     requestedContainerNumber: cleanContainer,
     errors: broaderLookupResult.errors || [],
@@ -920,11 +923,11 @@ export const getGateTransactionsByNumbers = async (transactionNumbers = [], cred
   return {
     transactions: sortedTransactions,
     outEirTransaction: sortedTransactions.find((item) =>
-      OUT_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
-    ) || sortedTransactions.find((item) => OUT_GATE_SUBTYPES.includes(item.subType)) || null,
+      PORT_HOUSTON_OUT_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
+    ) || sortedTransactions.find((item) => PORT_HOUSTON_OUT_GATE_SUBTYPES.includes(item.subType)) || null,
     inEirTransaction: sortedTransactions.find((item) =>
-      IN_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
-    ) || sortedTransactions.find((item) => IN_GATE_SUBTYPES.includes(item.subType)) || null,
+      PORT_HOUSTON_IN_GATE_SUBTYPES.includes(item.subType) && item.hasDocuments === true
+    ) || sortedTransactions.find((item) => PORT_HOUSTON_IN_GATE_SUBTYPES.includes(item.subType)) || null,
     lookupMethod: uniqueNumbers.length ? 'nbr' : '',
     requestedTransactionNumbers: uniqueNumbers,
     errors,

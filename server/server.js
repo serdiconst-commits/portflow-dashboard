@@ -149,7 +149,10 @@ import {
   getGateHistory,
   getGateTransactionsByContainer,
   getGateTransactionsByNumbers,
+  getPortHoustonEirCategoryFromSubType,
   getPortHoustonFacilityCode,
+  PORT_HOUSTON_IN_GATE_SUBTYPES,
+  PORT_HOUSTON_OUT_GATE_SUBTYPES,
 } from './integrations/portHouston.js';
 
 const isProduction = process.env.NODE_ENV === 'production' || process.env.APP_ENV === 'production';
@@ -503,15 +506,9 @@ const getPortHoustonTransactionId = (transaction = {}) => {
   return String(safeTransaction.nbr || safeTransaction.gkey || '').trim();
 };
 
-const portHoustonOutGateSubtypes = ['RO', 'DM', 'DI', 'DE'];
-const portHoustonInGateSubtypes = ['RI', 'RM', 'RE', 'RC', 'RB'];
-
 const getPortHoustonEirCategory = (transaction = {}) => {
   const safeTransaction = transaction || {};
-  const subType = String(safeTransaction.subType || '').trim().toUpperCase();
-  if (portHoustonInGateSubtypes.includes(subType)) return 'IN EIR';
-  if (portHoustonOutGateSubtypes.includes(subType)) return 'OUT EIR';
-  return '';
+  return getPortHoustonEirCategoryFromSubType(safeTransaction.subType);
 };
 
 const mergePortHoustonGateTransactions = (...results) => {
@@ -537,8 +534,8 @@ const mergePortHoustonGateTransactions = (...results) => {
 
   return {
     transactions,
-    outEirTransaction: findTransaction(portHoustonOutGateSubtypes),
-    inEirTransaction: findTransaction(portHoustonInGateSubtypes),
+    outEirTransaction: findTransaction(PORT_HOUSTON_OUT_GATE_SUBTYPES),
+    inEirTransaction: findTransaction(PORT_HOUSTON_IN_GATE_SUBTYPES),
     lookupMethod: validResults.map((result) => result.lookupMethod).filter(Boolean).join(' + '),
     errors: validResults.flatMap((result) => result.errors || []),
   };

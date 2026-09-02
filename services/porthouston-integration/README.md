@@ -177,6 +177,8 @@ Endpoint names in this first MVP follow the Port Houston service operation names
 
 Webhook processing maps Port Houston `TruckTransaction` records into Portflow
 shipments using `ctrId` as the container number and `blNbr` as the bill of
-lading. `subType=RI` becomes `IN EIR`; `subType=RO` becomes `OUT EIR`. The
+lading. Port Houston truck-transaction subtypes are classified as follows:
+`DI` and `RE` become `OUT EIR`; `DE` and `RM` become `IN EIR`. Legacy
+subtypes `RO`/`DM` remain `OUT EIR`, while `RI`/`RC`/`RB` remain `IN EIR`. The
 service logs every incoming event for auditing and alerts dispatch when a Unit
 event indicates an SSL hold.
