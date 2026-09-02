@@ -72,7 +72,7 @@ export const buildEirTrackerSubscription = (
       "blNbr",
     ],
     [
-      "subType in (RI, RO, RM, DM, DI, DE, RE, RC, RB)",
+      "subType in (DI, DE, RM, RE)",
       "status=COMPLETE",
       ...(truckingCompanyId ? [`trkcoId=${truckingCompanyId}`] : []),
     ],
