@@ -6426,9 +6426,20 @@ const updateCurrentMoveForLoadStatus = (req, loadId, status, callback) => {
                 : waitingForCustomer
                   ? 'Dropped'
                   : (nextMove ? 'Pending' : status);
+              const releaseAssignment = Boolean(nextMove) && nextLoadStatus !== 'Delivered';
               db.run(
-                `UPDATE loads SET driver = '', truck = '', status = ? WHERE id = ? AND companyId = ?`,
-                [nextLoadStatus, loadId, companyId],
+                `UPDATE loads
+                 SET driver = CASE WHEN ? = 1 THEN '' ELSE driver END,
+                     truck = CASE WHEN ? = 1 THEN '' ELSE truck END,
+                     status = ?
+                 WHERE id = ? AND companyId = ?`,
+                [
+                  releaseAssignment ? 1 : 0,
+                  releaseAssignment ? 1 : 0,
+                  nextLoadStatus,
+                  loadId,
+                  companyId,
+                ],
                 (loadErr) => callback(loadErr || null)
               );
             }
