@@ -273,6 +273,11 @@ db.run(`ALTER TABLE companies ADD COLUMN invoiceAddress TEXT`, (err) => {
     console.error('Error adding invoiceAddress column to companies:', err.message);
   }
 });
+db.run(`ALTER TABLE companies ADD COLUMN invoiceSettingsJson TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding invoiceSettingsJson column to companies:', err.message);
+  }
+});
 db.run(`ALTER TABLE companies ADD COLUMN settlementCompanyName TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding settlementCompanyName column to companies:', err.message);

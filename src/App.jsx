@@ -184,6 +184,18 @@ const staffRoleOptions = [
 ];
 
 const fullAccessRoles = new Set(['admin', 'administrator', 'owner', 'carrier']);
+const defaultInvoiceSettings = {
+  template: 'modern',
+  primaryColor: '#0F2744',
+  accentColor: '#1677FF',
+  paymentTerms: 'Due upon receipt',
+  footerMessage: 'Thank you for your business.',
+  showPoNumber: true,
+  showReferenceNumber: true,
+  showLoadId: true,
+  showRouteDetails: true,
+  showNotes: true,
+};
 const getNormalizedRole = (role) => String(role || '').trim().toLowerCase();
 const isPortFlowOwnerUser = (user = {}) => {
   const safeUser = user || {};
@@ -1446,8 +1458,10 @@ const [invoiceBrandingForm, setInvoiceBrandingForm] = useState({
   invoiceName: savedCompany?.invoiceName || savedCompany?.name || '',
   invoiceAddress: savedCompany?.invoiceAddress || '',
   settlementCompanyName: savedCompany?.settlementCompanyName || savedCompany?.invoiceName || savedCompany?.name || '',
+  invoiceSettings: { ...defaultInvoiceSettings, ...(savedCompany?.invoiceSettings || {}) },
 });
 const [invoiceBrandingStatus, setInvoiceBrandingStatus] = useState('');
+const activeInvoiceSettings = { ...defaultInvoiceSettings, ...(company?.invoiceSettings || {}) };
 const defaultPodSettings = {
   showCompanyInfo: false,
   showCustomerInfo: true,
@@ -1642,8 +1656,9 @@ useEffect(() => {
     invoiceName: company?.invoiceName || company?.name || '',
     invoiceAddress: company?.invoiceAddress || '',
     settlementCompanyName: company?.settlementCompanyName || company?.invoiceName || company?.name || '',
+    invoiceSettings: { ...defaultInvoiceSettings, ...(company?.invoiceSettings || {}) },
   });
-}, [company?.invoiceName, company?.invoiceAddress, company?.settlementCompanyName, company?.name]);
+}, [company?.invoiceName, company?.invoiceAddress, company?.settlementCompanyName, company?.name, company?.invoiceSettings]);
 
 useEffect(() => {
   setPodSettingsForm({
@@ -3561,6 +3576,17 @@ const handleSaveCompanyProfile = async (e) => {
     console.error('Failed to save company profile:', error);
     setCompanyProfileStatus(`Failed to save company profile: ${error.message}`);
   }
+};
+
+const updateInvoiceSetting = (field, value) => {
+  setInvoiceBrandingForm((prev) => ({
+    ...prev,
+    invoiceSettings: {
+      ...defaultInvoiceSettings,
+      ...(prev.invoiceSettings || {}),
+      [field]: value,
+    },
+  }));
 };
 
 const handleSaveInvoiceBranding = async (e) => {
@@ -16206,7 +16232,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       )}
     </section>
 
-    <section className="panel">
+    <section className="panel company-profile-panel">
       <div className="panel-header">
         <h3>Company Profile</h3>
         {!companyProfileEditing && (
@@ -16380,6 +16406,148 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 placeholder="Company name for payroll reports"
               />
             </label>
+          </div>
+
+          <div className="invoice-designer-layout">
+            <div className="invoice-design-controls">
+              <div className="invoice-branding-grid">
+                <label>
+                  <span>Invoice Style</span>
+                  <select
+                    value={invoiceBrandingForm.invoiceSettings.template}
+                    onChange={(e) => updateInvoiceSetting('template', e.target.value)}
+                  >
+                    <option value="modern">Modern</option>
+                    <option value="classic">Classic</option>
+                    <option value="compact">Compact</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Primary Color</span>
+                  <div className="invoice-color-field">
+                    <input
+                      type="color"
+                      value={invoiceBrandingForm.invoiceSettings.primaryColor}
+                      onChange={(e) => updateInvoiceSetting('primaryColor', e.target.value.toUpperCase())}
+                    />
+                    <input
+                      type="text"
+                      value={invoiceBrandingForm.invoiceSettings.primaryColor}
+                      pattern="#[0-9A-Fa-f]{6}"
+                      maxLength={7}
+                      onChange={(e) => updateInvoiceSetting('primaryColor', e.target.value)}
+                      aria-label="Primary color hex value"
+                    />
+                  </div>
+                </label>
+                <label>
+                  <span>Accent Color</span>
+                  <div className="invoice-color-field">
+                    <input
+                      type="color"
+                      value={invoiceBrandingForm.invoiceSettings.accentColor}
+                      onChange={(e) => updateInvoiceSetting('accentColor', e.target.value.toUpperCase())}
+                    />
+                    <input
+                      type="text"
+                      value={invoiceBrandingForm.invoiceSettings.accentColor}
+                      pattern="#[0-9A-Fa-f]{6}"
+                      maxLength={7}
+                      onChange={(e) => updateInvoiceSetting('accentColor', e.target.value)}
+                      aria-label="Accent color hex value"
+                    />
+                  </div>
+                </label>
+                <label>
+                  <span>Payment Terms</span>
+                  <input
+                    type="text"
+                    value={invoiceBrandingForm.invoiceSettings.paymentTerms}
+                    onChange={(e) => updateInvoiceSetting('paymentTerms', e.target.value)}
+                    maxLength={160}
+                    placeholder="Due upon receipt"
+                  />
+                </label>
+              </div>
+
+              <label>
+                <span>Invoice Footer Message</span>
+                <textarea
+                  value={invoiceBrandingForm.invoiceSettings.footerMessage}
+                  onChange={(e) => updateInvoiceSetting('footerMessage', e.target.value)}
+                  maxLength={240}
+                  rows={2}
+                  placeholder="Thank you for your business."
+                />
+              </label>
+
+              <div className="invoice-display-options">
+                {[
+                  ['showReferenceNumber', 'Reference number'],
+                  ['showPoNumber', 'PO number'],
+                  ['showLoadId', 'Load ID'],
+                  ['showRouteDetails', 'Pickup, delivery and return'],
+                  ['showNotes', 'Invoice notes'],
+                ].map(([field, label]) => (
+                  <label key={field} className="settings-toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={invoiceBrandingForm.invoiceSettings[field]}
+                      onChange={(e) => updateInvoiceSetting(field, e.target.checked)}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                className="secondary-btn compact-btn invoice-reset-btn"
+                onClick={() =>
+                  setInvoiceBrandingForm((prev) => ({
+                    ...prev,
+                    invoiceSettings: { ...defaultInvoiceSettings },
+                  }))
+                }
+              >
+                Restore Default Design
+              </button>
+            </div>
+
+            <div
+              className={`invoice-design-preview ${invoiceBrandingForm.invoiceSettings.template}`}
+              style={{
+                '--invoice-primary': invoiceBrandingForm.invoiceSettings.primaryColor,
+                '--invoice-accent': invoiceBrandingForm.invoiceSettings.accentColor,
+              }}
+            >
+              <div className="invoice-design-preview-header">
+                <div>
+                  <strong>{invoiceBrandingForm.invoiceName || company?.name || 'Your Company'}</strong>
+                  <p>{invoiceBrandingForm.invoiceAddress || 'Company address'}</p>
+                </div>
+                <div className="invoice-design-preview-title">
+                  <span>INVOICE</span>
+                  <strong>INV-1001</strong>
+                </div>
+              </div>
+              <div className="invoice-design-preview-cards">
+                <div><span>BILL TO</span><strong>Customer Name</strong><p>billing@customer.com</p></div>
+                <div><span>LOAD</span><strong>Container ABCD1234567</strong><p>Houston, TX → Customer Facility</p></div>
+              </div>
+              <div className="invoice-design-preview-table">
+                <div><strong>Description</strong><strong>Amount</strong></div>
+                <div><span>Linehaul / Load Rate</span><span>$1,250.00</span></div>
+                <div><span>Detention</span><span>$150.00</span></div>
+              </div>
+              <div className="invoice-design-preview-total">
+                <span>TOTAL</span><strong>$1,400.00</strong>
+              </div>
+              <p className="invoice-design-preview-footer">
+                {invoiceBrandingForm.invoiceSettings.paymentTerms || 'Due upon receipt'} ·{' '}
+                {invoiceBrandingForm.invoiceSettings.footerMessage || 'Thank you for your business.'}
+              </p>
+            </div>
           </div>
 
           <div className="invoice-branding-logo-row">
@@ -18358,7 +18526,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           )}
 
           {selectedInvoiceLoad ? (
-            <div className="invoice-preview">
+            <div
+              className={`invoice-preview invoice-preview-${activeInvoiceSettings.template}`}
+              style={{
+                '--invoice-primary': activeInvoiceSettings.primaryColor,
+                '--invoice-accent': activeInvoiceSettings.accentColor,
+              }}
+            >
               <div className="invoice-header">
                 <div className="invoice-brand-preview">
                   {getCompanyLogoSrc() && (
@@ -18379,9 +18553,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </p>
 
                   <p><strong>Invoice Date:</strong> {selectedInvoiceLoad.loadDate}</p>
-                  <p><strong>Load ID:</strong> {selectedInvoiceLoad.id}</p>
-                  <p><strong>Reference #:</strong> {selectedInvoiceLoad.referenceNumber || '—'}</p>
-                  <p><strong>PO#:</strong> {selectedInvoiceLoad.poNumber || '—'}</p>
+                  {activeInvoiceSettings.showLoadId && <p><strong>Load ID:</strong> {selectedInvoiceLoad.id}</p>}
+                  {activeInvoiceSettings.showReferenceNumber && <p><strong>Reference #:</strong> {selectedInvoiceLoad.referenceNumber || '—'}</p>}
+                  {activeInvoiceSettings.showPoNumber && <p><strong>PO#:</strong> {selectedInvoiceLoad.poNumber || '—'}</p>}
                 </div>
               </div>
 
@@ -18396,13 +18570,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
                 <div className="invoice-box">
                   <h4>Load Information</h4>
-                  <p><strong>Reference #:</strong> {selectedInvoiceLoad.referenceNumber || '—'}</p>
-                  <p><strong>PO#:</strong> {selectedInvoiceLoad.poNumber || '—'}</p>
+                  {activeInvoiceSettings.showReferenceNumber && <p><strong>Reference #:</strong> {selectedInvoiceLoad.referenceNumber || '—'}</p>}
+                  {activeInvoiceSettings.showPoNumber && <p><strong>PO#:</strong> {selectedInvoiceLoad.poNumber || '—'}</p>}
 
-                  <p><strong>Pick up Location:</strong> {selectedInvoiceLoad.pickup}</p>
-                  <p><strong>Delivery Location:</strong> {getDeliveryDisplay(selectedInvoiceLoad.delivery) || '—'}</p>
+                  {activeInvoiceSettings.showRouteDetails && <p><strong>Pick up Location:</strong> {selectedInvoiceLoad.pickup}</p>}
+                  {activeInvoiceSettings.showRouteDetails && <p><strong>Delivery Location:</strong> {getDeliveryDisplay(selectedInvoiceLoad.delivery) || '—'}</p>}
                   <p><strong>Appointment:</strong> {selectedInvoiceLoad.appointmentTime || '—'}</p>
-                  <p><strong>Return Location:</strong> {selectedInvoiceLoad.returnLocation || '—'}</p>
+                  {activeInvoiceSettings.showRouteDetails && <p><strong>Return Location:</strong> {selectedInvoiceLoad.returnLocation || '—'}</p>}
                   <p><strong>Container:</strong> {selectedInvoiceLoad.containerNumber || '—'}</p>
                 </div>
               </div>
@@ -18443,9 +18617,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 </table>
               </div>
 
-              <div className="invoice-box">
+              {activeInvoiceSettings.showNotes && <div className="invoice-box">
                 <h4>Notes</h4>
                 <p>{selectedInvoiceLoad.notes || 'No additional notes.'}</p>
+              </div>}
+              <div className="invoice-payment-footer">
+                <strong>{activeInvoiceSettings.paymentTerms}</strong>
+                <span>{activeInvoiceSettings.footerMessage}</span>
               </div>
             </div>
           ) : (
