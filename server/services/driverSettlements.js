@@ -11,6 +11,22 @@ const parseMoney = (value) => {
 
 const normalizeDate = (value) => String(value || '').slice(0, 10);
 
+const normalizeSettlementStatus = (value) => {
+  const status = String(value || 'Draft').trim().toLowerCase();
+  if (status === 'complete' || status === 'completed' || status === 'finalized') return 'Finalized';
+  if (status === 'reviewed') return 'Reviewed';
+  return 'Draft';
+};
+
+const assertSettlementEditable = (settlement) => {
+  const status = normalizeSettlementStatus(settlement?.status);
+  if (status !== 'Draft') {
+    const error = new Error(`${status} settlements are locked. Unreview the settlement before making changes.`);
+    error.status = 409;
+    throw error;
+  }
+};
+
 const dbAll = (db, sql, params = []) =>
   new Promise((resolve, reject) => {
     db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || [])));
@@ -104,15 +120,21 @@ const buildStatement = ({ settlement, driver, loads, deductions, auditLogs }) =>
   return {
     settlement: {
       id: settlement.id,
-      status: settlement.status || 'Draft',
+      status: normalizeSettlementStatus(settlement.status),
       notes: settlement.notes || '',
       periodStart: settlement.periodStart,
       periodEnd: settlement.periodEnd,
       version: Number(settlement.version || 1),
+      reviewedAt: settlement.reviewedAt || '',
+      reviewedBy: settlement.reviewedBy || '',
+      finalizedAt: settlement.finalizedAt || '',
+      finalizedBy: settlement.finalizedBy || '',
+      unreviewReason: settlement.unreviewReason || '',
     },
     driver: {
       id: driver.id,
       name: driver.name,
+      email: driver.email || '',
       payType: driver.payType || 'per_load',
     },
     totals: {
@@ -281,7 +303,8 @@ export async function recalculateSettlement(db, companyId, settlementId, changed
     [settlementId, companyId]
   );
   if (!settlementRecord) return null;
-  if (String(settlementRecord.status || 'Draft').trim().toLowerCase() !== 'complete') {
+  assertSettlementEditable(settlementRecord);
+  if (normalizeSettlementStatus(settlementRecord.status) === 'Draft') {
     await syncCompletedMovementLines(db, {
       companyId,
       settlementId,
@@ -325,6 +348,7 @@ export async function getSettlement(db, companyId, settlementId) {
   if (!parts) return null;
   return {
     ...parts.settlement,
+    status: normalizeSettlementStatus(parts.settlement.status),
     statement: buildStatement(parts),
   };
 }
@@ -348,7 +372,8 @@ export async function listSettlements(db, companyId, filters = {}) {
 
   return dbAll(
     db,
-    `SELECT s.*, d.name AS driverName
+    `SELECT s.*, d.name AS driverName, d.email AS driverEmail,
+            (SELECT COUNT(*) FROM settlement_loads sl WHERE sl.settlementId = s.id) AS loadCount
      FROM settlements s
      LEFT JOIN drivers d ON d.id = s.driverId AND d.companyId = s.companyId
      WHERE ${clauses.join(' AND ')}
@@ -387,6 +412,9 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
       `SELECT * FROM settlements WHERE id = ? AND companyId = ?`,
       [existingSettlement.id, companyId]
     );
+    if (normalizeSettlementStatus(existing.status) !== 'Draft') {
+      return getSettlement(db, companyId, existing.id);
+    }
     const addedMoves = await syncCompletedMovementLines(db, {
       companyId,
       settlementId: existing.id,
@@ -503,7 +531,8 @@ export async function updateSettlement(db, companyId, settlementId, input = {}, 
 
   const nextPeriodStart = normalizeDate(input.periodStart) || existing.periodStart;
   const nextPeriodEnd = normalizeDate(input.periodEnd) || existing.periodEnd;
-  const nextStatus = input.status || existing.status || 'Draft';
+  assertSettlementEditable(existing);
+  const nextStatus = normalizeSettlementStatus(existing.status);
   const nextNotes = Object.prototype.hasOwnProperty.call(input, 'notes')
     ? String(input.notes || '')
     : existing.notes || '';
@@ -522,6 +551,7 @@ export async function updateSettlement(db, companyId, settlementId, input = {}, 
 export async function deleteSettlement(db, companyId, settlementId, changedBy = '') {
   const existing = await getSettlement(db, companyId, settlementId);
   if (!existing) return false;
+  assertSettlementEditable(existing);
   await writeSettlementAudit(db, settlementId, 'DELETE', existing, null, changedBy);
   await dbRun(db, `DELETE FROM settlements WHERE id = ? AND companyId = ?`, [settlementId, companyId]);
   return true;
@@ -530,6 +560,7 @@ export async function deleteSettlement(db, companyId, settlementId, changedBy = 
 export async function addSettlementLoad(db, companyId, settlementId, input = {}, changedBy = '') {
   const settlement = await dbGet(db, `SELECT * FROM settlements WHERE id = ? AND companyId = ?`, [settlementId, companyId]);
   if (!settlement) return null;
+  assertSettlementEditable(settlement);
 
   const loadId = String(input.loadId || '').trim();
   const load = loadId
@@ -561,6 +592,9 @@ export async function addSettlementLoad(db, companyId, settlementId, input = {},
 }
 
 export async function updateSettlementLoad(db, companyId, settlementId, settlementLoadId, input = {}, changedBy = '') {
+  const settlement = await dbGet(db, `SELECT * FROM settlements WHERE id = ? AND companyId = ?`, [settlementId, companyId]);
+  if (!settlement) return null;
+  assertSettlementEditable(settlement);
   const existing = await dbGet(
     db,
     `SELECT sl.*
@@ -595,6 +629,9 @@ export async function updateSettlementLoad(db, companyId, settlementId, settleme
 }
 
 export async function removeSettlementLoad(db, companyId, settlementId, settlementLoadId, changedBy = '') {
+  const settlement = await dbGet(db, `SELECT * FROM settlements WHERE id = ? AND companyId = ?`, [settlementId, companyId]);
+  if (!settlement) return null;
+  assertSettlementEditable(settlement);
   const existing = await dbGet(
     db,
     `SELECT sl.*
@@ -611,8 +648,9 @@ export async function removeSettlementLoad(db, companyId, settlementId, settleme
 }
 
 export async function addDeduction(db, companyId, settlementId, input = {}, changedBy = '') {
-  const settlement = await dbGet(db, `SELECT id FROM settlements WHERE id = ? AND companyId = ?`, [settlementId, companyId]);
+  const settlement = await dbGet(db, `SELECT * FROM settlements WHERE id = ? AND companyId = ?`, [settlementId, companyId]);
   if (!settlement) return null;
+  assertSettlementEditable(settlement);
 
   const description = String(input.description || '').trim();
   if (!description) {
@@ -635,6 +673,9 @@ export async function addDeduction(db, companyId, settlementId, input = {}, chan
 }
 
 export async function updateDeduction(db, companyId, settlementId, deductionId, input = {}, changedBy = '') {
+  const settlement = await dbGet(db, `SELECT * FROM settlements WHERE id = ? AND companyId = ?`, [settlementId, companyId]);
+  if (!settlement) return null;
+  assertSettlementEditable(settlement);
   const existing = await dbGet(
     db,
     `SELECT d.*
@@ -673,6 +714,9 @@ export async function updateDeduction(db, companyId, settlementId, deductionId, 
 }
 
 export async function removeDeduction(db, companyId, settlementId, deductionId, changedBy = '') {
+  const settlement = await dbGet(db, `SELECT * FROM settlements WHERE id = ? AND companyId = ?`, [settlementId, companyId]);
+  if (!settlement) return null;
+  assertSettlementEditable(settlement);
   const existing = await dbGet(
     db,
     `SELECT d.*
@@ -686,4 +730,68 @@ export async function removeDeduction(db, companyId, settlementId, deductionId, 
   await dbRun(db, `DELETE FROM deductions WHERE id = ? AND settlement_id = ?`, [deductionId, settlementId]);
   await writeSettlementAudit(db, settlementId, 'REMOVE_DEDUCTION', existing, null, changedBy);
   return recalculateSettlement(db, companyId, settlementId, changedBy);
+}
+
+export async function transitionSettlement(db, companyId, settlementId, input = {}, changedBy = '') {
+  const existing = await getSettlement(db, companyId, settlementId);
+  if (!existing) return null;
+
+  const action = String(input.action || '').trim().toLowerCase();
+  const currentStatus = normalizeSettlementStatus(existing.status);
+  const now = new Date().toISOString();
+  let nextStatus = currentStatus;
+  let auditAction = '';
+  let extraSql = '';
+  let extraParams = [];
+
+  if (action === 'review') {
+    if (currentStatus !== 'Draft') {
+      const error = new Error('Only Draft settlements can be reviewed.');
+      error.status = 409;
+      throw error;
+    }
+    await recalculateSettlement(db, companyId, settlementId, changedBy);
+    nextStatus = 'Reviewed';
+    auditAction = 'REVIEW';
+    extraSql = ', reviewedAt = ?, reviewedBy = ?, unreviewReason = ?';
+    extraParams = [now, changedBy || '', ''];
+  } else if (action === 'unreview') {
+    if (currentStatus !== 'Reviewed') {
+      const error = new Error('Only Reviewed settlements can be returned to Draft.');
+      error.status = 409;
+      throw error;
+    }
+    const reason = String(input.reason || '').trim();
+    if (!reason) {
+      const error = new Error('A reason is required to unreview a settlement.');
+      error.status = 400;
+      throw error;
+    }
+    nextStatus = 'Draft';
+    auditAction = 'UNREVIEW';
+    extraSql = ', unreviewReason = ?';
+    extraParams = [reason];
+  } else if (action === 'finalize') {
+    if (currentStatus !== 'Reviewed') {
+      const error = new Error('Review the settlement before finalizing it.');
+      error.status = 409;
+      throw error;
+    }
+    nextStatus = 'Finalized';
+    auditAction = 'FINALIZE';
+    extraSql = ', finalizedAt = ?, finalizedBy = ?';
+    extraParams = [now, changedBy || ''];
+  } else {
+    const error = new Error('Settlement transition must be review, unreview, or finalize.');
+    error.status = 400;
+    throw error;
+  }
+
+  await dbRun(
+    db,
+    `UPDATE settlements SET status = ?, updatedAt = ?${extraSql} WHERE id = ? AND companyId = ?`,
+    [nextStatus, now, ...extraParams, settlementId, companyId]
+  );
+  await writeSettlementAudit(db, settlementId, auditAction, { status: currentStatus }, { status: nextStatus, reason: input.reason || '' }, changedBy);
+  return getSettlement(db, companyId, settlementId);
 }
