@@ -98,6 +98,53 @@ const parsePodSettings = (company = {}) => {
     return defaultPodSettings;
   }
 };
+const defaultInvoiceSettings = {
+  template: 'modern',
+  primaryColor: '#0F2744',
+  accentColor: '#1677FF',
+  paymentTerms: 'Due upon receipt',
+  footerMessage: 'Thank you for your business.',
+  showPoNumber: true,
+  showReferenceNumber: true,
+  showLoadId: true,
+  showRouteDetails: true,
+  showNotes: true,
+};
+const normalizeInvoiceColor = (value, fallback) => {
+  const color = String(value || '').trim().toUpperCase();
+  return /^#[0-9A-F]{6}$/.test(color) ? color : fallback;
+};
+const normalizeInvoiceSettings = (settings = {}) => {
+  const source = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
+  const allowedTemplates = new Set(['modern', 'classic', 'compact']);
+  return {
+    template: allowedTemplates.has(source.template) ? source.template : defaultInvoiceSettings.template,
+    primaryColor: normalizeInvoiceColor(source.primaryColor, defaultInvoiceSettings.primaryColor),
+    accentColor: normalizeInvoiceColor(source.accentColor, defaultInvoiceSettings.accentColor),
+    paymentTerms: String(source.paymentTerms ?? defaultInvoiceSettings.paymentTerms).trim().slice(0, 160),
+    footerMessage: String(source.footerMessage ?? defaultInvoiceSettings.footerMessage).trim().slice(0, 240),
+    showPoNumber: source.showPoNumber !== false,
+    showReferenceNumber: source.showReferenceNumber !== false,
+    showLoadId: source.showLoadId !== false,
+    showRouteDetails: source.showRouteDetails !== false,
+    showNotes: source.showNotes !== false,
+  };
+};
+const parseInvoiceSettings = (company = {}) => {
+  try {
+    return normalizeInvoiceSettings(JSON.parse(company.invoiceSettingsJson || '{}'));
+  } catch {
+    return { ...defaultInvoiceSettings };
+  }
+};
+const invoicePdfColor = (hex, fallback = '#0F2744') => {
+  const normalized = normalizeInvoiceColor(hex, fallback).slice(1);
+  return rgb(
+    Number.parseInt(normalized.slice(0, 2), 16) / 255,
+    Number.parseInt(normalized.slice(2, 4), 16) / 255,
+    Number.parseInt(normalized.slice(4, 6), 16) / 255
+  );
+};
 const getCompanyPayload = (company = {}) => ({
   id: company.id,
   name: company.name,
@@ -105,6 +152,7 @@ const getCompanyPayload = (company = {}) => ({
   invoiceName: company.invoiceName || company.name || '',
   invoiceAddress: company.invoiceAddress || '',
   settlementCompanyName: company.settlementCompanyName || company.invoiceName || company.name || '',
+  invoiceSettings: parseInvoiceSettings(company),
   podSettings: parsePodSettings(company),
   logoUrl: getCompanyLogoUrl(company),
   portHoustonUsername: company.portHoustonUsername || '',
@@ -115,7 +163,7 @@ const getCompanyPayload = (company = {}) => ({
 });
 
 const companyProfileSelect =
-  'id, name, email, logoPath, invoiceName, invoiceAddress, settlementCompanyName, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson, companyTimezone, allowAiAnalytics';
+  'id, name, email, logoPath, invoiceName, invoiceAddress, invoiceSettingsJson, settlementCompanyName, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson, companyTimezone, allowAiAnalytics';
 
 const parseNumericField = (value, fallback = 0) => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
@@ -2501,6 +2549,7 @@ app.put('/api/company/invoice-branding', authenticate, requireRoles(adminRoles),
   const invoiceName = String(req.body.invoiceName || '').trim().slice(0, 120);
   const invoiceAddress = String(req.body.invoiceAddress || '').trim().slice(0, 500);
   const settlementCompanyName = String(req.body.settlementCompanyName || invoiceName).trim().slice(0, 120);
+  const invoiceSettings = normalizeInvoiceSettings(req.body.invoiceSettings);
 
   if (!invoiceName) {
     return res.status(400).json({ error: 'Invoice company name is required.' });
@@ -2508,9 +2557,9 @@ app.put('/api/company/invoice-branding', authenticate, requireRoles(adminRoles),
 
   db.run(
     `UPDATE companies
-     SET invoiceName = ?, invoiceAddress = ?, settlementCompanyName = ?
+     SET invoiceName = ?, invoiceAddress = ?, settlementCompanyName = ?, invoiceSettingsJson = ?
      WHERE id = ?`,
-    [invoiceName, invoiceAddress, settlementCompanyName, companyId],
+    [invoiceName, invoiceAddress, settlementCompanyName, JSON.stringify(invoiceSettings), companyId],
     function (err) {
       if (err) {
         console.error('Invoice branding update error:', err.message);
@@ -2532,7 +2581,7 @@ app.put('/api/company/invoice-branding', authenticate, requireRoles(adminRoles),
             entityId: companyId,
             entityLabel: company.name,
             oldValue: null,
-            newValue: { invoiceName, invoiceAddress, settlementCompanyName },
+            newValue: { invoiceName, invoiceAddress, settlementCompanyName, invoiceSettings },
             changedFields: {
               invoiceName: { oldValue: '', newValue: invoiceName },
               invoiceAddress: { oldValue: '', newValue: invoiceAddress },
@@ -5644,114 +5693,92 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
 
           const invoicePdf = await PDFDocument.create();
           const invoicePage = invoicePdf.addPage([612, 792]);
-          // Top divider
-          invoicePage.drawLine({
-            start: { x: 50, y: 675 },
-            end: { x: 560, y: 675 },
-            thickness: 1,
+          const regularFont = await invoicePdf.embedFont(StandardFonts.Helvetica);
+          const boldFont = await invoicePdf.embedFont(StandardFonts.HelveticaBold);
+          const invoiceSettings = parseInvoiceSettings(packetCompany);
+          const primaryColor = invoicePdfColor(invoiceSettings.primaryColor);
+          const accentColor = invoicePdfColor(invoiceSettings.accentColor, '#1677FF');
+          const mutedColor = rgb(0.39, 0.45, 0.55);
+          const borderColor = rgb(0.86, 0.89, 0.93);
+          const surfaceColor = rgb(0.97, 0.98, 0.99);
+          const safeText = (value, fallback = '-') => String(value || fallback).replace(/[^\x20-\x7E]/g, ' ');
+          const drawLabel = (text, x, y) => invoicePage.drawText(safeText(text).toUpperCase(), {
+            x, y, size: 8, font: boldFont, color: accentColor,
+          });
+          const drawValue = (text, x, y, size = 10, max = 58) => invoicePage.drawText(safeText(text).slice(0, max), {
+            x, y, size, font: regularFont, color: primaryColor,
           });
 
-          invoicePage.drawText(packetCompanyName, {
-            x: 50,
-            y: 760,
-            size: 18,
-          });
+          invoicePage.drawRectangle({ x: 0, y: 780, width: 612, height: 12, color: primaryColor });
+          invoicePage.drawRectangle({ x: 420, y: 780, width: 192, height: 12, color: accentColor });
 
-          if (packetCompanyAddress) {
-            invoicePage.drawText(String(packetCompanyAddress).slice(0, 90), {
-              x: 50,
-              y: 742,
-              size: 10,
-            });
+          let logoOffset = 0;
+          if (packetCompany.logoPath && fs.existsSync(packetCompany.logoPath)) {
+            try {
+              const logoBytes = await sharp(packetCompany.logoPath).png().toBuffer();
+              const logoImage = await invoicePdf.embedPng(logoBytes);
+              const logoScale = Math.min(92 / logoImage.width, 42 / logoImage.height);
+              invoicePage.drawImage(logoImage, {
+                x: 42,
+                y: 716,
+                width: logoImage.width * logoScale,
+                height: logoImage.height * logoScale,
+              });
+              logoOffset = Math.min(108, logoImage.width * logoScale + 14);
+            } catch (logoErr) {
+              console.warn('Invoice logo could not be embedded:', logoErr.message);
+            }
           }
 
+          invoicePage.drawText(safeText(packetCompanyName).slice(0, 46), {
+            x: 42 + logoOffset, y: 752, size: 17, font: boldFont, color: primaryColor,
+          });
+          if (packetCompanyAddress) {
+            invoicePage.drawText(safeText(packetCompanyAddress).slice(0, 78), {
+              x: 42 + logoOffset, y: 734, size: 9, font: regularFont, color: mutedColor,
+            });
+          }
           invoicePage.drawText('INVOICE', {
-            x: 50,
-            y: 710,
-            size: 28,
+            x: 440, y: 744, size: 25, font: boldFont, color: primaryColor,
+          });
+          invoicePage.drawText(safeText(packetInvoice.invoiceNumber || 'Not saved'), {
+            x: 440, y: 724, size: 11, font: boldFont, color: accentColor,
           });
 
-          invoicePage.drawText(`Invoice Date: ${loadRow.loadDate || '—'}`, {
-            x: 400,
-            y: 730,
-            size: 12,
-          });
+          invoicePage.drawRectangle({ x: 42, y: 632, width: 252, height: 70, color: surfaceColor });
+          invoicePage.drawRectangle({ x: 318, y: 632, width: 252, height: 70, color: surfaceColor });
+          drawLabel('Bill To', 56, 683);
+          drawValue(loadRow.customer, 56, 660, 12, 36);
+          drawLabel('Invoice Details', 332, 683);
+          drawValue(`Date: ${loadRow.loadDate || '-'}`, 332, 663, 9, 36);
+          let detailsY = 647;
+          if (invoiceSettings.showLoadId) {
+            drawValue(`Load ID: ${loadRow.id || '-'}`, 332, detailsY, 9, 36);
+            detailsY -= 14;
+          }
+          const identifierParts = [];
+          if (invoiceSettings.showReferenceNumber) identifierParts.push(`Ref: ${loadRow.referenceNumber || '-'}`);
+          if (invoiceSettings.showPoNumber) identifierParts.push(`PO: ${loadRow.poNumber || '-'}`);
+          if (identifierParts.length) drawValue(identifierParts.join('   '), 332, detailsY, 9, 40);
 
-          invoicePage.drawText(`Load ID: ${loadRow.id || '—'}`, {
-            x: 400,
-            y: 710,
-            size: 12,
-          });
+          drawLabel('Shipment Information', 42, 604);
+          invoicePage.drawLine({ start: { x: 42, y: 594 }, end: { x: 570, y: 594 }, thickness: 1, color: borderColor });
+          drawLabel('Container', 42, 572);
+          drawValue(loadRow.containerNumber, 42, 554, 10, 22);
+          drawLabel('Appointment', 220, 572);
+          drawValue(loadRow.appointmentTime, 220, 554, 10, 28);
+          if (invoiceSettings.showRouteDetails) {
+            drawLabel('Route', 42, 526);
+            drawValue(`Pickup: ${loadRow.pickup || '-'}`, 42, 508, 9, 88);
+            drawValue(`Delivery: ${loadRow.delivery || '-'}`, 42, 492, 9, 88);
+            drawValue(`Return: ${loadRow.returnLocation || '-'}`, 42, 476, 9, 88);
+          }
 
-          invoicePage.drawText(`Reference #: ${loadRow.referenceNumber || '—'}`, {
-            x: 400,
-            y: 690,
-            size: 12,
-          });
-
-          invoicePage.drawText('Bill To:', {
-            x: 50,
-            y: 680,
-            size: 14,
-          });
-
-          invoicePage.drawText(`${loadRow.customer || '—'}`, {
-            x: 50,
-            y: 660,
-            size: 12,
-          });
-
-          invoicePage.drawText('Load Information:', {
-            x: 50,
-            y: 620,
-            size: 14,
-          });
-          invoicePage.drawLine({
-            start: { x: 50, y: 520 },
-            end: { x: 560, y: 520 },
-            thickness: 1,
-          });
-
-          invoicePage.drawText(`Pickup: ${loadRow.pickup || '—'}`, {
-            x: 50,
-            y: 600,
-            size: 12,
-          });
-
-          invoicePage.drawText(`Delivery: ${loadRow.delivery || '—'}`, {
-            x: 50,
-            y: 580,
-            size: 12,
-          });
-
-          invoicePage.drawText(`Return: ${loadRow.returnLocation || '—'}`, {
-            x: 50,
-            y: 560,
-            size: 12,
-          });
-
-          invoicePage.drawText(`Container: ${loadRow.containerNumber || '—'}`, {
-            x: 50,
-            y: 540,
-            size: 12,
-          });
-          invoicePage.drawText('Charges', {
-            x: 50,
-            y: 480,
-            size: 14,
-          });
-
-          invoicePage.drawText('Description', {
-            x: 50,
-            y: 460,
-            size: 12,
-          });
-
-          invoicePage.drawText('Amount', {
-            x: 450,
-            y: 460,
-            size: 12,
-          });
+          const chargesTop = invoiceSettings.showRouteDetails ? 438 : 492;
+          drawLabel('Charges', 42, chargesTop + 24);
+          invoicePage.drawRectangle({ x: 42, y: chargesTop - 2, width: 528, height: 25, color: primaryColor });
+          invoicePage.drawText('Description', { x: 54, y: chargesTop + 6, size: 9, font: boldFont, color: rgb(1, 1, 1) });
+          invoicePage.drawText('Amount', { x: 494, y: chargesTop + 6, size: 9, font: boldFont, color: rgb(1, 1, 1) });
 
           const parseMoney = (value) => {
             const number = Number(String(value || 0).replace(/[^0-9.-]/g, ''));
@@ -5794,44 +5821,45 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
             })),
           ];
 
-          let chargeY = 440;
+          let chargeY = chargesTop - 24;
           chargeRows.forEach((row) => {
             invoicePage.drawText(String(row.description).slice(0, 58), {
-              x: 50,
+              x: 54,
               y: chargeY,
-              size: 12,
+              size: 9,
+              font: regularFont,
+              color: primaryColor,
             });
 
             invoicePage.drawText(formatMoney(row.amount), {
-              x: 450,
+              x: 494,
               y: chargeY,
-              size: 12,
+              size: 9,
+              font: regularFont,
+              color: primaryColor,
             });
-            chargeY -= 20;
+            invoicePage.drawLine({ start: { x: 42, y: chargeY - 8 }, end: { x: 570, y: chargeY - 8 }, thickness: 0.5, color: borderColor });
+            chargeY -= 24;
           });
 
-          invoicePage.drawLine({
-            start: { x: 50, y: chargeY + 6 },
-            end: { x: 560, y: chargeY + 6 },
-            thickness: 1,
-          });
-
-          invoicePage.drawText('Total:', {
-            x: 350,
-            y: chargeY - 14,
-            size: 14,
-          });
-
+          invoicePage.drawRectangle({ x: 378, y: chargeY - 35, width: 192, height: 42, color: surfaceColor });
+          drawLabel('Total', 392, chargeY - 10);
           invoicePage.drawText(formatMoney(invoiceTotalAmount), {
-            x: 450,
-            y: chargeY - 14,
-            size: 14,
+            x: 474, y: chargeY - 17, size: 15, font: boldFont, color: primaryColor,
           });
 
-          invoicePage.drawText(`Notes: ${loadRow.notes || 'No additional notes.'}`, {
-            x: 50,
-            y: Math.max(80, chargeY - 42),
-            size: 12,
+          let footerY = Math.max(72, chargeY - 64);
+          if (invoiceSettings.showNotes && loadRow.notes) {
+            drawLabel('Notes', 42, footerY);
+            drawValue(loadRow.notes, 42, footerY - 16, 9, 90);
+            footerY -= 42;
+          }
+          invoicePage.drawLine({ start: { x: 42, y: footerY }, end: { x: 570, y: footerY }, thickness: 1, color: borderColor });
+          invoicePage.drawText(safeText(invoiceSettings.paymentTerms || 'Due upon receipt'), {
+            x: 42, y: footerY - 20, size: 9, font: boldFont, color: primaryColor,
+          });
+          invoicePage.drawText(safeText(invoiceSettings.footerMessage || 'Thank you for your business.').slice(0, 82), {
+            x: 42, y: footerY - 38, size: 8, font: regularFont, color: mutedColor,
           });
           const invoiceBytes = await invoicePdf.save();
           const loadedInvoicePdf = await PDFDocument.load(invoiceBytes);
