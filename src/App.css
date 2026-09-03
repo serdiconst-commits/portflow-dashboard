@@ -3548,6 +3548,77 @@ td {
   margin-bottom: 24px;
 }
 
+.settlement-workspace-panel {
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid #dbe5ea;
+  background: #f7fafb;
+}
+
+.settlement-workspace-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px 26px 20px;
+  color: #fff;
+  background: linear-gradient(125deg, #071d2e 0%, #0b3444 70%, #0c766f 140%);
+}
+
+.settlement-workspace-heading h2,
+.settlement-workspace-heading p { margin: 0; }
+.settlement-workspace-heading h2 { margin-top: 4px; font-size: 27px; }
+.settlement-workspace-heading p { margin-top: 7px; color: #c9d9df; }
+.settlement-eyebrow { color: #5eead4; font-size: 11px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+.settlement-workspace-total { min-width: 155px; text-align: right; }
+.settlement-workspace-total span { display: block; color: #b8ced5; font-size: 12px; }
+.settlement-workspace-total strong { display: block; margin-top: 4px; font-size: 25px; }
+
+.settlement-week-rail { display: flex; align-items: stretch; gap: 10px; padding: 18px 20px 12px; }
+.settlement-week-options { display: grid; grid-template-columns: repeat(5, minmax(125px, 1fr)); gap: 8px; min-width: 0; overflow-x: auto; flex: 1; scrollbar-width: thin; }
+.settlement-week-arrow { flex: 0 0 42px; border: 1px solid #d6e1e5; border-radius: 12px; background: #fff; color: #123047; font-size: 28px; cursor: pointer; }
+.settlement-week-chip { min-width: 125px; padding: 11px 13px; border: 1px solid #d6e1e5; border-radius: 12px; background: #fff; color: #193448; text-align: left; cursor: pointer; }
+.settlement-week-chip small { display: block; margin-bottom: 4px; color: #718390; font-size: 10px; text-transform: uppercase; }
+.settlement-week-chip strong { font-size: 13px; }
+.settlement-week-chip.active { border-color: #0d9488; color: #075f59; background: #eafbf8; box-shadow: 0 0 0 2px rgba(13,148,136,.12); }
+
+.settlement-period-summary { display: grid; grid-template-columns: repeat(4, minmax(90px, 130px)) minmax(180px, 1fr); gap: 8px; padding: 8px 20px 16px; }
+.settlement-period-summary button { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid #d9e3e7; border-radius: 10px; color: #536672; background: #fff; cursor: pointer; }
+.settlement-period-summary button strong { color: #102d40; font-size: 16px; }
+.settlement-period-summary button.active { border-color: #0d9488; background: #edfaf8; color: #08766d; }
+.settlement-period-summary input { min-width: 0; border: 1px solid #d9e3e7; border-radius: 10px; padding: 10px 13px; background: #fff; color: #193448; color-scheme: light; -webkit-text-fill-color: #193448; }
+.settlement-period-summary input::placeholder { color: #81919b; -webkit-text-fill-color: #81919b; }
+
+.settlement-driver-list { display: grid; gap: 1px; border-top: 1px solid #dbe5ea; background: #dbe5ea; }
+.settlement-driver-row { display: grid; grid-template-columns: 42px minmax(190px, 2fr) repeat(3, minmax(80px, .65fr)) minmax(100px, .7fr) 22px; align-items: center; gap: 14px; width: 100%; padding: 14px 22px; border: 0; background: #fff; color: #193448; text-align: left; cursor: pointer; }
+.settlement-driver-row:hover { background: #f5fbfa; }
+.settlement-driver-row.active { position: relative; background: #ebf8f6; box-shadow: inset 4px 0 #0d9488; }
+.settlement-driver-avatar { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; color: #fff; background: #16384c; font-weight: 900; }
+.settlement-driver-identity { min-width: 0; }
+.settlement-driver-identity strong, .settlement-driver-identity small, .settlement-driver-row > span > small, .settlement-driver-row > span > strong { display: block; }
+.settlement-driver-identity small, .settlement-driver-row > span > small { margin-top: 3px; color: #788995; font-size: 11px; }
+.settlement-status-pill { justify-self: start; padding: 6px 10px; border-radius: 999px; background: #edf1f3; color: #52636e; font-size: 11px; font-weight: 900; }
+.settlement-status-pill.reviewed { color: #8a5800; background: #fff4d6; }
+.settlement-status-pill.finalized { color: #08715f; background: #dff8f1; }
+.settlement-status-pill.draft { color: #295ca7; background: #e8f1ff; }
+.settlement-row-chevron { color: #82949f; font-size: 24px; }
+.settlement-empty-workspace { margin: 0; padding: 24px; background: #fff; color: #718390; text-align: center; }
+.settlement-lock-notice { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 12px 14px; border: 1px solid #f0dca5; border-radius: 10px; background: #fff9e8; color: #6f5011; }
+.settlement-audit-panel { margin-top: 18px; padding: 16px; border: 1px solid #dbe5ea; border-radius: 12px; background: #f8fafb; }
+.settlement-audit-panel h4 { margin: 0 0 12px; color: #173448; }
+.settlement-audit-panel > div { display: grid; gap: 8px; }
+.settlement-audit-panel span { display: flex; justify-content: space-between; gap: 16px; padding-bottom: 8px; border-bottom: 1px solid #e3eaed; }
+.settlement-audit-panel small { color: #718390; }
+
+@media (max-width: 900px) {
+  .settlement-workspace-heading { align-items: flex-start; flex-direction: column; }
+  .settlement-workspace-total { text-align: left; }
+  .settlement-period-summary { grid-template-columns: repeat(2, 1fr); }
+  .settlement-period-summary input { grid-column: 1 / -1; }
+  .settlement-driver-row { grid-template-columns: 38px minmax(150px, 1fr) minmax(85px, .5fr) 24px; }
+  .settlement-driver-row > span:nth-child(3), .settlement-driver-row > span:nth-child(4) { display: none; }
+}
+
 .settlement-detail-panel .panel-header {
   align-items: flex-start;
 }

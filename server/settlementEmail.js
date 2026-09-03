@@ -19,83 +19,104 @@ export async function buildSettlementPdf(settlement, company = {}) {
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   let page = pdf.addPage([612, 792]);
-  let y = 742;
+  let y = 720;
+  const navy = rgb(0.04, 0.12, 0.2);
+  const teal = rgb(0.04, 0.55, 0.5);
+  const slate = rgb(0.38, 0.45, 0.54);
+  const pale = rgb(0.95, 0.98, 0.98);
 
   const ensureSpace = (height = 28) => {
-    if (y > 55 + height) return;
+    if (y > 62 + height) return;
     page = pdf.addPage([612, 792]);
-    y = 748;
+    page.drawRectangle({ x: 0, y: 764, width: 612, height: 28, color: navy });
+    drawText(page, clean(company.settlementCompanyName || company.invoiceName || company.name || 'PortFlow'), 38, 774, { size: 9, font: bold, color: rgb(1, 1, 1) });
+    drawText(page, `Settlement ${clean(settlement.id).slice(0, 8).toUpperCase()}`, 440, 774, { size: 8, font: regular, color: rgb(1, 1, 1) });
+    y = 738;
   };
-  const row = (columns, widths, isHeader = false) => {
-    ensureSpace(22);
+  const row = (columns, widths, isHeader = false, shaded = false) => {
+    ensureSpace(25);
+    if (isHeader || shaded) {
+      page.drawRectangle({ x: 38, y: y - 6, width: 536, height: 20, color: isHeader ? navy : pale });
+    }
     let x = 42;
     columns.forEach((value, index) => {
       drawText(page, clean(value).slice(0, Math.max(8, Math.floor(widths[index] / 5.3))), x, y, {
         size: isHeader ? 8 : 8.5,
         font: isHeader ? bold : regular,
-        color: isHeader ? rgb(1, 1, 1) : rgb(0.12, 0.16, 0.23),
+        color: isHeader ? rgb(1, 1, 1) : navy,
       });
       x += widths[index];
     });
-    if (isHeader) page.drawRectangle({ x: 38, y: y - 5, width: 536, height: 18, color: rgb(0.06, 0.46, 0.43), opacity: 1 });
-    // Redraw header text above its background.
-    if (isHeader) {
-      x = 42;
-      columns.forEach((value, index) => {
-        drawText(page, clean(value), x, y, { size: 8, font: bold, color: rgb(1, 1, 1) });
-        x += widths[index];
-      });
-    }
     y -= 20;
   };
 
-  drawText(page, clean(company.settlementCompanyName || company.invoiceName || company.name || 'PortFlow'), 42, y, { size: 18, font: bold, color: rgb(0.06, 0.46, 0.43) });
-  drawText(page, 'DRIVER SETTLEMENT', 390, y, { size: 14, font: bold });
-  y -= 30;
-  drawText(page, `Driver: ${statement.driver?.id || settlement.driverId} - ${statement.driver?.name || ''}`, 42, y, { size: 10, font: bold });
-  drawText(page, `Period: ${settlement.periodStart} to ${settlement.periodEnd}`, 340, y, { size: 9, font: regular });
-  y -= 18;
-  drawText(page, `Status: ${settlement.status || statement.settlement?.status || 'Complete'}`, 42, y, { font: regular });
-  drawText(page, `Statement Version: ${settlement.version || statement.settlement?.version || 1}`, 340, y, { font: regular });
-  y -= 28;
+  page.drawRectangle({ x: 0, y: 690, width: 612, height: 102, color: navy });
+  drawText(page, clean(company.settlementCompanyName || company.invoiceName || company.name || 'PortFlow'), 38, 751, { size: 20, font: bold, color: rgb(1, 1, 1) });
+  drawText(page, 'DRIVER SETTLEMENT', 38, 725, { size: 10, font: bold, color: teal });
+  drawText(page, `#${clean(settlement.id).slice(0, 8).toUpperCase()}`, 478, 748, { size: 10, font: bold, color: rgb(1, 1, 1) });
+  y = 656;
+  drawText(page, 'DRIVER', 42, y, { size: 7, font: bold, color: slate });
+  drawText(page, 'PAY PERIOD', 264, y, { size: 7, font: bold, color: slate });
+  drawText(page, 'STATUS', 468, y, { size: 7, font: bold, color: slate });
+  y -= 16;
+  drawText(page, `${statement.driver?.id || settlement.driverId} - ${statement.driver?.name || ''}`, 42, y, { size: 10, font: bold, color: navy });
+  drawText(page, `${settlement.periodStart} to ${settlement.periodEnd}`, 264, y, { size: 9, font: bold, color: navy });
+  drawText(page, settlement.status || statement.settlement?.status || 'Draft', 468, y, { size: 9, font: bold, color: teal });
+  y -= 34;
 
-  row(['Load', 'Date', 'Description', 'Moves', 'Pay'], [80, 78, 230, 58, 80], true);
-  (statement.loads || []).forEach((line) => row([
-    line.loadId || line.id || '',
-    line.appointmentTime?.slice?.(0, 10) || line.loadDate || '',
-    line.description || line.containerNumber || '',
-    line.movesCount || 1,
+  drawText(page, 'COMPLETED MOVES & PAY', 42, y, { size: 10, font: bold, color: navy });
+  y -= 20;
+  row(['Date', 'Container / Load', 'Movement & Route', 'Pay'], [76, 120, 250, 80], true);
+  (statement.loads || []).forEach((line, index) => row([
+    line.completedAt?.slice?.(0, 10) || line.appointmentTime?.slice?.(0, 10) || '',
+    line.containerNumber || line.loadId || '',
+    [clean(line.moveType).replaceAll('_', ' '), [line.moveOrigin, line.moveDestination].filter(Boolean).join(' to ') || line.description].filter(Boolean).join(' - '),
     money(line.payAmount),
-  ], [80, 78, 230, 58, 80]));
+  ], [76, 120, 250, 80], false, index % 2 === 1));
 
   y -= 12;
-  if ((statement.deductions || []).length) {
-    drawText(page, 'Adjustments and deductions', 42, y, { size: 11, font: bold });
+  const adjustments = [...(statement.deductions || []), ...(statement.netDeductions || [])];
+  if (adjustments.length) {
+    drawText(page, 'ADJUSTMENTS & DEDUCTIONS', 42, y, { size: 10, font: bold, color: navy });
     y -= 20;
     row(['Type', 'Description', 'Amount'], [110, 310, 106], true);
-    (statement.deductions || []).forEach((item) => row([
-      item.type || item.category || 'Deduction',
+    adjustments.forEach((item, index) => row([
+      Number(item.amount) < 0 ? 'Deduction' : 'Additional pay',
       item.description || item.reason || '',
       money(item.amount),
-    ], [110, 310, 106]));
+    ], [110, 310, 106], false, index % 2 === 1));
   }
 
-  ensureSpace(95);
-  y -= 16;
-  page.drawRectangle({ x: 330, y: y - 62, width: 244, height: 78, color: rgb(0.95, 0.97, 0.98) });
-  drawText(page, `Gross Pay: ${money(statement.totals?.grossPay)}`, 350, y, { size: 10, font: bold });
+  ensureSpace(118);
+  y -= 18;
+  page.drawRectangle({ x: 318, y: y - 78, width: 256, height: 96, color: pale, borderColor: rgb(0.82, 0.9, 0.9), borderWidth: 1 });
+  drawText(page, 'SETTLEMENT SUMMARY', 338, y, { size: 8, font: bold, color: slate });
   y -= 20;
-  drawText(page, `Deductions: ${money(statement.totals?.adjustmentsTotal || statement.totals?.deductionsTotal)}`, 350, y, { size: 10, font: regular });
-  y -= 22;
-  drawText(page, `NET PAY: ${money(statement.totals?.netPay)}`, 350, y, { size: 13, font: bold, color: rgb(0.06, 0.46, 0.43) });
+  drawText(page, `Gross pay`, 338, y, { size: 9, font: regular, color: slate });
+  drawText(page, money(statement.totals?.grossPay), 496, y, { size: 9, font: bold, color: navy });
+  y -= 17;
+  drawText(page, `Adjustments`, 338, y, { size: 9, font: regular, color: slate });
+  drawText(page, money(statement.totals?.adjustmentsTotal), 496, y, { size: 9, font: bold, color: navy });
+  y -= 17;
+  drawText(page, `Net deductions`, 338, y, { size: 9, font: regular, color: slate });
+  drawText(page, money(-(statement.totals?.netDeductionsTotal || 0)), 496, y, { size: 9, font: bold, color: navy });
+  y -= 20;
+  drawText(page, `NET PAY`, 338, y, { size: 11, font: bold, color: navy });
+  drawText(page, money(statement.totals?.netPay), 478, y, { size: 13, font: bold, color: teal });
 
   if (clean(settlement.notes || statement.settlement?.notes)) {
-    ensureSpace(50);
-    y -= 35;
-    drawText(page, 'Payroll Note', 42, y, { size: 10, font: bold });
+    ensureSpace(66);
+    y -= 38;
+    drawText(page, 'PAYROLL NOTE', 42, y, { size: 9, font: bold, color: navy });
     y -= 16;
-    drawText(page, clean(settlement.notes || statement.settlement?.notes).slice(0, 100), 42, y, { font: regular });
+    const note = clean(settlement.notes || statement.settlement?.notes);
+    drawText(page, note.slice(0, 94), 42, y, { font: regular, color: slate });
+    if (note.length > 94) {
+      y -= 14;
+      drawText(page, note.slice(94, 188), 42, y, { font: regular, color: slate });
+    }
   }
+  drawText(page, `Generated by PortFlow • Version ${settlement.version || statement.settlement?.version || 1}`, 42, 36, { size: 7, font: regular, color: slate });
   return Buffer.from(await pdf.save());
 }
 
@@ -115,7 +136,7 @@ export async function sendSettlementEmail({ settlement, company, driver, pdfBuff
       from: process.env.DRIVER_COMPLIANCE_FROM_EMAIL,
       to: [driver.email],
       subject: `Driver settlement ${settlement.periodStart} to ${settlement.periodEnd}`,
-      html: `<p>Hello ${clean(driver.name, 'Driver')},</p><p>Your completed driver settlement for <strong>${settlement.periodStart} to ${settlement.periodEnd}</strong> is attached.</p><p>Net pay: <strong>${money(settlement.statement?.totals?.netPay)}</strong></p><p>${clean(company.name, 'PortFlow')}</p>`,
+      html: `<div style="font-family:Arial,sans-serif;color:#0b1f33;max-width:560px"><h2 style="margin:0 0 8px">Your driver settlement is ready</h2><p>Hello ${clean(driver.name, 'Driver')},</p><p>Your ${clean(settlement.status, 'reviewed').toLowerCase()} driver settlement for <strong>${settlement.periodStart} to ${settlement.periodEnd}</strong> is attached.</p><div style="background:#f0faf9;border-left:4px solid #0b8c80;padding:14px 18px;margin:18px 0"><span style="color:#64748b">Net pay</span><br><strong style="font-size:24px">${money(settlement.statement?.totals?.netPay)}</strong></div><p>Please contact payroll if you have any questions.</p><p>${clean(company.settlementCompanyName || company.name, 'PortFlow')}</p></div>`,
       attachments: [{
         filename: `Settlement-${clean(driver.id || settlement.driverId)}-${settlement.periodStart}-${settlement.periodEnd}.pdf`,
         content: pdfBuffer.toString('base64'),

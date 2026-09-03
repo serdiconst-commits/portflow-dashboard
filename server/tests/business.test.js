@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { dbRun } from '../services/dbUtils.js';
 import { getSummary } from '../services/analyticsService.js';
 import { canUsePayroll, generatePayrollRun, getPayrollRun } from '../services/payrollService.js';
-import { createSettlement } from '../services/driverSettlements.js';
+import { addDeduction, createSettlement, transitionSettlement, updateSettlementLoad } from '../services/driverSettlements.js';
 
 const createDb = async () => {
   const db = new sqlite3.Database(':memory:');
@@ -31,7 +31,8 @@ const createDb = async () => {
   await dbRun(db, `CREATE TABLE settlements (
     id TEXT PRIMARY KEY, companyId TEXT, driverId TEXT, periodStart TEXT, periodEnd TEXT,
     status TEXT, grossPay REAL DEFAULT 0, deductionsTotal REAL DEFAULT 0, netPay REAL DEFAULT 0,
-    statementJson TEXT, notes TEXT, version INTEGER DEFAULT 1, createdAt TEXT, updatedAt TEXT, createdBy TEXT
+    statementJson TEXT, notes TEXT, version INTEGER DEFAULT 1, createdAt TEXT, updatedAt TEXT, createdBy TEXT,
+    reviewedAt TEXT, reviewedBy TEXT, finalizedAt TEXT, finalizedBy TEXT, unreviewReason TEXT
   )`);
   await dbRun(db, `CREATE TABLE settlement_loads (
     id TEXT PRIMARY KEY, settlementId TEXT, loadId TEXT, moveId TEXT, payAmount REAL DEFAULT 0,
@@ -263,4 +264,33 @@ test('reopening an existing draft settlement adds newly completed movements', as
   assert.equal(first.statement.totals.grossPay, 300);
   assert.equal(refreshed.statement.totals.grossPay, 500);
   assert.equal(refreshed.statement.loads.length, 2);
+});
+
+test('settlement review workflow locks edits, records unreview reason, and finalizes safely', async () => {
+  const db = await createDb();
+  await dbRun(db, `INSERT INTO loads (id, companyId, loadDate, appointmentTime, status, customer, driver, driverRate) VALUES ('WF-1', 'COMP-A', '2026-07-10', '2026-07-10T10:00:00Z', 'Completed', 'Workflow Customer', 'DRV-A', '400')`);
+  const draft = await createSettlement(
+    db, 'COMP-A', { driverId: 'DRV-A', periodStart: '2026-07-01', periodEnd: '2026-07-31' }, 'Payroll User'
+  );
+
+  const reviewed = await transitionSettlement(db, 'COMP-A', draft.id, { action: 'review' }, 'Payroll User');
+  assert.equal(reviewed.status, 'Reviewed');
+  await assert.rejects(
+    addDeduction(db, 'COMP-A', draft.id, { description: 'Should fail', amount: -10 }, 'Payroll User'),
+    /Reviewed settlements are locked/
+  );
+
+  const reopened = await transitionSettlement(db, 'COMP-A', draft.id, { action: 'unreview', reason: 'Correct driver rate' }, 'Manager User');
+  assert.equal(reopened.status, 'Draft');
+  assert.equal(reopened.unreviewReason, 'Correct driver rate');
+  await updateSettlementLoad(db, 'COMP-A', draft.id, reopened.statement.loads[0].settlementLoadId, { payAmount: 425 }, 'Manager User');
+
+  await transitionSettlement(db, 'COMP-A', draft.id, { action: 'review' }, 'Manager User');
+  const finalized = await transitionSettlement(db, 'COMP-A', draft.id, { action: 'finalize' }, 'Manager User');
+  assert.equal(finalized.status, 'Finalized');
+  assert.equal(finalized.statement.totals.grossPay, 425);
+  await assert.rejects(
+    transitionSettlement(db, 'COMP-A', draft.id, { action: 'unreview', reason: 'Too late' }, 'Manager User'),
+    /Only Reviewed settlements/
+  );
 });

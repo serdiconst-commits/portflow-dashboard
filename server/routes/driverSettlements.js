@@ -12,6 +12,7 @@ import {
   updateDeduction,
   updateSettlementLoad,
   updateSettlement,
+  transitionSettlement,
 } from '../services/driverSettlements.js';
 import { buildSettlementPdf, sendSettlementEmail } from '../settlementEmail.js';
 
@@ -128,6 +129,22 @@ export default function createDriverSettlementRoutes(db) {
     }
   });
 
+  router.post('/:id/transition', async (req, res) => {
+    try {
+      const settlement = await transitionSettlement(
+        db,
+        req.company.companyId,
+        req.params.id,
+        req.body || {},
+        getActor(req)
+      );
+      if (!settlement) return res.status(404).json({ error: 'Settlement not found.' });
+      res.json(settlement);
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
   router.get('/:id/statement', async (req, res) => {
     try {
       const settlement = await getSettlement(db, req.company.companyId, req.params.id);
@@ -138,12 +155,26 @@ export default function createDriverSettlementRoutes(db) {
     }
   });
 
+  router.get('/:id/pdf', async (req, res) => {
+    try {
+      const settlement = await getSettlement(db, req.company.companyId, req.params.id);
+      if (!settlement) return res.status(404).json({ error: 'Settlement not found.' });
+      const company = await dbGet(db, `SELECT name, invoiceName, settlementCompanyName, invoiceAddress, invoiceSettingsJson FROM companies WHERE id = ?`, [req.company.companyId]);
+      const pdfBuffer = await buildSettlementPdf(settlement, company || {});
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="Settlement-${settlement.driverId}-${settlement.periodStart}-${settlement.periodEnd}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
   router.post('/:id/send-email', async (req, res) => {
     try {
       const settlement = await getSettlement(db, req.company.companyId, req.params.id);
       if (!settlement) return res.status(404).json({ error: 'Settlement not found.' });
-      if (String(settlement.status || '').trim().toLowerCase() !== 'complete') {
-        return res.status(409).json({ error: 'Complete the settlement before emailing it to the driver.' });
+      if (!['reviewed', 'finalized'].includes(String(settlement.status || '').trim().toLowerCase())) {
+        return res.status(409).json({ error: 'Review the settlement before emailing it to the driver.' });
       }
 
       const driver = await dbGet(db, `SELECT id, name, email FROM drivers WHERE id = ? AND companyId = ?`, [settlement.driverId, req.company.companyId]);

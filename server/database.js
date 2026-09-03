@@ -802,6 +802,11 @@ db.run(`ALTER TABLE settlements ADD COLUMN notes TEXT`, (err) => {
 [
   ['emailedAt', 'TEXT'],
   ['emailedTo', 'TEXT'],
+  ['reviewedAt', 'TEXT'],
+  ['reviewedBy', 'TEXT'],
+  ['finalizedAt', 'TEXT'],
+  ['finalizedBy', 'TEXT'],
+  ['unreviewReason', 'TEXT'],
 ].forEach(([column, definition]) => {
   db.run(`ALTER TABLE settlements ADD COLUMN ${column} ${definition}`, (err) => {
     if (err && !err.message.includes('duplicate column name')) {

@@ -2838,6 +2838,8 @@ const [activeBackendSettlement, setActiveBackendSettlement] = useState(null);
 const [settlementEmailSending, setSettlementEmailSending] = useState(false);
 const [settlementBackendLoading, setSettlementBackendLoading] = useState(false);
 const [settlementBackendStatus, setSettlementBackendStatus] = useState('');
+const [settlementWorkspaceSearch, setSettlementWorkspaceSearch] = useState('');
+const [settlementWorkspaceStatus, setSettlementWorkspaceStatus] = useState('All');
 const [backendDeductionDraft, setBackendDeductionDraft] = useState({
   kind: 'deduction',
   calculationType: 'flat',
@@ -4325,6 +4327,37 @@ useEffect(() => {
     driversList.find((driver) => driver.id === activeSettlementDriverId) ||
     null;
 
+  const normalizeSettlementWorkflowStatus = (value) => {
+    const status = String(value || 'Draft').trim().toLowerCase();
+    if (['complete', 'completed', 'finalized'].includes(status)) return 'Finalized';
+    if (status === 'reviewed') return 'Reviewed';
+    return 'Draft';
+  };
+  const activeSettlementStatus = normalizeSettlementWorkflowStatus(
+    activeBackendSettlement?.status || activeBackendSettlement?.statement?.settlement?.status
+  );
+  const isActiveSettlementEditable = !activeBackendSettlement?.id || activeSettlementStatus === 'Draft';
+  const settlementByDriver = new Map(
+    backendSettlements
+      .filter((item) => item.periodStart === settlementStartDate && item.periodEnd === settlementEndDate)
+      .map((item) => [item.driverId, item])
+  );
+  const normalizedSettlementWorkspaceSearch = settlementWorkspaceSearch.trim().toLowerCase();
+  const settlementWorkspaceDrivers = driversList.filter((driver) => {
+    const settlement = settlementByDriver.get(driver.id);
+    const status = normalizeSettlementWorkflowStatus(settlement?.status);
+    const matchesStatus = settlementWorkspaceStatus === 'All' || status === settlementWorkspaceStatus;
+    const matchesSearch = !normalizedSettlementWorkspaceSearch ||
+      `${driver.id} ${driver.name} ${driver.email || ''}`.toLowerCase().includes(normalizedSettlementWorkspaceSearch);
+    return matchesStatus && matchesSearch;
+  });
+  const settlementWorkspaceTotals = backendSettlements.reduce((totals, settlement) => {
+    const status = normalizeSettlementWorkflowStatus(settlement.status);
+    totals.netPay += parseMoney(settlement.netPay);
+    totals[status] += 1;
+    return totals;
+  }, { netPay: 0, Draft: Math.max(0, driversList.length - backendSettlements.length), Reviewed: 0, Finalized: 0 });
+
   const settlementCustomDeductionKey = [
     activeSettlementDriver?.id || 'no-driver',
     settlementStartDate || 'all-start',
@@ -4515,7 +4548,7 @@ useEffect(() => {
   };
 
   const fetchActiveBackendSettlement = async () => {
-    if (!authToken || !activeSettlementDriverId || !settlementStartDate || !settlementEndDate) {
+    if (!authToken || !settlementStartDate || !settlementEndDate) {
       setBackendSettlements([]);
       setActiveBackendSettlement(null);
       return null;
@@ -4524,7 +4557,6 @@ useEffect(() => {
     setSettlementBackendLoading(true);
     try {
       const params = new URLSearchParams({
-        driverId: activeSettlementDriverId,
         periodStart: settlementStartDate,
         periodEnd: settlementEndDate,
       });
@@ -4539,7 +4571,7 @@ useEffect(() => {
       }
 
       setBackendSettlements(Array.isArray(data) ? data : []);
-      const current = (Array.isArray(data) ? data : []).find(
+      const current = activeSettlementDriverId && (Array.isArray(data) ? data : []).find(
         (item) =>
           item.driverId === activeSettlementDriverId &&
           item.periodStart === settlementStartDate &&
@@ -4702,6 +4734,61 @@ useEffect(() => {
     }
   };
 
+  const handleTransitionBackendSettlement = async (action) => {
+    if (!activeBackendSettlement?.id || settlementBackendLoading) return;
+    let reason = '';
+    if (action === 'unreview') {
+      reason = window.prompt('Why does this settlement need to be corrected?')?.trim() || '';
+      if (!reason) return;
+    }
+    const labels = { review: 'mark this settlement Reviewed', finalize: 'finalize and lock this settlement' };
+    if (labels[action] && !window.confirm(`Are you sure you want to ${labels[action]}?`)) return;
+    setSettlementBackendLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/driver-settlements/${activeBackendSettlement.id}/transition`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+        body: JSON.stringify({ action, reason }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update settlement status.');
+      setActiveBackendSettlement(data);
+      setSettlementNote(data.notes || data.statement?.settlement?.notes || '');
+      setSettlementBackendStatus(`Settlement is now ${normalizeSettlementWorkflowStatus(data.status)}.`);
+      await fetchActiveBackendSettlement();
+    } catch (error) {
+      setSettlementBackendStatus(error.message);
+    } finally {
+      setSettlementBackendLoading(false);
+    }
+  };
+
+  const handleDownloadBackendSettlementPdf = async () => {
+    if (!activeBackendSettlement?.id) return;
+    setSettlementBackendLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/driver-settlements/${activeBackendSettlement.id}/pdf`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to create settlement PDF.');
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Settlement-${activeBackendSettlement.driverId}-${activeBackendSettlement.periodStart}-${activeBackendSettlement.periodEnd}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setSettlementBackendStatus(error.message);
+    } finally {
+      setSettlementBackendLoading(false);
+    }
+  };
+
   const handleSendBackendSettlementEmail = async () => {
     if (!activeBackendSettlement?.id || settlementEmailSending) return;
     const driverEmail = activeBackendSettlement.statement?.driver?.email ||
@@ -4710,7 +4797,7 @@ useEffect(() => {
       alert('This driver does not have an email address in the driver profile.');
       return;
     }
-    const confirmed = window.confirm(`Send this completed settlement PDF to ${driverEmail}?`);
+    const confirmed = window.confirm(`Send this settlement PDF to ${driverEmail}?`);
     if (!confirmed) return;
 
     setSettlementEmailSending(true);
@@ -4737,6 +4824,11 @@ useEffect(() => {
     if (activeView !== 'settlements') return;
     fetchActiveBackendSettlement();
   }, [activeView, activeSettlementDriverId, settlementStartDate, settlementEndDate, authToken]);
+
+  useEffect(() => {
+    if (activeView !== 'settlements' || settlementStartDate || settlementEndDate) return;
+    handleSetSettlementWeek('current');
+  }, [activeView]);
 
   const getSettlementAppointmentDateValue = (load) => {
     const appointmentTime = String(load.appointmentTime || '').trim();
@@ -5138,6 +5230,10 @@ const assignPickupMove = async (moveId) => {
 };
 
 const saveMoveDriverRate = async (moveId, currentRate = '') => {
+  if (!isActiveSettlementEditable) {
+    setSettlementPayStatus('Unreview this settlement before changing movement pay.');
+    return;
+  }
   const driverRate = moveAssignmentDrafts[moveId]?.driverRate ?? currentRate;
   try {
     const res = await fetch(`${API_BASE}/api/load-moves/${moveId}/rate`, {
@@ -6467,6 +6563,10 @@ const handleResetSettlementPayDraft = (loadId) => {
 };
 
 const handleSaveSettlementPay = async (load) => {
+  if (!isActiveSettlementEditable) {
+    setSettlementPayStatus('Unreview this settlement before changing load pay.');
+    return;
+  }
   const draft = settlementPayDrafts[load.id] || {};
   const updatedLoad = {
     ...load,
@@ -14497,11 +14597,92 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
       {activeView === 'settlements' && (
         <div className="settlements-view">
+        <section className="panel settlement-workspace-panel">
+          <div className="settlement-workspace-heading">
+            <div>
+              <span className="settlement-eyebrow">Accounts Payable</span>
+              <h2>Driver Settlements</h2>
+              <p>Review every driver for the selected pay period from one workspace.</p>
+            </div>
+            <div className="settlement-workspace-total">
+              <span>Period net pay</span>
+              <strong>{formatMoney(settlementWorkspaceTotals.netPay)}</strong>
+            </div>
+          </div>
+
+          <div className="settlement-week-rail" aria-label="Settlement pay periods">
+            <button type="button" className="settlement-week-arrow" onClick={() => handleSetSettlementWeek('previous')} aria-label="Previous week">‹</button>
+            <div className="settlement-week-options">
+              {[-2, -1, 0, 1, 2].map((offset) => {
+                const reference = settlementStartDate ? new Date(`${settlementStartDate}T12:00:00`) : new Date();
+                reference.setDate(reference.getDate() + offset * 7);
+                const start = getStartOfWeek(reference);
+                const end = getEndOfWeek(reference);
+                const startValue = start.toISOString().split('T')[0];
+                const endValue = end.toISOString().split('T')[0];
+                const selected = startValue === settlementStartDate && endValue === settlementEndDate;
+                return (
+                  <button
+                    type="button"
+                    key={startValue}
+                    className={`settlement-week-chip ${selected ? 'active' : ''}`}
+                    onClick={() => {
+                      setSettlementStartDate(startValue);
+                      setSettlementEndDate(endValue);
+                      setSelectedSettlementLoadId('');
+                    }}
+                  >
+                    <small>{offset === 0 ? 'Selected period' : offset < 0 ? 'Previous' : 'Upcoming'}</small>
+                    <strong>{start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – {end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong>
+                  </button>
+                );
+              })}
+            </div>
+            <button type="button" className="settlement-week-arrow" onClick={() => handleSetSettlementWeek('next')} aria-label="Next week">›</button>
+          </div>
+
+          <div className="settlement-period-summary">
+            <button type="button" className={settlementWorkspaceStatus === 'All' ? 'active' : ''} onClick={() => setSettlementWorkspaceStatus('All')}><strong>{driversList.length}</strong><span>All drivers</span></button>
+            <button type="button" className={settlementWorkspaceStatus === 'Draft' ? 'active' : ''} onClick={() => setSettlementWorkspaceStatus('Draft')}><strong>{settlementWorkspaceTotals.Draft}</strong><span>Draft</span></button>
+            <button type="button" className={settlementWorkspaceStatus === 'Reviewed' ? 'active' : ''} onClick={() => setSettlementWorkspaceStatus('Reviewed')}><strong>{settlementWorkspaceTotals.Reviewed}</strong><span>Reviewed</span></button>
+            <button type="button" className={settlementWorkspaceStatus === 'Finalized' ? 'active' : ''} onClick={() => setSettlementWorkspaceStatus('Finalized')}><strong>{settlementWorkspaceTotals.Finalized}</strong><span>Finalized</span></button>
+            <input type="search" value={settlementWorkspaceSearch} onChange={(event) => setSettlementWorkspaceSearch(event.target.value)} placeholder="Search driver" aria-label="Search driver settlements" />
+          </div>
+
+          <div className="settlement-driver-list">
+            {settlementWorkspaceDrivers.map((driver) => {
+              const periodSettlement = settlementByDriver.get(driver.id);
+              const status = normalizeSettlementWorkflowStatus(periodSettlement?.status);
+              const selected = driver.id === activeSettlementDriverId;
+              return (
+                <button
+                  type="button"
+                  key={driver.id}
+                  className={`settlement-driver-row ${selected ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelectedSettlementDriverId(driver.id);
+                    setSelectedSettlementLoadId('');
+                  }}
+                >
+                  <span className="settlement-driver-avatar">{String(driver.name || driver.id).charAt(0).toUpperCase()}</span>
+                  <span className="settlement-driver-identity"><strong>{driver.name || driver.id}</strong><small>{driver.id} · {driver.email || 'No email'}</small></span>
+                  <span><small>Moves</small><strong>{periodSettlement?.statement?.totals?.loadCount ?? periodSettlement?.loadCount ?? '—'}</strong></span>
+                  <span><small>Gross</small><strong>{formatMoney(periodSettlement?.grossPay || 0)}</strong></span>
+                  <span><small>Net pay</small><strong>{formatMoney(periodSettlement?.netPay || 0)}</strong></span>
+                  <span className={`settlement-status-pill ${status.toLowerCase()}`}>{periodSettlement ? status : 'Not created'}</span>
+                  <span className="settlement-row-chevron">›</span>
+                </button>
+              );
+            })}
+            {settlementWorkspaceDrivers.length === 0 && <p className="settlement-empty-workspace">No drivers match this view.</p>}
+          </div>
+        </section>
+
         <section className="panel settlement-entry-panel">
           <div className="panel-header">
             <div>
-              <h3>Payroll Load Pay Entry</h3>
-              <p className="panel-subtitle">Choose one driver and settlement period, then add pay, deductions, and payroll notes.</p>
+              <h3>{activeSettlementDriver ? `${activeSettlementDriver.name} Settlement` : 'Select a Driver'}</h3>
+              <p className="panel-subtitle">Open a driver above to manage moves, deductions, notes, review, PDF, and email.</p>
             </div>
             <span>{settlementPeriodLabel}</span>
           </div>
@@ -14526,7 +14707,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 type="button"
                 className="primary-btn"
                 onClick={activeBackendSettlement?.id ? refreshActiveBackendSettlement : createBackendSettlement}
-                disabled={settlementBackendLoading || !activeSettlementDriverId || !settlementStartDate || !settlementEndDate}
+                disabled={settlementBackendLoading || !activeSettlementDriverId || !settlementStartDate || !settlementEndDate || (activeBackendSettlement?.id && !isActiveSettlementEditable)}
               >
                 {activeBackendSettlement?.id ? 'Refresh Database Settlement' : 'Create Database Settlement'}
               </button>
@@ -14540,21 +14721,31 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   Reload
                 </button>
               )}
-              {activeBackendSettlement?.id &&
-                String(activeBackendSettlement.status || activeBackendSettlement.statement?.settlement?.status || '')
-                  .trim()
-                  .toLowerCase() !== 'complete' && (
+              {activeBackendSettlement?.id && activeSettlementStatus === 'Draft' && (
                   <button
                     type="button"
                     className="primary-btn"
-                    onClick={handleCompleteBackendSettlement}
+                    onClick={() => handleTransitionBackendSettlement('review')}
                     disabled={settlementBackendLoading}
                   >
-                    Complete Settlement
+                    Mark Reviewed
                   </button>
                 )}
+              {activeBackendSettlement?.id && activeSettlementStatus === 'Reviewed' && (
+                <>
+                  <button type="button" className="secondary-btn" onClick={() => handleTransitionBackendSettlement('unreview')} disabled={settlementBackendLoading}>Unreview</button>
+                  <button type="button" className="primary-btn" onClick={() => handleTransitionBackendSettlement('finalize')} disabled={settlementBackendLoading}>Finalize Settlement</button>
+                </>
+              )}
             </div>
           </div>
+
+          {activeBackendSettlement?.id && !isActiveSettlementEditable && (
+            <div className="settlement-lock-notice">
+              <strong>{activeSettlementStatus} settlement</strong>
+              <span>{activeSettlementStatus === 'Reviewed' ? 'Unreview it with a reason before making corrections.' : 'This settlement is finalized and permanently locked.'}</span>
+            </div>
+          )}
 
           <div className="settlement-entry-grid">
             <label className="settlement-entry-field settlement-entry-driver">
@@ -14706,6 +14897,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onClick={handleSaveSettlementNote}
                 disabled={
                   settlementBackendLoading ||
+                  !isActiveSettlementEditable ||
                   !activeSettlementDriverId ||
                   !settlementStartDate ||
                   !settlementEndDate
@@ -14748,8 +14940,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       aria-label={`Pay for movement ${move.sequence}`}
                       value={moveAssignmentDrafts[move.id]?.driverRate ?? move.driverRate ?? ''}
                       onChange={(e) => setMoveAssignmentDrafts((prev) => ({ ...prev, [move.id]: { ...(prev[move.id] || {}), driverRate: e.target.value } }))}
+                      disabled={!isActiveSettlementEditable}
                     />
-                    <button type="button" className="secondary-btn compact-btn" onClick={() => saveMoveDriverRate(move.id, move.driverRate)}>Save Move Pay</button>
+                    <button type="button" className="secondary-btn compact-btn" onClick={() => saveMoveDriverRate(move.id, move.driverRate)} disabled={!isActiveSettlementEditable}>Save Move Pay</button>
                   </div>
                 ))}
                 <label className="settlement-entry-field">
@@ -14761,6 +14954,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     onChange={(e) =>
                       handleSettlementPayChange(selectedSettlementLoad.id, 'driverRate', e.target.value)
                     }
+                    disabled={!isActiveSettlementEditable}
                   />
                 </label>
 
@@ -14773,6 +14967,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     onChange={(e) =>
                       handleSettlementPayChange(selectedSettlementLoad.id, 'lumper', e.target.value)
                     }
+                    disabled={!isActiveSettlementEditable}
                   />
                 </label>
 
@@ -14785,6 +14980,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     onChange={(e) =>
                       handleSettlementPayChange(selectedSettlementLoad.id, 'fuelAdvance', e.target.value)
                     }
+                    disabled={!isActiveSettlementEditable}
                   />
                 </label>
 
@@ -14831,6 +15027,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     type="button"
                     className="primary-btn"
                     onClick={() => handleSaveSettlementPay(selectedSettlementLoad)}
+                    disabled={!isActiveSettlementEditable}
                   >
                     Save Load Pay
                   </button>
@@ -15048,6 +15245,20 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 </tbody>
               </table>
             </div>
+
+            {(activeBackendSettlement.statement.auditTrail || []).length > 0 && (
+              <div className="settlement-audit-panel">
+                <h4>Settlement History</h4>
+                <div>
+                  {activeBackendSettlement.statement.auditTrail.slice(0, 8).map((event) => (
+                    <span key={event.id}>
+                      <strong>{String(event.action || '').replaceAll('_', ' ')}</strong>
+                      <small>{event.changedBy || 'System'} · {formatDateTime(event.createdAt)}</small>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
         )}
 
@@ -15170,7 +15381,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <button type="button" className="primary-btn" onClick={handlePrintBackendSettlementReport}>
                   Print Report
                 </button>
-                {String(activeBackendSettlement.status || activeBackendSettlement.statement?.settlement?.status || '').trim().toLowerCase() === 'complete' && (
+                <button type="button" className="primary-btn" onClick={handleDownloadBackendSettlementPdf} disabled={settlementBackendLoading}>
+                  Download PDF
+                </button>
+                {['Reviewed', 'Finalized'].includes(activeSettlementStatus) && (
                   <button type="button" className="primary-btn" onClick={handleSendBackendSettlementEmail} disabled={settlementEmailSending}>
                     {settlementEmailSending ? 'Sending...' : 'Send to Driver'}
                   </button>
