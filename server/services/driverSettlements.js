@@ -77,6 +77,11 @@ const buildStatement = ({ settlement, driver, loads, deductions, auditLogs }) =>
   const loadLines = loads.map((row) => ({
     settlementLoadId: row.settlementLoadId,
     loadId: row.loadId,
+    moveId: row.moveId || '',
+    moveType: row.moveType || '',
+    moveOrigin: row.moveOrigin || '',
+    moveDestination: row.moveDestination || '',
+    completedAt: row.moveCompletedAt || '',
     appointmentTime: row.appointmentTime || '',
     customer: row.customer || '',
     containerNumber: row.containerNumber || '',
@@ -162,6 +167,7 @@ async function getSettlementParts(db, companyId, settlementId) {
     `SELECT
        sl.id AS settlementLoadId,
        sl.loadId,
+       sl.moveId,
        sl.payAmount,
        sl.movesCount,
        sl.description,
@@ -171,11 +177,16 @@ async function getSettlementParts(db, companyId, settlementId) {
        l.containerNumber,
        l.referenceNumber,
        l.bookingNumber,
-       l.miles
+       l.miles,
+       lm.moveType,
+       lm.origin AS moveOrigin,
+       lm.destination AS moveDestination,
+       lm.completedAt AS moveCompletedAt
      FROM settlement_loads sl
      LEFT JOIN loads l ON l.id = sl.loadId
+     LEFT JOIN load_moves lm ON lm.id = sl.moveId
      WHERE sl.settlementId = ?
-     ORDER BY COALESCE(l.appointmentTime, sl.createdAt), sl.createdAt`,
+     ORDER BY COALESCE(lm.completedAt, l.appointmentTime, sl.createdAt), sl.createdAt`,
     [settlementId]
   );
   const deductions = await dbAll(
@@ -209,9 +220,77 @@ async function writeSettlementAudit(db, settlementId, action, oldValue, newValue
   );
 }
 
+async function syncCompletedMovementLines(db, {
+  companyId,
+  settlementId,
+  driverId,
+  periodStart,
+  periodEnd,
+  createdAt = new Date().toISOString(),
+}) {
+  const completedMoves = await dbAll(
+    db,
+    `SELECT
+       lm.*,
+       l.customer,
+       l.containerNumber,
+       l.referenceNumber,
+       l.bookingNumber
+     FROM load_moves lm
+     JOIN loads l ON l.id = lm.loadId AND l.companyId = lm.companyId
+     LEFT JOIN settlement_loads paidMove ON paidMove.moveId = lm.id
+     WHERE lm.companyId = ?
+       AND LOWER(COALESCE(lm.status, '')) = 'completed'
+       AND TRIM(LOWER(COALESCE(NULLIF(lm.completedBy, ''), lm.driverId))) = TRIM(LOWER(?))
+       AND DATE(SUBSTR(lm.completedAt, 1, 10)) BETWEEN DATE(?) AND DATE(?)
+       AND COALESCE(l.deletedAt, '') = ''
+       AND paidMove.id IS NULL
+     ORDER BY lm.completedAt, lm.loadId, lm.sequence`,
+    [companyId, driverId, periodStart, periodEnd]
+  );
+
+  for (const move of completedMoves) {
+    const moveType = String(move.moveType || 'MOVE').trim().replaceAll('_', ' ');
+    const route = [move.origin, move.destination].filter(Boolean).join(' to ');
+    await dbRun(
+      db,
+      `INSERT INTO settlement_loads (
+         id, settlementId, loadId, moveId, payAmount, movesCount, description, source, createdAt
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        uuidv4(),
+        settlementId,
+        move.loadId,
+        move.id,
+        roundMoney(parseMoney(move.driverRate)),
+        1,
+        `${moveType} move${route ? ` - ${route}` : ''}`,
+        'completed_move',
+        createdAt,
+      ]
+    );
+  }
+
+  return completedMoves.length;
+}
+
 export async function recalculateSettlement(db, companyId, settlementId, changedBy = '') {
+  const settlementRecord = await dbGet(
+    db,
+    `SELECT * FROM settlements WHERE id = ? AND companyId = ?`,
+    [settlementId, companyId]
+  );
+  if (!settlementRecord) return null;
+  if (String(settlementRecord.status || 'Draft').trim().toLowerCase() !== 'complete') {
+    await syncCompletedMovementLines(db, {
+      companyId,
+      settlementId,
+      driverId: settlementRecord.driverId,
+      periodStart: settlementRecord.periodStart,
+      periodEnd: settlementRecord.periodEnd,
+    });
+  }
   const parts = await getSettlementParts(db, companyId, settlementId);
-  if (!parts) return null;
 
   const statement = buildStatement(parts);
   const now = new Date().toISOString();
@@ -303,7 +382,21 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
     [companyId, driverId, periodStart, periodEnd]
   );
   if (existingSettlement?.id) {
-    return getSettlement(db, companyId, existingSettlement.id);
+    const existing = await dbGet(
+      db,
+      `SELECT * FROM settlements WHERE id = ? AND companyId = ?`,
+      [existingSettlement.id, companyId]
+    );
+    const addedMoves = await syncCompletedMovementLines(db, {
+      companyId,
+      settlementId: existing.id,
+      driverId,
+      periodStart: existing.periodStart,
+      periodEnd: existing.periodEnd,
+    });
+    return addedMoves > 0
+      ? recalculateSettlement(db, companyId, existing.id, createdBy)
+      : getSettlement(db, companyId, existing.id);
   }
 
   const settlementId = input.id || uuidv4();
@@ -329,6 +422,15 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
       ]
     );
 
+    await syncCompletedMovementLines(db, {
+      companyId,
+      settlementId,
+      driverId,
+      periodStart,
+      periodEnd,
+      createdAt: now,
+    });
+
     const config = getDriverPayConfig(driver);
     const loads = await dbAll(
       db,
@@ -336,6 +438,12 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
        FROM loads
        WHERE companyId = ?
          AND COALESCE(deletedAt, '') = ''
+         AND NOT EXISTS (
+           SELECT 1 FROM load_moves lm
+           WHERE lm.companyId = loads.companyId
+             AND lm.loadId = loads.id
+             AND LOWER(COALESCE(lm.status, '')) = 'completed'
+         )
          AND (
            (driver = ? AND LOWER(COALESCE(status, '')) IN ('delivered', 'completed')
              AND DATE(SUBSTR(COALESCE(NULLIF(appointmentTime, ''), loadDate), 1, 10)) BETWEEN DATE(?) AND DATE(?))
@@ -372,8 +480,8 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
       for (const line of lines) {
         await dbRun(
           db,
-          `INSERT INTO settlement_loads (id, settlementId, loadId, payAmount, movesCount, description, source, createdAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO settlement_loads (id, settlementId, loadId, moveId, payAmount, movesCount, description, source, createdAt)
+           VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
           [uuidv4(), settlementId, load.id, line.amount, 1, line.description, line.source, now]
         );
       }

@@ -818,6 +818,7 @@ db.run(`
     id TEXT PRIMARY KEY,
     settlementId TEXT NOT NULL,
     loadId TEXT,
+    moveId TEXT,
     payAmount REAL DEFAULT 0,
     movesCount INTEGER DEFAULT 1,
     description TEXT,
@@ -826,9 +827,19 @@ db.run(`
     FOREIGN KEY (settlementId) REFERENCES settlements(id) ON DELETE CASCADE
   )
 `);
+db.run(`ALTER TABLE settlement_loads ADD COLUMN moveId TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding moveId column to settlement_loads:', err.message);
+  }
+});
 db.run(`
   CREATE INDEX IF NOT EXISTS idx_settlement_loads_settlement
   ON settlement_loads(settlementId)
+`);
+db.run(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_settlement_loads_move
+  ON settlement_loads(moveId)
+  WHERE moveId IS NOT NULL AND moveId != ''
 `);
 db.run(`
   CREATE TABLE IF NOT EXISTS deductions (
