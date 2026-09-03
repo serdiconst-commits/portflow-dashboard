@@ -1149,7 +1149,9 @@ const getLoadMoveTemplates = (load = {}) => {
   }
 
   if (workflowType === 'DROP_AND_PICK') {
-    const dropDestination = yard || delivery;
+    // A Drop & Pick ends the first move at the customer. That same address is
+    // the origin of the later pickup/return move.
+    const dropDestination = delivery || yard;
     return [
       { moveType: 'DROP', status: driverId ? 'Assigned' : 'Planned', origin: pickup, destination: dropDestination, driverId, driverRate, assignedAt },
       { moveType: 'PICKUP_RETURN', status: 'Waiting Customer', origin: dropDestination, destination: returnLocation, driverId: '', driverRate: '', assignedAt: '' },

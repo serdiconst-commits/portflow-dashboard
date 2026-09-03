@@ -10,3 +10,9 @@ test('load details can render a dropped legacy load before its pickup move is re
     /selectedPickupReturnMove\?\.origin \|\| selectedLoad\.dropLocation \|\| selectedLoad\.delivery/
   );
 });
+
+test('Drop and Pick uses the customer delivery as the next pickup origin', async () => {
+  const source = await readFile(new URL('../server.js', import.meta.url), 'utf8');
+  assert.match(source, /const dropDestination = delivery \|\| yard/);
+  assert.match(source, /origin: dropDestination, destination: returnLocation/);
+});

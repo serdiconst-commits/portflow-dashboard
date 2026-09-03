@@ -4604,6 +4604,27 @@ useEffect(() => {
     }
   };
 
+  const refreshActiveBackendSettlement = async () => {
+    if (!activeBackendSettlement?.id) return fetchActiveBackendSettlement();
+    setSettlementBackendLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/driver-settlements/${activeBackendSettlement.id}/recalculate`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to refresh settlement');
+      setActiveBackendSettlement(data);
+      setSettlementBackendStatus('Settlement refreshed with newly completed movements.');
+      return data;
+    } catch (error) {
+      setSettlementBackendStatus(`Failed to refresh database settlement: ${error.message}`);
+      return null;
+    } finally {
+      setSettlementBackendLoading(false);
+    }
+  };
+
   const ensureBackendSettlement = async () => {
     if (activeBackendSettlement?.id) return activeBackendSettlement;
     return createBackendSettlement();
@@ -7977,7 +7998,7 @@ const handleDeleteUser = async (user) => {
       Type: 'Load Pay',
       Driver: `${statement.driver?.id || ''} - ${statement.driver?.name || ''}`.trim(),
       Period: `${statement.settlement?.periodStart || ''} to ${statement.settlement?.periodEnd || ''}`,
-      Date: formatAppointmentTime(line.appointmentTime) || '',
+      Date: formatAppointmentTime(line.completedAt || line.appointmentTime) || '',
       Load: line.loadId || '',
       Customer: line.customer || '',
       Container: line.containerNumber || '',
@@ -8076,8 +8097,8 @@ const handleDeleteUser = async (user) => {
       .map(
         (line) => `
           <tr>
-            <td>${escapeHtml(formatAppointmentTime(line.appointmentTime) || '-')}</td>
-            <td>${escapeHtml(line.loadId || line.description || '-')}</td>
+            <td>${escapeHtml(formatAppointmentTime(line.completedAt || line.appointmentTime) || '-')}</td>
+            <td>${escapeHtml(line.description || line.loadId || '-')}</td>
             <td>${escapeHtml(line.containerNumber || '-')}</td>
             <td>${escapeHtml(formatMiles(line.miles))}</td>
             <td>${escapeHtml(line.source || 'auto')}</td>
@@ -10927,7 +10948,7 @@ const renderDriverPaymentsPanel = () => (
                   <h3>Loads</h3>
                   {(statement.loads || []).map((loadLine) => (
                     <div className="driver-payment-load" key={loadLine.settlementLoadId}>
-                      <span>{loadLine.loadId || loadLine.description || 'Payment'}</span>
+                      <span>{loadLine.description || loadLine.loadId || 'Payment'}</span>
                       <strong>{formatMoney(loadLine.payAmount)}</strong>
                     </div>
                   ))}
@@ -14504,7 +14525,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <button
                 type="button"
                 className="primary-btn"
-                onClick={activeBackendSettlement?.id ? fetchActiveBackendSettlement : createBackendSettlement}
+                onClick={activeBackendSettlement?.id ? refreshActiveBackendSettlement : createBackendSettlement}
                 disabled={settlementBackendLoading || !activeSettlementDriverId || !settlementStartDate || !settlementEndDate}
               >
                 {activeBackendSettlement?.id ? 'Refresh Database Settlement' : 'Create Database Settlement'}
@@ -15174,8 +15195,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <table>
                 <thead>
                   <tr>
-                    <th>Appointment</th>
+                    <th>Completed</th>
                     <th>Load</th>
+                    <th>Movement</th>
+                    <th>Route</th>
                     <th>Customer</th>
                     <th>Container</th>
                     <th>Miles</th>
@@ -15186,13 +15209,15 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <tbody>
                   {(activeBackendSettlement.statement.loads || []).length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="settlement-empty-cell">No database settlement loads yet.</td>
+                      <td colSpan="9" className="settlement-empty-cell">No database settlement loads yet.</td>
                     </tr>
                   ) : (
                     activeBackendSettlement.statement.loads.map((line) => (
                       <tr key={line.settlementLoadId}>
-                        <td>{formatAppointmentTime(line.appointmentTime) || '-'}</td>
+                        <td>{formatAppointmentTime(line.completedAt || line.appointmentTime) || '-'}</td>
                         <td>{line.loadId || line.description || '-'}</td>
+                        <td>{line.moveType ? line.moveType.replaceAll('_', ' ') : '-'}</td>
+                        <td>{line.moveOrigin || line.moveDestination ? `${line.moveOrigin || '-'} → ${line.moveDestination || '-'}` : '-'}</td>
                         <td>{line.customer || '-'}</td>
                         <td>
                           {line.loadId ? (

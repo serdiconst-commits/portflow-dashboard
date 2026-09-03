@@ -34,8 +34,15 @@ const createDb = async () => {
     statementJson TEXT, notes TEXT, version INTEGER DEFAULT 1, createdAt TEXT, updatedAt TEXT, createdBy TEXT
   )`);
   await dbRun(db, `CREATE TABLE settlement_loads (
-    id TEXT PRIMARY KEY, settlementId TEXT, loadId TEXT, payAmount REAL DEFAULT 0,
+    id TEXT PRIMARY KEY, settlementId TEXT, loadId TEXT, moveId TEXT, payAmount REAL DEFAULT 0,
     movesCount INTEGER DEFAULT 1, description TEXT, source TEXT, createdAt TEXT
+  )`);
+  await dbRun(db, `CREATE UNIQUE INDEX idx_settlement_loads_move ON settlement_loads(moveId) WHERE moveId IS NOT NULL AND moveId != ''`);
+  await dbRun(db, `CREATE TABLE load_moves (
+    id TEXT PRIMARY KEY, companyId TEXT, loadId TEXT, sequence INTEGER, moveType TEXT,
+    status TEXT, origin TEXT, destination TEXT, driverId TEXT, driverRate TEXT,
+    assignedAt TEXT, startedAt TEXT, completedAt TEXT, completedBy TEXT, readyAt TEXT,
+    notes TEXT, createdAt TEXT, updatedAt TEXT
   )`);
   await dbRun(db, `CREATE TABLE deductions (
     id TEXT PRIMARY KEY, settlement_id TEXT, description TEXT, amount REAL,
@@ -127,4 +134,133 @@ test('drop and hook pay is attributed to each movement driver', async () => {
   assert.equal(dropSettlement.statement.loads[0].source, 'drop_move');
   assert.equal(hookSettlement.statement.totals.grossPay, 200);
   assert.equal(hookSettlement.statement.loads[0].source, 'hook_move');
+});
+
+test('completed Drop and Pick movements pay each completing driver from the move ledger', async () => {
+  const db = await createDb();
+  await dbRun(db, `INSERT INTO drivers (id, companyId, name, truck) VALUES ('DRV-RETURN', 'COMP-A', 'Return Driver', 'A2')`);
+  await dbRun(
+    db,
+    `INSERT INTO loads (id, companyId, loadDate, appointmentTime, status, customer, driver, containerNumber, movementMode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ['MOVE-1', 'COMP-A', '2026-07-10', '2026-07-10T08:00:00Z', 'Delivered', 'Move Customer', 'DRV-RETURN', 'CONT-MOVE-1', 'Direct']
+  );
+  await dbRun(
+    db,
+    `INSERT INTO load_moves (
+       id, companyId, loadId, sequence, moveType, status, origin, destination,
+       driverId, driverRate, completedAt, completedBy, createdAt, updatedAt
+     ) VALUES
+       ('MOVE-DROP', 'COMP-A', 'MOVE-1', 1, 'DROP', 'Completed', 'Bayport Terminal', 'Customer Yard',
+        'DRV-A', '$325.00', '2026-07-10T15:00:00Z', 'DRV-A', '2026-07-10T08:00:00Z', '2026-07-10T15:00:00Z'),
+       ('MOVE-RETURN', 'COMP-A', 'MOVE-1', 2, 'PICKUP_RETURN', 'Completed', 'Customer Yard', 'Empty Depot',
+        'DRV-RETURN', '$225.00', '2026-07-11T12:00:00Z', 'DRV-RETURN', '2026-07-10T08:00:00Z', '2026-07-11T12:00:00Z')`
+  );
+
+  const dropSettlement = await createSettlement(
+    db, 'COMP-A', { driverId: 'DRV-A', periodStart: '2026-07-01', periodEnd: '2026-07-31' }, 'USR-A'
+  );
+  const returnSettlement = await createSettlement(
+    db, 'COMP-A', { driverId: 'DRV-RETURN', periodStart: '2026-07-01', periodEnd: '2026-07-31' }, 'USR-A'
+  );
+
+  assert.equal(dropSettlement.statement.totals.grossPay, 325);
+  assert.equal(dropSettlement.statement.loads[0].moveId, 'MOVE-DROP');
+  assert.equal(dropSettlement.statement.loads[0].source, 'completed_move');
+  assert.equal(returnSettlement.statement.totals.grossPay, 225);
+  assert.equal(returnSettlement.statement.loads[0].moveId, 'MOVE-RETURN');
+  assert.equal(returnSettlement.statement.loads[0].moveOrigin, 'Customer Yard');
+  assert.equal(returnSettlement.statement.loads[0].moveDestination, 'Empty Depot');
+});
+
+test('the same driver receives both completed Drop and Pick movement rates', async () => {
+  const db = await createDb();
+  await dbRun(
+    db,
+    `INSERT INTO loads (id, companyId, loadDate, appointmentTime, status, customer, driver, containerNumber, movementMode)
+     VALUES ('MOVE-2', 'COMP-A', '2026-07-10', '2026-07-10T08:00:00Z', 'Delivered', 'Move Customer', 'DRV-A', 'CONT-MOVE-2', 'Direct')`
+  );
+  await dbRun(
+    db,
+    `INSERT INTO load_moves (
+       id, companyId, loadId, sequence, moveType, status, origin, destination,
+       driverId, driverRate, completedAt, completedBy, createdAt, updatedAt
+     ) VALUES
+       ('SAME-DROP', 'COMP-A', 'MOVE-2', 1, 'DROP', 'Completed', 'Terminal', 'Customer',
+        'DRV-A', '300', '2026-07-10T12:00:00Z', 'DRV-A', '2026-07-10T08:00:00Z', '2026-07-10T12:00:00Z'),
+       ('SAME-RETURN', 'COMP-A', 'MOVE-2', 2, 'PICKUP_RETURN', 'Completed', 'Customer', 'Depot',
+        'DRV-A', '200', '2026-07-11T12:00:00Z', 'DRV-A', '2026-07-10T08:00:00Z', '2026-07-11T12:00:00Z')`
+  );
+
+  const settlement = await createSettlement(
+    db, 'COMP-A', { driverId: 'DRV-A', periodStart: '2026-07-01', periodEnd: '2026-07-31' }, 'USR-A'
+  );
+
+  assert.equal(settlement.statement.totals.grossPay, 500);
+  assert.equal(settlement.statement.loads.length, 2);
+  assert.deepEqual(settlement.statement.loads.map((line) => line.moveId), ['SAME-DROP', 'SAME-RETURN']);
+});
+
+test('a completed movement cannot be paid again in an overlapping settlement', async () => {
+  const db = await createDb();
+  await dbRun(
+    db,
+    `INSERT INTO loads (id, companyId, loadDate, status, customer, driver, containerNumber)
+     VALUES ('MOVE-3', 'COMP-A', '2026-07-10', 'Delivered', 'Move Customer', 'DRV-A', 'CONT-MOVE-3')`
+  );
+  await dbRun(
+    db,
+    `INSERT INTO load_moves (
+       id, companyId, loadId, sequence, moveType, status, origin, destination,
+       driverId, driverRate, completedAt, completedBy, createdAt, updatedAt
+     ) VALUES ('PAID-ONCE', 'COMP-A', 'MOVE-3', 1, 'DROP', 'Completed', 'Terminal', 'Customer',
+       'DRV-A', '275', '2026-07-10T12:00:00Z', 'DRV-A', '2026-07-10T08:00:00Z', '2026-07-10T12:00:00Z')`
+  );
+
+  const first = await createSettlement(
+    db, 'COMP-A', { driverId: 'DRV-A', periodStart: '2026-07-01', periodEnd: '2026-07-31' }, 'USR-A'
+  );
+  const overlapping = await createSettlement(
+    db, 'COMP-A', { driverId: 'DRV-A', periodStart: '2026-07-10', periodEnd: '2026-07-20' }, 'USR-A'
+  );
+
+  assert.equal(first.statement.totals.grossPay, 275);
+  assert.equal(overlapping.statement.totals.grossPay, 0);
+  assert.equal(overlapping.statement.loads.length, 0);
+});
+
+test('reopening an existing draft settlement adds newly completed movements', async () => {
+  const db = await createDb();
+  await dbRun(
+    db,
+    `INSERT INTO loads (id, companyId, loadDate, status, customer, driver, containerNumber)
+     VALUES ('MOVE-4', 'COMP-A', '2026-07-10', 'Dropped', 'Move Customer', 'DRV-A', 'CONT-MOVE-4')`
+  );
+  await dbRun(
+    db,
+    `INSERT INTO load_moves (
+       id, companyId, loadId, sequence, moveType, status, origin, destination,
+       driverId, driverRate, completedAt, completedBy, createdAt, updatedAt
+     ) VALUES ('REFRESH-DROP', 'COMP-A', 'MOVE-4', 1, 'DROP', 'Completed', 'Terminal', 'Customer',
+       'DRV-A', '300', '2026-07-10T12:00:00Z', 'DRV-A', '2026-07-10T08:00:00Z', '2026-07-10T12:00:00Z')`
+  );
+
+  const first = await createSettlement(
+    db, 'COMP-A', { driverId: 'DRV-A', periodStart: '2026-07-01', periodEnd: '2026-07-31' }, 'USR-A'
+  );
+  await dbRun(
+    db,
+    `INSERT INTO load_moves (
+       id, companyId, loadId, sequence, moveType, status, origin, destination,
+       driverId, driverRate, completedAt, completedBy, createdAt, updatedAt
+     ) VALUES ('REFRESH-RETURN', 'COMP-A', 'MOVE-4', 2, 'PICKUP_RETURN', 'Completed', 'Customer', 'Depot',
+       'DRV-A', '200', '2026-07-11T12:00:00Z', 'DRV-A', '2026-07-11T08:00:00Z', '2026-07-11T12:00:00Z')`
+  );
+  const refreshed = await createSettlement(
+    db, 'COMP-A', { driverId: 'DRV-A', periodStart: '2026-07-01', periodEnd: '2026-07-31' }, 'USR-A'
+  );
+
+  assert.equal(first.statement.totals.grossPay, 300);
+  assert.equal(refreshed.statement.totals.grossPay, 500);
+  assert.equal(refreshed.statement.loads.length, 2);
 });
