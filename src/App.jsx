@@ -5286,6 +5286,7 @@ const selectedAccountingInvoice = selectedAccountingLoad
 const hasLastFreeDay = (load) => Boolean(String(load.lfd || load.lastFreeDay || '').trim());
 const hasAppointment = (load) => Boolean(String(load.appointmentTime || '').trim());
 const getAppointmentFilterDate = () => {
+  if (appointmentDateFilter === 'all') return '';
   if (appointmentDateFilter === 'yesterday') return getRelativeDateString(-1);
   if (appointmentDateFilter === 'tomorrow') return getRelativeDateString(1);
   if (appointmentDateFilter === 'custom') return customAppointmentDate;
@@ -13087,6 +13088,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 onChange={(e) => setAppointmentDateFilter(e.target.value)}
                 className="filter-select"
               >
+                <option value="all">All Appointments</option>
                 <option value="yesterday">Yesterday</option>
                 <option value="today">Today</option>
                 <option value="tomorrow">Tomorrow</option>
@@ -13827,7 +13829,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <option value="Dispatched">Dispatched</option>
                             <option value="In Transit">In Transit</option>
                             <option value="Dropped">Dropped</option>
-                            <option value="Delivered">Delivered</option>
+                            <option value="Completed">Completed</option>
                             <option value="Available">Available</option>
                             <option value="Not Available">Not Available</option>
                           </select>
