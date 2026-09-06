@@ -22,6 +22,7 @@ import {
 import './App.css';
 import DispatchBoard from './components/DispatchBoard/DispatchBoard.jsx';
 import StatusBadge from './components/DispatchBoard/StatusBadge.jsx';
+import DriverPodCapture from './components/DriverPodCapture.jsx';
 
 function LoadLocationEditor({
   editorId,
@@ -1192,6 +1193,7 @@ const [availableCustomAppointmentDate, setAvailableCustomAppointmentDate] = useS
 const [lfdDateFilter, setLfdDateFilter] = useState('all');
 const [lfdCustomDate, setLfdCustomDate] = useState(getTodayDate());
 const [driverMobileTab, setDriverMobileTab] = useState('active');
+const [driverPodLoad, setDriverPodLoad] = useState(null);
 const [driverSettlements, setDriverSettlements] = useState([]);
 const [driverSettlementDetails, setDriverSettlementDetails] = useState({});
 const [driverPaymentsStatus, setDriverPaymentsStatus] = useState('');
@@ -10957,6 +10959,10 @@ const renderDriverLoadCard = (load) => {
       </div>
 
       <section className="driver-paperwork-panel">
+        <button type="button" className="driver-pod-launch" onClick={() => setDriverPodLoad(load)}>
+          <span><strong>Receiver signature & POD</strong><small>Sign, save, and optionally email a copy</small></span>
+          <span aria-hidden="true">↗</span>
+        </button>
         <div className="driver-paperwork-header">
           <div>
             <span>Paperwork</span>
@@ -11434,6 +11440,17 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           {driverVisibleLoads.map(renderDriverLoadCard)}
         </div>
       )}
+      {driverPodLoad && <DriverPodCapture
+        key={`${currentUser.id}:${driverPodLoad.id}`}
+        load={driverPodLoad}
+        actorKey={`${currentUser.companyId || company?.id || ''}:${currentUser.id}`}
+        apiBase={API_BASE}
+        authToken={authToken}
+        onClose={() => setDriverPodLoad(null)}
+        onSaved={document => setLoadsData(previous => previous.map(load => load.id === driverPodLoad.id
+          ? { ...load, documents: [...(load.documents || []).filter(item => item.id !== document.id), document] }
+          : load))}
+      />}
     </main>
   );
 }
@@ -13482,7 +13499,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <div className="panel-header">
                     <h3>{isEditing ? 'Edit Load' : 'Load Details'}</h3>
                     <div className="details-actions">
-                      <span>{selectedLoad.id}</span>
+                      <span>Load # {selectedLoad.id}</span>
                       <button
                         className="secondary-btn"
                         onClick={() => handleCheckPortHouston(selectedLoad)}
@@ -17264,6 +17281,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <div className="documents-header">
                 <h4>Review Completed Load</h4>
                 <div className="documents-toolbar">
+                  <span>Load # {selectedCompletedReviewLoad.id}</span>
                   <span>{selectedCompletedReviewLoad.containerNumber || selectedCompletedReviewLoad.id}</span>
                   <button
                     type="button"
@@ -18129,7 +18147,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div>
                   <h3>Bill Load Details</h3>
                   <p className="panel-subtitle">
-                    {selectedAccountingLoad.containerNumber || 'No container'} • {selectedAccountingLoad.referenceNumber || selectedAccountingLoad.id}
+                    Load # {selectedAccountingLoad.id} • {selectedAccountingLoad.containerNumber || 'No container'} • {selectedAccountingLoad.referenceNumber || 'No reference'}
                   </p>
                 </div>
                 <div className="details-actions">

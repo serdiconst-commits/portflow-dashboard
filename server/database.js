@@ -4,6 +4,7 @@ import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { encrypt, isEncrypted } from './encryption.js';
+import { signedPodSchema, podEmailSchema } from './driverPod.js';
 
 sqlite3.verbose();
 
@@ -18,6 +19,8 @@ const db = new sqlite3.Database(dbPath);
 console.log('DATABASE FILE:', dbPath);
 function initDatabase() {
   db.serialize(() => {
+    db.run(signedPodSchema);
+    db.run(podEmailSchema);
     // CUSTOMERS TABLE
     db.run(`
   CREATE TABLE IF NOT EXISTS customers (
