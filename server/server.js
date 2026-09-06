@@ -181,6 +181,7 @@ import createAiAnalyticsRoutes from './routes/aiAnalyticsRoutes.js';
 import { runBackup } from './backup-database.js';
 import { encrypt, decrypt, safeCompare } from './encryption.js';
 import createDriverSettlementRoutes from './routes/driverSettlements.js';
+import createDriverPodRoutes from './routes/driverPods.js';
 import createInvoiceRoutes from './routes/invoices.js';
 import createPayrollRoutes from './routes/payrollRoutes.js';
 import {
@@ -233,6 +234,7 @@ app.use((req, res, next) => {
 });
 
 
+app.use('/api/driver-pods', express.json({ limit: '512kb' }));
 app.use(express.json());
 
 const PORT = process.env.PORT || 4000;
@@ -1975,6 +1977,7 @@ const requireTenantOwner = (req, res, next) => {
 
 app.use('/api/invoices', authenticate, createInvoiceRoutes(db));
 app.use('/api/driver-settlements', authenticate, createDriverSettlementRoutes(db));
+app.use('/api/driver-pods', authenticate, createDriverPodRoutes(db, { uploadsDir, audit: writeAuditLog }));
 app.use('/api/analytics', authenticate, createAnalyticsRoutes(db));
 app.use('/api/payroll', authenticate, createPayrollRoutes(db));
 app.use('/api/ai', authenticate, createAiAnalyticsRoutes(db));
