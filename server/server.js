@@ -4298,8 +4298,9 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
           return res.status(500).json({ error: driverErr.message });
         }
 
+        const driverChanged = Boolean(normalizedDriver) && normalizedDriver !== String(existingLoad.driver || '').trim();
         if (
-          normalizedDriver &&
+          driverChanged &&
           nextWorkflowType === 'DROP_AND_PICK' &&
           String(existingLoad.status || '').trim().toLowerCase() === 'dropped'
         ) {
@@ -4314,7 +4315,6 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
             return res.status(500).json({ error: droppedByErr.message });
           }
 
-      const driverChanged = Boolean(normalizedDriver) && normalizedDriver !== String(existingLoad.driver || '').trim();
       const nextStatus = driverChanged
         ? 'Dispatched'
         : getStatusAfterDriverAssignment(normalizedDriver, l.status, existingLoad.status || 'Pending');
