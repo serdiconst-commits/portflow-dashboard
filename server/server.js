@@ -1,3 +1,4 @@
+import { reconcileLoadMoves, movementPickupOrigin } from './loadMovePlan.js';
 import { normalizeScac, requirePortHoustonScac, matchesPortHoustonScope, portHoustonDocumentMetadata, isPortHoustonDocumentVisible, portHoustonDocumentScopeColumns } from './portHoustonScope.js';
 import 'dotenv/config';
 import express from 'express';
@@ -1205,72 +1206,52 @@ const getLoadMoveTemplates = (load = {}) => {
   ];
 };
 
-const syncLoadMoves = (load, callback) => {
+const syncLoadMoves = (load, callback, previousLoad) => {
   const now = new Date().toISOString();
-  const templates = getLoadMoveTemplates(load);
   db.all(
     `SELECT * FROM load_moves WHERE companyId = ? AND loadId = ? ORDER BY sequence ASC`,
     [load.companyId, load.id],
     (readErr, existingMoves = []) => {
       if (readErr) return callback(readErr);
-
-      const lockedMoves = existingMoves.filter((move) =>
-        ['Arrived at Pickup', 'Loaded', 'In Transit', 'Completed'].includes(String(move.status || ''))
-      );
-      const firstUnlockedSequence = lockedMoves.length
-        ? Math.max(...lockedMoves.map((move) => Number(move.sequence) || 0)) + 1
-        : 1;
-      const remainingTemplates = templates.slice(firstUnlockedSequence - 1);
-      if (
-        firstUnlockedSequence > 1 &&
-        remainingTemplates[0] &&
-        remainingTemplates[0].status === 'Planned' &&
-        String(load.driver || '').trim()
-      ) {
-        remainingTemplates[0] = {
-          ...remainingTemplates[0],
-          status: 'Assigned',
-          driverId: String(load.driver || '').trim(),
-          driverRate: String(load.driverRate || '').trim(),
-          assignedAt: now,
-        };
+      const plan = reconcileLoadMoves(load, existingMoves, getLoadMoveTemplates(load), previousLoad);
+      const retainedIds = new Set(plan.map((move) => move.id).filter(Boolean));
+      const operations = [];
+      for (const move of existingMoves) {
+        if (retainedIds.has(move.id)) continue;
+        operations.push([
+          `DELETE FROM load_moves WHERE id = ? AND companyId = ?
+           AND status IN ('Planned', 'Assigned', 'Waiting Customer', 'Ready for Pickup')
+           AND NOT EXISTS (SELECT 1 FROM settlement_loads WHERE moveId = load_moves.id)`,
+          [move.id, load.companyId],
+        ]);
       }
-
-      db.serialize(() => {
-        db.run(
-          `DELETE FROM load_moves
-           WHERE companyId = ? AND loadId = ? AND sequence >= ?
-             AND status NOT IN ('Arrived at Pickup', 'Loaded', 'In Transit', 'Completed')`,
-          [load.companyId, load.id, firstUnlockedSequence],
-          (deleteErr) => {
-            if (deleteErr) return callback(deleteErr);
-            if (!remainingTemplates.length) return callback(null);
-
-            let pending = remainingTemplates.length;
-            let insertError = null;
-            remainingTemplates.forEach((move, index) => {
-              const sequence = firstUnlockedSequence + index;
-              db.run(
-                `INSERT INTO load_moves (
-                  id, companyId, loadId, sequence, moveType, status, origin, destination,
-                  driverId, driverRate, assignedAt, startedAt, completedAt, completedBy,
-                  readyAt, notes, createdAt, updatedAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', '', ?, ?)`,
-                [
-                  uuidv4(), load.companyId, load.id, sequence, move.moveType, move.status,
-                  move.origin, move.destination, move.driverId, move.driverRate,
-                  move.assignedAt, now, now,
-                ],
-                (insertErr) => {
-                  if (insertErr && !insertError) insertError = insertErr;
-                  pending -= 1;
-                  if (pending === 0) callback(insertError);
-                }
-              );
-            });
-          }
-        );
-      });
+      for (const move of plan) {
+        const existing = existingMoves.find((row) => row.id === move.id);
+        if (existing && JSON.stringify(existing) === JSON.stringify(move)) continue;
+        if (existing) {
+          operations.push([
+            `UPDATE load_moves SET moveType = ?, status = ?, origin = ?, destination = ?,
+             driverId = ?, driverRate = ?, assignedAt = ?, updatedAt = ?
+             WHERE id = ? AND companyId = ? AND status NOT IN ('Completed', 'Cancelled')`,
+            [move.moveType, move.status, move.origin, move.destination, move.driverId,
+              move.driverRate, move.driverId ? (move.assignedAt || now) : '', now, move.id, load.companyId],
+          ]);
+        } else {
+          operations.push([
+            `INSERT INTO load_moves (id, companyId, loadId, sequence, moveType, status, origin, destination,
+             driverId, driverRate, assignedAt, startedAt, completedAt, completedBy, readyAt, notes, createdAt, updatedAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', '', ?, ?)`,
+            [uuidv4(), load.companyId, load.id, move.sequence, move.moveType, move.status,
+              move.origin, move.destination, move.driverId, move.driverRate, move.assignedAt || '', now, now],
+          ]);
+        }
+      }
+      const runNext = (index) => {
+        if (index === operations.length) return callback(null);
+        const [sql, params] = operations[index];
+        db.run(sql, params, (err) => err ? callback(err) : runNext(index + 1));
+      };
+      runNext(0);
     }
   );
 };
@@ -1292,7 +1273,8 @@ const attachMovesToLoads = (loads, callback) => {
         return map;
       }, {});
       callback(null, loads.map((load) => {
-        const loadMoves = movesByLoad[load.id] || [];
+        const storedMoves = movesByLoad[load.id] || [];
+        const loadMoves = storedMoves.map((move) => ({ ...move, origin: movementPickupOrigin(move, storedMoves) }));
         const currentMove =
           loadMoves.find((move) => ['Arrived at Pickup', 'Loaded', 'In Transit', 'Assigned'].includes(move.status)) ||
           loadMoves.find((move) => !['Completed', 'Cancelled'].includes(move.status)) ||
@@ -4381,10 +4363,6 @@ app.put('/api/loads/:id', authenticate, (req, res) => {
       }
 
       const nextWorkflowType = normalizeLoadWorkflow(l.workflowType || existingLoad.workflowType);
-      const nextDropLocation = String(l.dropLocation ?? existingLoad.dropLocation ?? '').trim();
-      if (nextWorkflowType === 'PRE_PULL_LIVE' && !nextDropLocation) {
-        return res.status(400).json({ error: 'Choose the main yard / pre-pull drop location.' });
-      }
 
       normalizeDriverAssignment(companyId, l.driver, (driverErr, normalizedDriver) => {
         if (driverErr) {
@@ -4564,7 +4542,7 @@ console.log('LOAD AFTER UPDATE =', updatedLoad);
                   }
                   res.json(rows[0]);
                 });
-              });
+              }, existingLoad);
             }
           );
         }
@@ -5031,7 +5009,11 @@ app.put('/api/load-moves/:id/assign', authenticate, requireRoles(dispatchLocatio
     if (driverErr) return res.status(500).json({ error: driverErr.message });
     if (!normalizedDriver) return res.status(400).json({ error: 'Choose a valid driver.' });
     db.get(
-      `SELECT load_moves.*, loads.containerNumber, loads.returnLocation
+      `SELECT load_moves.*, loads.containerNumber, loads.returnLocation,
+         (SELECT prior.destination FROM load_moves prior
+          WHERE prior.companyId = load_moves.companyId AND prior.loadId = load_moves.loadId
+            AND prior.moveType = 'DROP' AND prior.status = 'Completed' AND prior.sequence < load_moves.sequence
+          ORDER BY prior.sequence DESC LIMIT 1) AS recordedDropLocation
        FROM load_moves JOIN loads ON loads.id = load_moves.loadId AND loads.companyId = load_moves.companyId
        WHERE load_moves.id = ? AND load_moves.companyId = ?`,
       [moveId, companyId],
@@ -5045,24 +5027,26 @@ app.put('/api/load-moves/:id/assign', authenticate, requireRoles(dispatchLocatio
         if (move.moveType === 'PICKUP_RETURN' && !effectiveReturnLocation) {
           return res.status(400).json({ error: 'Add the return location before assigning a driver.' });
         }
+        const pickupOrigin = move.moveType === 'PICKUP_RETURN'
+          ? (move.recordedDropLocation || move.origin || '') : (move.origin || '');
         const assignedAt = new Date().toISOString();
         db.run(
-          `UPDATE load_moves SET driverId = ?, driverRate = ?, destination = ?, status = 'Assigned', assignedAt = ?, updatedAt = ? WHERE id = ? AND companyId = ?`,
-          [normalizedDriver, driverRate, effectiveReturnLocation || move.destination || '', assignedAt, assignedAt, moveId, companyId],
+          `UPDATE load_moves SET driverId = ?, driverRate = ?, destination = ?, origin = ?, status = 'Assigned', assignedAt = ?, updatedAt = ? WHERE id = ? AND companyId = ?`,
+          [normalizedDriver, driverRate, effectiveReturnLocation || move.destination || '', pickupOrigin, assignedAt, assignedAt, moveId, companyId],
           (updateErr) => {
             if (updateErr) return res.status(500).json({ error: updateErr.message });
             db.run(
               `UPDATE loads SET driver = ?, driverRate = ?, status = 'Dispatched', pickup = ?, delivery = ?, returnLocation = ? WHERE id = ? AND companyId = ?`,
-              [normalizedDriver, driverRate, move.origin || '', effectiveReturnLocation || move.destination || '', effectiveReturnLocation || move.returnLocation || '', move.loadId, companyId],
+              [normalizedDriver, driverRate, pickupOrigin, effectiveReturnLocation || move.destination || '', effectiveReturnLocation || move.returnLocation || '', move.loadId, companyId],
               (loadErr) => {
                 if (loadErr) return res.status(500).json({ error: loadErr.message });
                 writeAuditLog(req, {
                   action: 'MOVE_ASSIGN', entityType: 'LOAD_MOVE', entityId: moveId,
                   entityLabel: move.containerNumber || move.loadId,
-                  oldValue: { driverId: move.driverId || '', driverRate: move.driverRate || '', status: move.status },
-                  newValue: { driverId: normalizedDriver, driverRate, destination: effectiveReturnLocation || move.destination || '', status: 'Assigned', assignedAt },
+                  oldValue: { driverId: move.driverId || '', driverRate: move.driverRate || '', origin: move.origin || '', status: move.status },
+                  newValue: { driverId: normalizedDriver, driverRate, origin: pickupOrigin, destination: effectiveReturnLocation || move.destination || '', status: 'Assigned', assignedAt },
                 });
-                res.json({ ...move, driverId: normalizedDriver, driverRate, destination: effectiveReturnLocation || move.destination || '', status: 'Assigned', assignedAt, updatedAt: assignedAt });
+                res.json({ ...move, origin: pickupOrigin, driverId: normalizedDriver, driverRate, destination: effectiveReturnLocation || move.destination || '', status: 'Assigned', assignedAt, updatedAt: assignedAt });
               }
             );
           }
@@ -5096,7 +5080,14 @@ app.put('/api/load-moves/:id/rate', authenticate, requireRoles(movePayRoles), (r
             oldValue: { driverId: move.driverId || move.completedBy || '', driverRate: move.driverRate || '' },
             newValue: { driverId: move.driverId || move.completedBy || '', driverRate },
           });
-          res.json({ ...move, driverRate, updatedAt });
+          db.run(
+            `UPDATE loads SET driverRate = ? WHERE id = ? AND companyId = ?
+             AND TRIM(LOWER(driver)) = TRIM(LOWER(?))
+             AND ? IN ('Assigned', 'Arrived at Pickup', 'Loaded', 'In Transit')`,
+            [driverRate, move.loadId, companyId, move.driverId || '', move.status],
+            (loadErr) => loadErr ? res.status(500).json({ error: 'Movement pay saved, but load pay could not be refreshed.' }) :
+              res.json({ ...move, driverRate, updatedAt })
+          );
         }
       );
     }
@@ -6507,7 +6498,7 @@ app.put('/api/loads/:id/billing-status', authenticate, (req, res) => {
   );
 });
 
-const updateCurrentMoveForLoadStatus = (req, loadId, status, callback) => {
+const updateCurrentMoveForLoadStatus = (req, loadId, status, callback, allowInitialPlan = true) => {
   const companyId = req.company.companyId;
   const driverId = String(req.user?.driverId || '').trim();
   db.get(
@@ -6517,13 +6508,32 @@ const updateCurrentMoveForLoadStatus = (req, loadId, status, callback) => {
      ORDER BY sequence ASC LIMIT 1`,
     [companyId, loadId, driverId, driverId],
     (findErr, move) => {
-      if (findErr || !move) return callback(findErr || null);
+      if (findErr) return callback(findErr);
+      if (!move) {
+        if (!allowInitialPlan) return callback(null);
+        // Capture an unplanned first movement while its driver and initial pay
+        // still belong to this load; never infer a historical driver's pay.
+        return db.get(
+          `SELECT * FROM loads WHERE id = ? AND companyId = ? AND workflowType = 'DROP_AND_PICK'
+           AND TRIM(COALESCE(driver, '')) != ''
+           AND NOT EXISTS (SELECT 1 FROM load_moves WHERE companyId = loads.companyId AND loadId = loads.id)`,
+          [loadId, companyId],
+          (loadErr, load) => {
+            if (loadErr || !load) return callback(loadErr || null);
+            syncLoadMoves(load, (planErr) => planErr ? callback(planErr) :
+              updateCurrentMoveForLoadStatus(req, loadId, status, callback, false));
+          }
+        );
+      }
       const now = new Date().toISOString();
       const isComplete = status === 'Dropped' || status === 'Delivered';
       const nextMoveStatus = isComplete ? 'Completed' : status;
       db.run(
         `UPDATE load_moves SET status = ?, startedAt = CASE WHEN startedAt = '' THEN ? ELSE startedAt END,
-           completedAt = ?, completedBy = ?, updatedAt = ?
+           completedAt = ?, completedBy = ?, updatedAt = ?,
+           driverRate = CASE WHEN moveType = 'DROP' THEN COALESCE(
+             (SELECT driverRate FROM loads WHERE id = load_moves.loadId AND companyId = load_moves.companyId
+              AND TRIM(LOWER(driver)) = TRIM(LOWER(load_moves.driverId))), driverRate) ELSE driverRate END
          WHERE id = ? AND companyId = ?`,
         [
           nextMoveStatus,
@@ -6642,6 +6652,11 @@ app.put('/api/loads/:id/status', authenticate, (req, res) => {
         if (oldErr) {
           console.error('Error reading load before status change:', oldErr.message);
           return res.status(500).json({ error: 'Failed to update load status' });
+        }
+
+        if (status === 'Dropped' && normalizeLoadWorkflow(oldLoad?.workflowType) === 'PRE_PULL_LIVE' &&
+            !String(oldLoad?.dropLocation || '').trim()) {
+          return res.status(400).json({ error: 'Add the pre-pull yard location before recording the drop.' });
         }
 
         db.run(query, params, function (err) {

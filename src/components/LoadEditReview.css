@@ -1,0 +1,14 @@
+.load-edit-review { width: min(760px, calc(100vw - 32px)); max-height: 85vh; padding: 0; border: 1px solid #dbe5e7; border-radius: 18px; color: #183c43; background: #fff; box-shadow: 0 24px 80px #12383c40; }
+.load-edit-review::backdrop { background: #102e3a99; }
+.load-edit-review header { padding: 24px; }
+.load-edit-review header p { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.load-edit-review h2 { margin: 0 0 8px; }
+.load-edit-review header span { color: #526770; }
+.load-edit-review-scroll { max-height: 48vh; overflow: auto; }
+.load-edit-review table { width: 100%; border-collapse: collapse; table-layout: fixed; text-align: left; }
+.load-edit-review th, .load-edit-review td { padding: 14px 20px; border-bottom: 1px solid #e5ebed; overflow-wrap: anywhere; white-space: pre-wrap; vertical-align: top; }
+.load-edit-review thead { background: #f1f6f6; }
+.load-edit-review td:last-child { background: #eef8f4; font-weight: 600; }
+.load-edit-review-note { margin: 16px 24px 0; font-size: 13px; }
+.load-edit-review footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; padding: 20px 24px; }
+@media (max-width: 520px) { .load-edit-review th, .load-edit-review td { padding: 10px; font-size: 13px; } .load-edit-review footer button { flex: 1; } }
