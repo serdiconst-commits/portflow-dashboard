@@ -291,6 +291,10 @@ db.run(`ALTER TABLE companies ADD COLUMN podSettingsJson TEXT`, (err) => {
     console.error('Error adding podSettingsJson column to companies:', err.message);
   }
 });
+db.run(`ALTER TABLE companies ADD COLUMN portHoustonScac TEXT NOT NULL DEFAULT ''`, (err) => {
+  if (err && !err.message.includes('duplicate column')) console.error('Error adding company SCAC:', err.message);
+});
+
 db.run(`ALTER TABLE companies ADD COLUMN portHoustonUsername TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding portHoustonUsername column to companies:', err.message);
@@ -1047,6 +1051,10 @@ db.run(`
         FOREIGN KEY (loadId) REFERENCES loads(id) ON DELETE CASCADE
       )
     `);
+
+    db.run(`ALTER TABLE documents ADD COLUMN portHoustonMetadataJson TEXT`, (err) => {
+      if (err && !err.message.includes('duplicate column')) console.error('Error adding EIR provenance:', err.message);
+    });
 
     // INVOICES TABLE
     db.run(`

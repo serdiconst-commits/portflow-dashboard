@@ -1,3 +1,4 @@
+import { normalizeScac, requirePortHoustonScac, matchesPortHoustonScope, portHoustonDocumentMetadata, isPortHoustonDocumentVisible, portHoustonDocumentScopeColumns } from './portHoustonScope.js';
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -155,6 +156,7 @@ const getCompanyPayload = (company = {}) => ({
   invoiceSettings: parseInvoiceSettings(company),
   podSettings: parsePodSettings(company),
   logoUrl: getCompanyLogoUrl(company),
+  portHoustonScac: normalizeScac(company.portHoustonScac),
   portHoustonUsername: company.portHoustonUsername || '',
   portHoustonConfigured: Object.values(getSanitizedPortHoustonCredentials(company)).some((item) => item.configured),
   portHoustonCredentials: getSanitizedPortHoustonCredentials(company),
@@ -163,7 +165,7 @@ const getCompanyPayload = (company = {}) => ({
 });
 
 const companyProfileSelect =
-  'id, name, email, logoPath, invoiceName, invoiceAddress, invoiceSettingsJson, settlementCompanyName, podSettingsJson, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson, companyTimezone, allowAiAnalytics';
+  'id, name, email, logoPath, invoiceName, invoiceAddress, invoiceSettingsJson, settlementCompanyName, podSettingsJson, portHoustonScac, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson, companyTimezone, allowAiAnalytics';
 
 const parseNumericField = (value, fallback = 0) => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
@@ -370,7 +372,7 @@ const attachDocumentsToLoads = (loads, callback) => {
   const placeholders = loadIds.map(() => '?').join(',');
 
   db.all(
-    `SELECT * FROM documents WHERE loadId IN (${placeholders}) ORDER BY uploadedAt DESC`,
+    `SELECT d.*, ${portHoustonDocumentScopeColumns} FROM documents d JOIN loads l ON l.id = d.loadId JOIN companies c ON c.id = l.companyId WHERE d.loadId IN (${placeholders}) ORDER BY d.uploadedAt DESC`,
     loadIds,
     (err, documents = []) => {
       if (err) {
@@ -378,13 +380,17 @@ const attachDocumentsToLoads = (loads, callback) => {
         return;
       }
 
-      const documentsByLoad = documents.reduce((groups, doc) => {
+      const unverifiedByLoad = documents.filter(doc => !isPortHoustonDocumentVisible(doc)).reduce((counts, doc) => {
+        counts[doc.loadId] = (counts[doc.loadId] || 0) + 1;
+        return counts;
+      }, {});
+      const documentsByLoad = documents.filter(isPortHoustonDocumentVisible).reduce((groups, doc) => {
         const isExternalUrl = /^https?:\/\//i.test(String(doc.filePath || ''));
         const normalizedDoc = {
           ...doc,
           url: doc.filePath
             ? isExternalUrl
-              ? doc.filePath
+              ? `/api/documents/${doc.id}/file`
               : `/uploads/${path.basename(doc.filePath)}`
             : '',
         };
@@ -398,6 +404,7 @@ const attachDocumentsToLoads = (loads, callback) => {
         loads.map((load) => ({
           ...load,
           documents: documentsByLoad[load.id] || [],
+          unverifiedPortHoustonEirCount: unverifiedByLoad[load.id] || 0,
         }))
       );
     }
@@ -591,6 +598,13 @@ const mergePortHoustonGateTransactions = (...results) => {
   };
 };
 
+const scopePortHoustonGateHistory = (history, transactions = []) => {
+  const numbers = new Set(transactions.map(item => String(item.nbr || '')));
+  const events = (history?.events || []).filter(event =>
+    extractGateTransactionNumbersFromHistory({ events: [event] }).some(number => numbers.has(number)));
+  return { events, lastGateMove: events[0] || null, raw: events };
+};
+
 const ensureDownloadedPortHoustonDocument = ({
   loadId,
   companyId,
@@ -612,8 +626,8 @@ const ensureDownloadedPortHoustonDocument = ({
        WHERE d.loadId = ?
          AND l.companyId = ?
          AND UPPER(TRIM(d.category)) = ?
-         AND d.name LIKE ?`,
-      [loadId, companyId, category, `%${transactionId}%`],
+         AND (d.name LIKE ? OR d.name LIKE ?)`,
+      [loadId, companyId, category, `%-${transactionId}.pdf`, `%-${transactionId}.jpg`],
       (findErr, existingDoc) => {
         if (findErr) {
           reject(findErr);
@@ -621,7 +635,16 @@ const ensureDownloadedPortHoustonDocument = ({
         }
 
         if (existingDoc) {
-          resolve(existingDoc);
+          // Re-download into a document-specific path; legacy paths may have been shared.
+          const filePath = path.join(uploadsDir, `${existingDoc.id}.pdf`);
+          const size = `${(document.buffer.length / 1024).toFixed(1)} KB`;
+          try { fs.writeFileSync(filePath, document.buffer); }
+          catch (error) { reject(error); return; }
+          db.run('UPDATE documents SET filePath = ?, size = ?, type = ? WHERE id = ?',
+            [filePath, size, document.contentType || 'application/pdf', existingDoc.id], (err) => {
+              if (err) return reject(err);
+              resolve({ ...existingDoc, filePath, size, type: document.contentType || 'application/pdf' });
+            });
           return;
         }
 
@@ -629,7 +652,7 @@ const ensureDownloadedPortHoustonDocument = ({
         const uploadedAt = new Date().toISOString();
         const extension = String(document.contentType || '').toLowerCase().includes('image') ? 'jpg' : 'pdf';
         const safeLoadId = String(loadId).replace(/[^a-z0-9_-]/gi, '-');
-        const fileName = `${safeLoadId}-${category.replace(/\s+/g, '-').toLowerCase()}-${transactionId}.${extension}`;
+        const fileName = `${sanitizePdfFilename(companyId)}-${safeLoadId}-${category.replace(/\s+/g, '-').toLowerCase()}-${transactionId}.${extension}`;
         const filePath = path.join(uploadsDir, fileName);
 
         fs.writeFileSync(filePath, document.buffer);
@@ -669,6 +692,20 @@ const ensureDownloadedPortHoustonDocument = ({
       }
     );
   });
+
+const saveScopedPortHoustonDocument = async (saveDocument, options) => {
+  const load = await new Promise((resolve, reject) => db.get(
+    'SELECT containerNumber FROM loads WHERE id = ? AND companyId = ?',
+    [options.loadId, options.companyId], (err, row) => err ? reject(err) : resolve(row)));
+  const credentials = await getCompanyPortHoustonCredentials(options.companyId);
+  const metadata = portHoustonDocumentMetadata(options.transaction, credentials.scac, load?.containerNumber);
+  const document = await saveDocument(options);
+  if (!document) return null;
+  await new Promise((resolve, reject) => db.run(
+    'UPDATE documents SET portHoustonMetadataJson = ? WHERE id = ? AND loadId = ?',
+    [metadata, document.id, options.loadId], err => err ? reject(err) : resolve()));
+  return { ...document, portHoustonMetadataJson: metadata, url: `/api/documents/${document.id}/file` };
+};
 
 const formatPortHoustonDate = (value = '') => {
   if (!value) return '';
@@ -820,7 +857,7 @@ const ensureGeneratedPortHoustonEirDocument = ({
          AND l.companyId = ?
          AND UPPER(TRIM(d.category)) = ?
          AND d.name LIKE ?`,
-      [loadId, companyId, category, `%${transactionId}%`],
+      [loadId, companyId, category, `%-${transactionId}-portflow-summary.pdf`],
       async (findErr, existingDoc) => {
         if (findErr) {
           reject(findErr);
@@ -830,7 +867,7 @@ const ensureGeneratedPortHoustonEirDocument = ({
         if (existingDoc) {
           try {
             const buffer = await createGeneratedPortHoustonEirPdf({ category, transaction, load });
-            const filePath = existingDoc.filePath || path.join(uploadsDir, existingDoc.name);
+            const filePath = path.join(uploadsDir, `${existingDoc.id}-portflow-summary.pdf`);
             const uploadedAt = new Date().toISOString();
             const size = `${(buffer.length / 1024).toFixed(1)} KB`;
             fs.writeFileSync(filePath, buffer);
@@ -856,7 +893,7 @@ const ensureGeneratedPortHoustonEirDocument = ({
           const uploadedAt = new Date().toISOString();
           const safeContainer = sanitizePdfFilename(transaction.containerNumber || load.containerNumber || loadId, 'container');
           const safeCategory = category.replace(/\s+/g, '-').toLowerCase();
-          const fileName = `${safeContainer}-${safeCategory}-${transactionId}-portflow-summary.pdf`;
+          const fileName = `${sanitizePdfFilename(companyId)}-${sanitizePdfFilename(loadId)}-${safeContainer}-${safeCategory}-${transactionId}-portflow-summary.pdf`;
           const filePath = path.join(uploadsDir, fileName);
           const buffer = await createGeneratedPortHoustonEirPdf({ category, transaction, load });
 
@@ -1295,7 +1332,7 @@ const pickPortHoustonCredentials = (credentials = {}, preferredKey = '') => {
 const getCompanyPortHoustonCredentials = (companyId, terminal = '') =>
   new Promise((resolve, reject) => {
     db.get(
-      `SELECT portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
+      `SELECT portHoustonScac, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
       [companyId],
       (err, company) => {
         if (err) {
@@ -1304,10 +1341,10 @@ const getCompanyPortHoustonCredentials = (companyId, terminal = '') =>
         }
 
         resolve(
-          pickPortHoustonCredentials(
+          { ...pickPortHoustonCredentials(
             parsePortHoustonCredentials(company || {}),
             getPreferredPortHoustonCredentialKey(terminal)
-          )
+          ), scac: normalizeScac(company?.portHoustonScac) }
         );
       }
     );
@@ -1393,7 +1430,8 @@ const runAutomaticPortHoustonAvailabilityCheck = async () => {
       const facility = getLoadPortHoustonFacility(load);
 
       try {
-        const credentials = await getCompanyPortHoustonCredentials(load.companyId, facility);
+        const credentials = { ...await getCompanyPortHoustonCredentials(load.companyId, facility), containerNumber };
+        requirePortHoustonScac(credentials.scac);
         const availability = await getContainerAvailability(containerNumber, credentials, facility);
         if (typeof availability?.available !== 'boolean') continue;
 
@@ -1504,6 +1542,7 @@ const queryLoadsForAutomaticEirCheck = (offset) =>
          AND EXISTS (
            SELECT 1 FROM companies c
            WHERE c.id = l.companyId
+             AND TRIM(COALESCE(c.portHoustonScac, '')) <> ''
              AND (
                TRIM(COALESCE(c.portHoustonUsername, '')) <> ''
                OR TRIM(COALESCE(c.portHoustonCredentialsJson, '')) <> ''
@@ -1513,11 +1552,17 @@ const queryLoadsForAutomaticEirCheck = (offset) =>
            NOT EXISTS (
              SELECT 1 FROM documents d
              WHERE d.loadId = l.id
+               AND json_valid(d.portHoustonMetadataJson)
+               AND json_extract(d.portHoustonMetadataJson, '$.scac') = (SELECT portHoustonScac FROM companies WHERE id = l.companyId)
+               AND json_extract(d.portHoustonMetadataJson, '$.containerNumber') = UPPER(TRIM(l.containerNumber))
                AND UPPER(TRIM(COALESCE(d.category, ''))) = 'IN EIR'
            )
            OR NOT EXISTS (
              SELECT 1 FROM documents d
              WHERE d.loadId = l.id
+               AND json_valid(d.portHoustonMetadataJson)
+               AND json_extract(d.portHoustonMetadataJson, '$.scac') = (SELECT portHoustonScac FROM companies WHERE id = l.companyId)
+               AND json_extract(d.portHoustonMetadataJson, '$.containerNumber') = UPPER(TRIM(l.containerNumber))
                AND UPPER(TRIM(COALESCE(d.category, ''))) = 'OUT EIR'
            )
          )
@@ -1550,7 +1595,8 @@ const runAutomaticPortHoustonEirCheck = async () => {
       const containerNumber = String(load.containerNumber || '').trim().toUpperCase();
       const facility = getLoadPortHoustonFacility(load);
       try {
-        const credentials = await getCompanyPortHoustonCredentials(load.companyId, facility);
+        const credentials = { ...await getCompanyPortHoustonCredentials(load.companyId, facility), containerNumber };
+        requirePortHoustonScac(credentials.scac);
         const gateHistory = await getGateHistory(containerNumber, credentials, facility);
         const transactionNumbers = extractGateTransactionNumbersFromHistory(gateHistory);
 
@@ -1569,8 +1615,8 @@ const runAutomaticPortHoustonEirCheck = async () => {
           const transactionId = getPortHoustonTransactionId(transaction);
           if (!category || !transactionId || transaction.hasDocuments !== true) continue;
 
-          const document = await downloadGateTransactionDocument(transactionId, credentials);
-          const savedDocument = await ensureDownloadedPortHoustonDocument({
+          const document = await downloadGateTransactionDocument(transactionId, credentials, transaction);
+          const savedDocument = await saveScopedPortHoustonDocument(ensureDownloadedPortHoustonDocument, {
             loadId: load.id,
             companyId: load.companyId,
             category,
@@ -1748,25 +1794,35 @@ const requirePortHoustonInternalToken = (req, res, next) => {
   next();
 };
 
-const findLoadForPortHoustonMapping = ({ containerNumber = '', billOfLading = '' }) =>
+const findLoadForPortHoustonMapping = ({ containerNumber = '', billOfLading = '', companyId = '', scac = '' }) =>
   new Promise((resolve, reject) => {
     const normalizedContainer = String(containerNumber || '').trim().toUpperCase();
     const normalizedBol = String(billOfLading || '').trim().toUpperCase();
 
+    if (!companyId || !/^[A-Z]{2,4}$/.test(normalizeScac(scac))) {
+      const error = new Error('Port Houston callbacks require companyId and that company SCAC.');
+      error.status = 422;
+      reject(error);
+      return;
+    }
     if (!normalizedContainer && !normalizedBol) {
       resolve(null);
       return;
     }
 
-    db.get(
+    db.all(
       `SELECT *
        FROM loads
-       WHERE (? <> '' AND UPPER(TRIM(containerNumber)) = ?)
+       WHERE companyId = ?
+         AND EXISTS (SELECT 1 FROM companies c WHERE c.id = loads.companyId AND c.portHoustonScac = ?)
+         AND ((? <> '' AND UPPER(TRIM(containerNumber)) = ?)
           OR (? <> '' AND UPPER(TRIM(referenceNumber)) = ?)
-          OR (? <> '' AND UPPER(TRIM(poNumber)) = ?)
+          OR (? <> '' AND UPPER(TRIM(poNumber)) = ?))
        ORDER BY COALESCE(loadDate, '') DESC
-       LIMIT 1`,
+       LIMIT 2`,
       [
+        companyId,
+        normalizeScac(scac),
         normalizedContainer,
         normalizedContainer,
         normalizedBol,
@@ -1774,7 +1830,11 @@ const findLoadForPortHoustonMapping = ({ containerNumber = '', billOfLading = ''
         normalizedBol,
         normalizedBol,
       ],
-      (err, row) => (err ? reject(err) : resolve(row || null))
+      (err, rows) => {
+        if (err) return reject(err);
+        if (rows.length > 1) return reject(new Error('Multiple loads match this callback; no load was changed.'));
+        resolve(rows[0] || null);
+      }
     );
   });
 
@@ -1790,6 +1850,10 @@ app.post('/api/port-houston/events', requirePortHoustonInternalToken, async (req
         error: 'No matching load found for Port Houston event.',
         mapping,
       });
+    }
+
+    if (!matchesPortHoustonScope(sourceEvent, mapping.scac, load.containerNumber)) {
+      return res.status(422).json({ ok: false, error: 'Event trucking company or container could not be verified.' });
     }
 
     const nextStatus = String(mapping.shipmentStatus || '').trim();
@@ -1830,6 +1894,8 @@ app.post('/api/port-houston/eir-upload', requirePortHoustonInternalToken, upload
   const mapping = {
     containerNumber: req.body.containerNumber || '',
     billOfLading: req.body.billOfLading || '',
+    companyId: req.body.companyId || '',
+    scac: req.body.scac || '',
   };
 
   if (!req.file) {
@@ -1847,6 +1913,15 @@ app.post('/api/port-houston/eir-upload', requirePortHoustonInternalToken, upload
       });
     }
 
+    const credentials = { ...await getCompanyPortHoustonCredentials(load.companyId), containerNumber: load.containerNumber };
+    const requestedNumber = String(req.body.transactionNumber || '').trim();
+    const verified = await getGateTransactionsByNumbers([requestedNumber], credentials);
+    const transaction = verified.transactions.find(item => String(item.nbr) === requestedNumber && getPortHoustonEirCategory(item) === category);
+    if (!transaction) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(422).json({ ok: false, error: 'EIR transaction does not match this company and container.' });
+    }
+    const metadata = portHoustonDocumentMetadata(transaction, credentials.scac, load.containerNumber);
     const id = uuidv4();
     const uploadedAt = new Date().toISOString();
     const savedPath = req.file.path;
@@ -1858,13 +1933,13 @@ app.post('/api/port-houston/eir-upload', requirePortHoustonInternalToken, upload
       const existing = await new Promise((resolve, reject) => {
         db.get(
           `SELECT * FROM documents
-           WHERE loadId = ? AND category = ? AND name LIKE ?
+           WHERE loadId = ? AND category = ? AND json_valid(portHoustonMetadataJson) AND json_extract(portHoustonMetadataJson, '$.transactionNumber') = ?
            ORDER BY uploadedAt DESC LIMIT 1`,
-          [load.id, category, `%${transactionNumber}%`],
+          [load.id, category, transactionNumber],
           (err, row) => (err ? reject(err) : resolve(row || null))
         );
       });
-      if (existing) {
+      if (existing && isPortHoustonDocumentVisible({ ...existing, companyPortHoustonScac: credentials.scac, loadContainerNumber: load.containerNumber })) {
         fs.unlink(savedPath, () => {});
         return res.json({ ok: true, duplicate: true, document: existing });
       }
@@ -1872,8 +1947,8 @@ app.post('/api/port-houston/eir-upload', requirePortHoustonInternalToken, upload
 
     await new Promise((resolve, reject) => {
       db.run(
-        `INSERT INTO documents (id, loadId, name, size, type, category, filePath, uploadedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO documents (id, loadId, name, size, type, category, filePath, uploadedAt, portHoustonMetadataJson)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           load.id,
@@ -1883,6 +1958,7 @@ app.post('/api/port-houston/eir-upload', requirePortHoustonInternalToken, upload
           category,
           savedPath,
           uploadedAt,
+          metadata,
         ],
         (err) => (err ? reject(err) : resolve())
       );
@@ -1903,7 +1979,8 @@ app.post('/api/port-houston/eir-upload', requirePortHoustonInternalToken, upload
     });
   } catch (error) {
     console.error('Port Houston EIR upload failed:', error.message);
-    res.status(500).json({ ok: false, error: 'Failed to save Port Houston EIR.' });
+    if (req.file?.path) fs.unlink(req.file.path, () => {});
+    res.status(error.status || 500).json({ ok: false, error: 'Failed to save verified Port Houston EIR.' });
   }
 });
 
@@ -2458,9 +2535,10 @@ app.get('/uploads/:filename', authenticate, (req, res) => {
   const filename = path.basename(req.params.filename);
 
   db.get(
-    `SELECT d.*
+    `SELECT d.*, ${portHoustonDocumentScopeColumns}
      FROM documents d
      JOIN loads l ON l.id = d.loadId
+     JOIN companies c ON c.id = l.companyId
      WHERE l.companyId = ?
        AND d.filePath LIKE ?`,
     [companyId, `%${filename}`],
@@ -2470,7 +2548,7 @@ app.get('/uploads/:filename', authenticate, (req, res) => {
         return res.status(500).json({ error: 'Failed to open file' });
       }
 
-      if (!doc || !doc.filePath || !fs.existsSync(doc.filePath)) {
+      if (!doc || !isPortHoustonDocumentVisible(doc) || !doc.filePath || !fs.existsSync(doc.filePath)) {
         return res.status(404).json({ error: 'File not found' });
       }
 
@@ -2694,6 +2772,18 @@ app.put('/api/company/analytics-settings', authenticate, requireRoles(adminRoles
   );
 });
 
+app.put('/api/company/port-houston/scac', authenticate, requireRoles(adminRoles), (req, res) => {
+  let scac;
+  try { scac = requirePortHoustonScac(req.body.scac); }
+  catch (error) { return res.status(422).json({ error: error.message }); }
+  db.run('UPDATE companies SET portHoustonScac = ? WHERE id = ?', [scac, req.company.companyId], function (err) {
+    if (err) return res.status(500).json({ error: 'Failed to save company SCAC.' });
+    if (!this.changes) return res.status(404).json({ error: 'Company not found.' });
+    writeAuditLog(req, { action: 'UPDATE_PORT_HOUSTON_SCAC', entityType: 'COMPANY', entityId: req.company.companyId, newValue: { scac } });
+    res.json({ portHoustonScac: scac });
+  });
+});
+
 app.put('/api/company/port-houston', authenticate, requireRoles(adminRoles), (req, res) => {
   const companyId = req.company.companyId;
   const submittedCredentials = req.body.credentials && typeof req.body.credentials === 'object'
@@ -2710,7 +2800,7 @@ app.put('/api/company/port-houston', authenticate, requireRoles(adminRoles), (re
       };
 
   db.get(
-    `SELECT portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
+    `SELECT portHoustonScac, portHoustonUsername, portHoustonPassword, portHoustonCredentialsJson FROM companies WHERE id = ?`,
     [companyId],
     (lookupErr, existingCompany) => {
       if (lookupErr) {
@@ -2969,7 +3059,9 @@ app.get('/api/port-houston/gate/:containerNumber', authenticate, async (req, res
 
   try {
     const credentials = await getCompanyPortHoustonCredentials(companyId);
-    const result = await getGateHistory(containerNumber, credentials, facility);
+    const history = await getGateHistory(containerNumber, credentials, facility);
+    const verified = await getGateTransactionsByContainer(containerNumber, credentials, facility);
+    const result = scopePortHoustonGateHistory(history, verified.transactions);
     const log = await insertPortCheckLog({
       companyId,
       containerNumber,
@@ -3008,6 +3100,7 @@ app.get('/api/port-houston/load-lookup', authenticate, async (req, res) => {
   try {
     const credentials = await getCompanyPortHoustonCredentials(companyId, terminal);
     const facility = getPortHoustonFacilityCode(terminal);
+    credentials.containerNumber = containerNumber;
     const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials, facility) : null;
     const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials, facility) : null;
     const primaryContainer =
@@ -3104,6 +3197,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       companyId,
       facility || `${load.pickup || ''} ${load.returnLocation || ''}`
     );
+    credentials.containerNumber = containerNumber;
     const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials, facility) : null;
     const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials, facility) : null;
     const gate = containerNumber ? await getGateHistory(containerNumber, credentials, facility) : null;
@@ -3132,7 +3226,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
         historyGateTransactions
       );
       gateTransactions.requestedContainerNumber = containerNumber;
-      gateTransactions.requestedTransactionNumbers = gateTransactionNumbers;
+      gateTransactions.requestedTransactionNumbers = (gateTransactions.transactions || []).map(item => item.nbr).filter(Boolean);
       gateTransactions.containerLookupEmpty = !containerGateTransactions?.transactions?.length;
 
       if (!gateTransactions.transactions.length) {
@@ -3142,9 +3236,9 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
             outEirTransaction: null,
             inEirTransaction: null,
             requestedContainerNumber: containerNumber,
-            requestedTransactionNumbers: gateTransactionNumbers,
+            requestedTransactionNumbers: [],
             reason: containerNumber
-              ? 'No Port Houston gate transaction was returned for this container number.'
+              ? `No verified Port Houston gate transaction matched container ${containerNumber} and SCAC ${credentials.scac}.`
               : 'No container number was available for gate transaction lookup.',
           };
       }
@@ -3157,9 +3251,9 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       };
     }
 
-    const portDocumentSignals = getPortHoustonDocumentSignals({ availability, bolAvailability, gate, gateTransactions });
-    const outEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate, gateTransactions }, 'OUT EIR');
-    const inEirUrl = findPortHoustonEirUrl({ availability, bolAvailability, gate, gateTransactions }, 'IN EIR');
+    const portDocumentSignals = getPortHoustonDocumentSignals({ gateTransactions });
+    const outEirUrl = ''; // EIR links require a verified transaction and protected document route.
+    const inEirUrl = '';
     const downloadedDocuments = [];
     const eirDownloadErrors = [];
     const eirDocumentDownloadEnabled = Boolean(process.env.PORT_HOUSTON_EIR_DOCUMENT_URL_PATTERN);
@@ -3174,8 +3268,8 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       if (!eirDocumentDownloadEnabled) continue;
 
       try {
-        const document = await downloadGateTransactionDocument(transactionId, credentials);
-        const savedDoc = await ensureDownloadedPortHoustonDocument({
+        const document = await downloadGateTransactionDocument(transactionId, credentials, transaction);
+        const savedDoc = await saveScopedPortHoustonDocument(ensureDownloadedPortHoustonDocument, {
           loadId,
           companyId,
           category,
@@ -3207,7 +3301,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       if (alreadyHasOfficialDocument) continue;
 
       try {
-        const generatedDoc = await ensureGeneratedPortHoustonEirDocument({
+        const generatedDoc = await saveScopedPortHoustonDocument(ensureGeneratedPortHoustonEirDocument, {
           loadId,
           companyId,
           category,
@@ -3286,7 +3380,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       downloadErrors: eirDownloadErrors,
       documentDownloadEnabled: eirDocumentDownloadEnabled,
       gateTransactionError: gateTransactions?.error || '',
-      equipmentHistoryTransactionNumbers: gateTransactionNumbers,
+      equipmentHistoryTransactionNumbers: (gateTransactions?.transactions || []).map(item => item.nbr).filter(Boolean),
       note: downloadedDocuments.length
         ? 'Port Houston EIR document was downloaded and synced to paperwork.'
         : generatedDocuments.length
@@ -3312,7 +3406,7 @@ app.get('/api/loads/:id/port-houston-check', authenticate, async (req, res) => {
       facility: facility || 'ALL',
       availability,
       bolAvailability,
-      gate,
+      gate: scopePortHoustonGateHistory(gate, gateTransactions?.transactions),
       gateTransactions,
       eir,
     };
@@ -5632,7 +5726,7 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
     }
 
     db.all(
-      `SELECT * FROM documents WHERE loadId = ?`,
+      `SELECT d.*, ${portHoustonDocumentScopeColumns} FROM documents d JOIN loads l ON l.id = d.loadId JOIN companies c ON c.id = l.companyId WHERE d.loadId = ?`,
       [loadId],
       async (err, docs) => {
         if (err) {
@@ -5644,7 +5738,7 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
         }
 
         try {
-          const docsByCategory = (docs || []).reduce((groups, doc) => {
+          const docsByCategory = (docs || []).filter(isPortHoustonDocumentVisible).reduce((groups, doc) => {
             const key = normalizePacketCategory(doc.category || doc.type || 'OTHER');
             if (!groups[key]) groups[key] = [];
             groups[key].push(doc);
@@ -6098,9 +6192,10 @@ app.get('/api/documents/:id/file', authenticate, (req, res) => {
   const companyId = req.company.companyId;
 
   db.get(
-    `SELECT d.*
+    `SELECT d.*, ${portHoustonDocumentScopeColumns}
      FROM documents d
      JOIN loads l ON l.id = d.loadId
+     JOIN companies c ON c.id = l.companyId
      WHERE d.id = ? AND l.companyId = ?`,
     [docId, companyId],
     (err, doc) => {
@@ -6109,7 +6204,7 @@ app.get('/api/documents/:id/file', authenticate, (req, res) => {
         return res.status(500).json({ error: 'Failed to fetch document' });
       }
 
-      if (!doc || !doc.filePath) {
+      if (!doc || !isPortHoustonDocumentVisible(doc) || !doc.filePath) {
         return res.status(404).json({ error: 'Document not found' });
       }
 

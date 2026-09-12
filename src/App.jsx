@@ -1492,6 +1492,9 @@ const [mileageEstimateStatus, setMileageEstimateStatus] = useState('');
 const [portHoustonSettingsForm, setPortHoustonSettingsForm] = useState(
   buildPortHoustonCredentialForm(savedCompany || {})
 );
+const [portHoustonScac, setPortHoustonScac] = useState(savedCompany?.portHoustonScac || '');
+const [portHoustonScacStatus, setPortHoustonScacStatus] = useState('');
+const [portHoustonScacSaving, setPortHoustonScacSaving] = useState(false);
 const [portHoustonSettingsStatus, setPortHoustonSettingsStatus] = useState('');
 const [appNotifications, setAppNotifications] = useState([]);
 const previousLoadsRef = useRef(null);
@@ -1648,6 +1651,11 @@ const getCompanyLogoSrc = () => {
 useEffect(() => {
   setPortHoustonSettingsForm(buildPortHoustonCredentialForm(company || {}));
 }, [company?.portHoustonCredentials]);
+
+useEffect(() => {
+  setPortHoustonScac(company?.portHoustonScac || '');
+  setPortHoustonChecksByLoad({});
+}, [company?.id, company?.portHoustonScac]);
 
 useEffect(() => {
   setCompanyProfileForm({
@@ -3649,6 +3657,29 @@ const handleSavePodSettings = async (e) => {
     console.error('Failed to save POD settings:', error);
     setPodSettingsStatus(`Failed to save POD settings: ${error.message}`);
   }
+};
+
+const handleSavePortHoustonScac = async (event) => {
+  event.preventDefault();
+  setPortHoustonScacSaving(true);
+  setPortHoustonScacStatus('');
+  try {
+    const res = await fetch(`${API_BASE}/api/company/port-houston/scac`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ scac: portHoustonScac.trim().toUpperCase() }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unable to save SCAC.');
+    const updatedCompany = { ...company, portHoustonScac: data.portHoustonScac };
+    setCompany(updatedCompany);
+    saveCompanySession(updatedCompany);
+    setPortHoustonChecksByLoad({});
+    setPortHoustonScacStatus('SCAC saved. Refresh Port Houston on a load to retrieve verified EIRs.');
+    await fetchLoads();
+  } catch (error) {
+    setPortHoustonScacStatus(error.message);
+  } finally { setPortHoustonScacSaving(false); }
 };
 
 const handleSavePortHoustonSettings = async (group) => {
@@ -14252,6 +14283,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="detail-box"><span>Driver Rate</span><strong>{selectedLoad.driverRate}</strong></div>
                         <div className="detail-box"><span>Driver Pay</span><strong>{formatMoney(getDriverPayWithDetention(selectedLoad))}</strong></div>
                         <div className="detail-box"><span>Paperwork</span><strong>{selectedLoad.paperwork}</strong></div>
+                        {selectedLoad.unverifiedPortHoustonEirCount > 0 && (
+                          <div className="detail-box port-check-note"><span>EIR verification</span><strong>
+                            {selectedLoad.unverifiedPortHoustonEirCount} automatic EIR(s) are withheld until company verification. Refresh Port Houston to retrieve matching EIRs.
+                          </strong></div>
+                        )}
                         <div className="detail-box"><span>Customer Detention</span><strong>{selectedLoad.detention}</strong></div>
                         
                       </div>
@@ -16878,6 +16914,29 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           )}
         </form>
         <div className="port-houston-settings">
+          <form className="terminal-credential-group" onSubmit={handleSavePortHoustonScac}>
+            <div className="terminal-credential-title">
+              <div>
+                <h4>Port Houston · Company SCAC</h4>
+                <p>EIRs are limited to this company's SCAC at Bayport and Barbours Cut.</p>
+              </div>
+              <span className={company?.portHoustonScac ? 'status-pill active' : 'status-pill inactive'}>
+                {company?.portHoustonScac || 'SCAC required'}
+              </span>
+            </div>
+            <label>
+              Trucking company SCAC
+              <input aria-label="Trucking company SCAC" value={portHoustonScac}
+                onChange={(event) => setPortHoustonScac(event.target.value.toUpperCase())}
+                placeholder="Enter your company SCAC" pattern="[A-Za-z]{2,4}" minLength={2} maxLength={4} required autoComplete="off" />
+            </label>
+            <button type="submit" className="primary-btn" disabled={portHoustonScacSaving}>
+              {portHoustonScacSaving ? 'Saving...' : 'Save SCAC'}
+            </button>
+            <p>Automatic EIRs saved before SCAC verification remain stored and need a Port Houston refresh before they can be shared.</p>
+            {portHoustonScacStatus && <p role="status">{portHoustonScacStatus}</p>}
+          </form>
+
           <div className="settings-row-header">
             <div>
               <span>Terminal Credentials</span>
