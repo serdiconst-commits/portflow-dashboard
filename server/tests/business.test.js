@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import vm from 'node:vm';
+import { reconcileLoadMoves } from '../loadMovePlan.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import sqlite3 from 'sqlite3';
@@ -293,4 +296,109 @@ test('settlement review workflow locks edits, records unreview reason, and final
     transitionSettlement(db, 'COMP-A', draft.id, { action: 'unreview', reason: 'Too late' }, 'Manager User'),
     /Only Reviewed settlements/
   );
+});
+
+// Exercise the actual movement writer and status/assignment handlers against an
+// isolated database, then run the existing settlement service on their output.
+async function movementFixture() {
+  const db = await createDb();
+  for (const field of ['workflowType', 'pickup', 'delivery', 'returnLocation', 'notes']) {
+    await dbRun(db, `ALTER TABLE loads ADD COLUMN ${field} TEXT`);
+  }
+  await dbRun(db, "INSERT INTO drivers (id, companyId, name) VALUES ('DRV-P', 'COMP-A', 'Pedro')");
+  const source = await readFile(new URL('../server.js', import.meta.url), 'utf8');
+  const helpers = source.slice(source.indexOf('const getLoadMoveTemplates'), source.indexOf('const attachMovesToLoads'));
+  const statusHelper = source.slice(source.indexOf('const updateCurrentMoveForLoadStatus'), source.indexOf("app.put('/api/loads/:id/status'"));
+  const handlers = {};
+  const context = { db, uuidv4, reconcileLoadMoves, normalizeLoadWorkflow: (value) => value || 'LIVE_DELIVERY',
+    writeAuditLog() {}, authenticate() {}, requireRoles: () => () => {}, dispatchLocationRoles: [], movePayRoles: [],
+    normalizeDriverAssignment: (_company, driver, cb) => cb(null, driver),
+    app: { put: (path, ...args) => { handlers[path] = args.at(-1); } } };
+  const routes = source.slice(source.indexOf("app.put('/api/load-moves/:id/assign'"), source.indexOf("app.get('/api/drivers'"));
+  const functions = vm.runInNewContext(helpers + statusHelper + routes + '\n({syncLoadMoves, updateCurrentMoveForLoadStatus})', context);
+  const get = (sql, args = []) => new Promise((resolve, reject) => db.get(sql, args, (err, row) => err ? reject(err) : resolve(row)));
+  const all = (sql, args = []) => new Promise((resolve, reject) => db.all(sql, args, (err, rows) => err ? reject(err) : resolve(rows)));
+  const load = () => get("SELECT * FROM loads WHERE id = 'LIFECYCLE'");
+  const moves = () => all("SELECT * FROM load_moves WHERE loadId = 'LIFECYCLE' ORDER BY sequence");
+  const sync = async (previous) => {
+    const current = await load();
+    return new Promise((resolve, reject) => functions.syncLoadMoves(current, (err) => err ? reject(err) : resolve(), previous));
+  };
+  const status = (driverId, status) => new Promise((resolve, reject) => functions.updateCurrentMoveForLoadStatus(
+    { company: { companyId: 'COMP-A' }, user: { driverId } }, 'LIFECYCLE', status, (err) => err ? reject(err) : resolve()));
+  const route = (path, id, body) => new Promise((resolve, reject) => {
+    let statusCode = 200;
+    handlers[path]({ company: { companyId: 'COMP-A' }, params: { id }, body }, {
+      status(code) { statusCode = code; return this; },
+      json(value) { statusCode >= 400 ? reject(new Error(value.error)) : resolve(value); },
+    });
+  });
+  await dbRun(db, `INSERT INTO loads (id, companyId, driver, driverRate, status, workflowType, pickup, delivery, returnLocation, loadDate)
+    VALUES ('LIFECYCLE', 'COMP-A', 'DRV-A', '0', 'Dispatched', 'DROP_AND_PICK', 'Bayport', 'Plastics', 'Barbours Cut', '2026-09-12')`);
+  return { db, get, load, moves, sync, status, route };
+}
+
+test('drop pay survives an in-transit edit and pickup assignment, and both drivers settle once', async (t) => {
+  const f = await movementFixture();
+  t.after(() => f.db.close());
+  await f.sync();
+  const [initialDrop, initialPickup] = await f.moves();
+  await f.status('DRV-A', 'In Transit');
+  const beforePayEdit = await f.load();
+  await dbRun(f.db, "UPDATE loads SET driverRate = '100' WHERE id = 'LIFECYCLE'");
+  await f.sync(beforePayEdit);
+  assert.equal((await f.moves())[0].driverRate, '100');
+  await f.status('DRV-A', 'Dropped');
+  const dropped = (await f.moves())[0];
+  assert.equal(dropped.id, initialDrop.id);
+  assert.equal(dropped.completedBy, 'DRV-A');
+  assert.equal(dropped.driverRate, '100');
+  await dbRun(f.db, "UPDATE load_moves SET status = 'Ready for Pickup', origin = 'Stale port origin' WHERE id = ?", [initialPickup.id]);
+  await f.route('/api/load-moves/:id/assign', initialPickup.id, { driverId: 'DRV-P', driverRate: '100', returnLocation: 'Barbours Cut' });
+  const beforeNotes = await f.load();
+  await dbRun(f.db, "UPDATE loads SET notes = 'Dispatch correction' WHERE id = 'LIFECYCLE'");
+  await f.sync(beforeNotes);
+  await f.sync(); // Billing refresh must also preserve assignment, route and IDs.
+  const [drop, pickup] = await f.moves();
+  assert.deepEqual(drop, dropped);
+  assert.equal(pickup.id, initialPickup.id);
+  assert.equal(pickup.status, 'Assigned');
+  assert.equal(pickup.driverId, 'DRV-P');
+  assert.equal(pickup.origin, 'Plastics');
+  assert.equal(pickup.destination, 'Barbours Cut');
+  assert.equal(pickup.driverRate, '100');
+  await f.status('DRV-P', 'Delivered');
+  const day = new Date().toISOString().slice(0, 10);
+  for (const [driverId, moveId] of [['DRV-A', drop.id], ['DRV-P', pickup.id]]) {
+    const pay = await createSettlement(f.db, 'COMP-A', { driverId, periodStart: day, periodEnd: day }, 'Payroll');
+    assert.equal(pay.statement.totals.grossPay, 100);
+    assert.equal(pay.statement.loads.length, 1);
+    assert.equal(pay.statement.loads[0].moveId, moveId);
+    const again = await createSettlement(f.db, 'COMP-A', { driverId, periodStart: day, periodEnd: day }, 'Payroll');
+    assert.equal(again.statement.loads.length, 1);
+  }
+});
+
+test('an older active load with no movements captures its initial driver pay when dropped', async (t) => {
+  const f = await movementFixture();
+  t.after(() => f.db.close());
+  await dbRun(f.db, "UPDATE loads SET driverRate = '100' WHERE id = 'LIFECYCLE'");
+  await f.status('DRV-A', 'Dropped');
+  const [drop, pickup] = await f.moves();
+  assert.equal(drop.status, 'Completed');
+  assert.equal(drop.completedBy, 'DRV-A');
+  assert.equal(drop.driverRate, '100');
+  assert.equal(pickup.origin, 'Plastics');
+});
+
+test('payroll can deliberately set zero drop pay without completion restoring an older load rate', async (t) => {
+  const f = await movementFixture();
+  t.after(() => f.db.close());
+  await dbRun(f.db, "UPDATE loads SET driverRate = '100' WHERE id = 'LIFECYCLE'");
+  await f.sync();
+  const [drop] = await f.moves();
+  await f.route('/api/load-moves/:id/rate', drop.id, { driverRate: '0' });
+  assert.equal((await f.load()).driverRate, '0');
+  await f.status('DRV-A', 'Dropped');
+  assert.equal((await f.moves())[0].driverRate, '0');
 });

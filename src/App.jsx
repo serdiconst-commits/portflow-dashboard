@@ -1,3 +1,5 @@
+import { getLoadEditChanges } from './utils/loadEditReview.js';
+import LoadEditReview from './components/LoadEditReview.jsx';
 import { Fragment, useState, useEffect, useRef, useMemo } from 'react';
 import SignatureCanvas from 'react-signature-canvas';
 import { Capacitor } from '@capacitor/core';
@@ -1404,6 +1406,9 @@ const sigCanvas = useRef(null);
 const [signatures, setSignatures] = useState({});
 const [newLoad, setNewLoad] = useState(emptyLoad);
 const [editingLoad, setEditingLoad] = useState(emptyLoad);
+const editLoadBaseline = useRef(null);
+const loadEditSaving = useRef(false);
+const [loadEditReview, setLoadEditReview] = useState(null);
 
 const [loginEmail, setLoginEmail] = useState('');
 const [loginPassword, setLoginPassword] = useState('');
@@ -5685,6 +5690,7 @@ const handleEditClick = (event) => {
     paperwork: selectedLoad.paperwork || getPaperworkStatusFromDocuments(selectedLoad.documents || []),
   };
 
+  editLoadBaseline.current = loadForEdit;
   setEditingLoad(loadForEdit);
   setIsEditing(true);
   setShowForm(false);
@@ -5701,6 +5707,7 @@ const handleEditClick = (event) => {
 
 const openCompletedLoadEditor = (load) => {
   if (!load?.id) return;
+  editLoadBaseline.current = { ...emptyLoad, ...load, driver: normalizeDriverForStorage(load.driver) };
   setEditingLoad({
     ...emptyLoad,
     ...load,
@@ -5772,32 +5779,9 @@ const handleUpdateLoad = async (e) => {
     return;
   }
 
-  if (editingLoad.workflowType === 'PRE_PULL_LIVE' && !String(editingLoad.dropLocation || '').trim()) {
-    alert('Choose the main yard / pre-pull drop location.');
-    return;
-  }
-
-  const previousWorkflow = selectedLoad?.workflowType || 'LIVE_DELIVERY';
-  const workflowChanged = previousWorkflow !== (editingLoad.workflowType || 'LIVE_DELIVERY');
-  const protectedMoveStatuses = new Set([
-    'assigned',
-    'arrived at pickup',
-    'loaded',
-    'in transit',
-    'completed',
-    'ready for pickup',
-  ]);
-  const movementPlanAlreadyExists = Boolean(String(selectedLoad?.driver || '').trim()) || (
-    Array.isArray(selectedLoad?.moves) &&
-    selectedLoad.moves.some((move) => protectedMoveStatuses.has(String(move?.status || '').trim().toLowerCase()))
-  );
-  if (
-    workflowChanged &&
-    movementPlanAlreadyExists &&
-    !window.confirm('This load already has a driver or movement history. Change the remaining movement plan and preserve completed history?')
-  ) {
-    return;
-  }
+  const originalLoad = editLoadBaseline.current?.id === editingLoad.id
+    ? editLoadBaseline.current : loadsData.find((load) => load.id === editingLoad.id);
+  if (!originalLoad || loadEditSaving.current) return;
 
   const updatedLoad = {
     ...editingLoad,
@@ -5830,6 +5814,7 @@ const handleUpdateLoad = async (e) => {
     );
     return;
   }
+  loadEditSaving.current = true;
   try {
 
     /* EDITLOAD FUNTION */
@@ -5841,8 +5826,17 @@ const payload = {
   driver: normalizeDriverForStorage(updatedLoad.driver),
   truck: updatedLoad.driver ? getDriverTruck(updatedLoad.driver) : '',
   droppedBy: normalizeDriverForStorage(updatedLoad.droppedBy),
-  status: getStatusAfterDriverAssignment(updatedLoad.driver, updatedLoad.status),
+  status: normalizeDriverForStorage(updatedLoad.driver) !== normalizeDriverForStorage(originalLoad.driver)
+    ? getStatusAfterDriverAssignment(updatedLoad.driver, updatedLoad.status) : updatedLoad.status,
 };
+
+const changes = getLoadEditChanges(originalLoad, payload, getDriverLabel);
+if (!changes.length) {
+  alert('No changes to save.');
+  return;
+}
+const confirmed = await new Promise((resolve) => setLoadEditReview({ loadId: payload.id, changes, resolve }));
+if (!confirmed) return;
 
 const res = await fetch(`${API_BASE}/api/loads/${editingLoad.id}`, {
   method: 'PUT',
@@ -5864,12 +5858,15 @@ const res = await fetch(`${API_BASE}/api/loads/${editingLoad.id}`, {
     );
     setSelectedLoad(data);
     setEditingLoad(data);
+    editLoadBaseline.current = data;
     setIsEditing(false);
     setCompletedEditingLoadId('');
     await fetchSelectedLoadAuditLogs(data.id);
   } catch (error) {
     console.error('Failed to update load:', error);
     alert(`Failed to update load: ${error.message}`);
+  } finally {
+    loadEditSaving.current = false;
   }
 };
 
@@ -10923,10 +10920,10 @@ const renderDriverLoadCard = (load) => {
           <strong>{load.chassisNumber || '-'}</strong>
         </div>
         <div className="driver-info-item">
-          <span>Driver Pay</span>
+          <span>{currentMove?.moveType === 'DROP' ? 'Drop Pay' : isPickupReturnMove ? 'Pickup / Return Pay' : 'Driver Pay'}</span>
           <strong>{isDropHookLoad(load)
             ? formatMoney(Number(isHookMoveActive(load) ? load.pickupPay || 0 : load.dropPay || 0))
-            : load.driverRate ? formatMoney(getDriverPayWithDetention(load)) : '-'}</strong>
+            : currentMove ? formatMoney(parseMoney(currentMove.driverRate)) : load.driverRate ? formatMoney(getDriverPayWithDetention(load)) : '-'}</strong>
         </div>
         <div className="driver-info-item">
           <span>PO #</span>
@@ -11920,6 +11917,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 }
   return (
   <div className="app-shell">
+    {loadEditReview && <LoadEditReview loadId={loadEditReview.loadId} changes={loadEditReview.changes}
+      onDecision={(confirmed) => {
+        loadEditReview.resolve(confirmed);
+        setLoadEditReview(null);
+      }} />}
     <button
       type="button"
       className="sidebar-mobile-toggle"
@@ -13726,6 +13728,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <option value="PRE_PULL_LIVE">Pre-Pull Live Load</option>
                             <option value="DROP_AND_PICK">Drop &amp; Pick</option>
                           </select></label>
+                          {editingLoad.workflowType === 'PRE_PULL_LIVE' && !LEGACY_DROP_HOOK_UI_ENABLED && (
+                            <label className="edit-load-field"><span>Pre-pull yard (can be added later)</span>
+                              <input name="dropLocation" value={editingLoad.dropLocation || ''} onChange={handleEditInputChange} placeholder="Pre-pull drop location" />
+                            </label>
+                          )}
                           {LEGACY_DROP_HOOK_UI_ENABLED ? <>
                           <select name="dropType" value={editingLoad.dropType || ''} onChange={handleEditInputChange}>
                             <option value="">Select Drop Type</option>

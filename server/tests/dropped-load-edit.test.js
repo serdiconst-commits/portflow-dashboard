@@ -7,11 +7,11 @@ const source = await readFile(new URL('../server.js', import.meta.url), 'utf8');
 const start = source.indexOf("app.put('/api/loads/:id'");
 const end = source.indexOf("app.put('/api/loads/:id/drop-hook'", start);
 
-function editDroppedLoad(existingDriver, requestedDriver) {
+function editDroppedLoad(existingDriver, requestedDriver, overrides = {}) {
   const existing = {
     id: 'LD-DROP', companyId: 'company-1', status: 'Dropped',
     workflowType: 'DROP_AND_PICK', driver: existingDriver,
-    returnLocation: '', notes: 'Before', droppedBy: 'DRV-001',
+    returnLocation: '', notes: 'Before', droppedBy: 'DRV-001', ...overrides.existing,
   };
   let handler;
   let updated;
@@ -43,7 +43,7 @@ function editDroppedLoad(existingDriver, requestedDriver) {
   vm.runInNewContext(source.slice(start, end), context);
   const res = { status(value) { code = value; return this; }, json(value) { result = value; } };
   handler({ params: { id: existing.id }, company: { companyId: existing.companyId },
-    body: { ...existing, driver: requestedDriver, notes: 'Edited without scheduling return' } }, res);
+    body: { ...existing, driver: requestedDriver, notes: 'Edited without scheduling return', ...overrides.request } }, res);
   return { code, result, updated, synced };
 }
 
@@ -67,5 +67,21 @@ for (const driver of ['', 'DRV-001']) {
     assert.match(result.error, /Ready for Pickup/);
     assert.equal(updated, undefined);
     assert.equal(synced, false);
+  });
+}
+
+for (const status of ['Pending', 'Available', 'Dropped']) {
+  test(`editing ${status} load to Pre-Pull saves without driver, return or yard`, () => {
+    const { code, result, synced } = editDroppedLoad('', '', {
+      existing: { status, workflowType: 'LIVE_DELIVERY', dropLocation: '' },
+      request: { workflowType: 'PRE_PULL_LIVE' },
+    });
+    assert.equal(code, 200);
+    assert.equal(result.workflowType, 'PRE_PULL_LIVE');
+    assert.equal(result.driver, '');
+    assert.equal(result.returnLocation, '');
+    assert.equal(result.dropLocation, '');
+    assert.equal(result.status, status);
+    assert.equal(synced, true);
   });
 }
