@@ -1,3 +1,4 @@
+import { requirePortHoustonScac, matchesPortHoustonScope } from '../portHoustonScope.js';
 const DEFAULT_FIELDS = [
   'extras.dwellDays',
   'scope.facility_id',
@@ -776,14 +777,16 @@ export const getGateHistory = async (containerNumber, credentials = {}, facility
 const fetchGateTransactionsByPredicate = async (predicate, credentials = {}, facility = '', includeFields = true) => {
   const query = {
     operator: 'POHA',
-    predicate,
+    predicate: `${predicate} and trkcoId=${requirePortHoustonScac(credentials.scac)}`,
     size: 100,
   };
   if (includeFields) query.fields = GATE_TRANSACTION_FIELDS;
   const normalizedFacility = getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase();
   if (normalizedFacility) query.facility = normalizedFacility;
   const response = await portHoustonFetch('/road/gatetransactions', query, credentials);
-  return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+  return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction).filter(
+    (transaction) => matchesPortHoustonScope(transaction, credentials.scac, credentials.containerNumber)
+  ));
 };
 
 const fetchLegacyGateTransactionsByContainer = async (containerNumber, credentials = {}, facility = '') => {
@@ -792,11 +795,13 @@ const fetchLegacyGateTransactionsByContainer = async (containerNumber, credentia
   const response = await portHoustonFetch('/road/gatetransactions', {
     operator: 'POHA',
     facility: getPortHoustonFacilityCode(facility) || String(facility || '').trim().toUpperCase(),
-    predicate: `ctrId = ${containerNumber}`,
+    predicate: `ctrId=${containerNumber} and trkcoId=${requirePortHoustonScac(credentials.scac)}`,
     fields: GATE_TRANSACTION_FIELDS,
   }, credentials);
 
-  return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction));
+  return sortGateTransactions(unwrapRecords(response).map(normalizeGateTransaction).filter(
+    (transaction) => matchesPortHoustonScope(transaction, credentials.scac, credentials.containerNumber)
+  ));
 };
 
 const fetchFirstGateTransactionsMatch = async (predicates = [], credentials = {}, facility = '') => {
@@ -836,15 +841,19 @@ const fetchFirstGateTransactionsMatch = async (predicates = [], credentials = {}
 
 export const getGateTransactionByNumber = async (transactionNumber, credentials = {}, facility = '') => {
   const cleanNumber = String(transactionNumber || '').trim();
+  requirePortHoustonScac(credentials.scac);
+  if (!/^\d+$/.test(cleanNumber) || !credentials.containerNumber) throw new Error('Transaction number and container scope are required.');
   const result = await fetchFirstGateTransactionsMatch([
     `nbr=${cleanNumber}`,
     `nbr = ${cleanNumber}`,
   ], credentials, facility);
-  return result.transactions;
+  return result.transactions.filter((transaction) => String(transaction.nbr) === cleanNumber);
 };
 
 export const getGateTransactionsByContainer = async (containerNumber, credentials = {}, facility = '') => {
   const cleanContainer = String(containerNumber || '').trim().toUpperCase();
+  credentials = { ...credentials, scac: requirePortHoustonScac(credentials.scac), containerNumber: cleanContainer };
+  if (cleanContainer && !/^[A-Z0-9]{4,20}$/.test(cleanContainer)) throw new Error('Invalid container number.');
   if (!cleanContainer) {
     return {
       transactions: [],
@@ -907,6 +916,7 @@ export const getGateTransactionsByContainer = async (containerNumber, credential
 };
 
 export const getGateTransactionsByNumbers = async (transactionNumbers = [], credentials = {}, facility = '') => {
+  requirePortHoustonScac(credentials.scac);
   const uniqueNumbers = [...new Set(transactionNumbers.map((item) => String(item || '').trim()).filter(Boolean))];
   const transactions = [];
   const errors = [];
@@ -939,7 +949,12 @@ export const getGateTransactionsByNumbers = async (transactionNumbers = [], cred
   };
 };
 
-export const downloadGateTransactionDocument = async (transactionId, credentials = {}) => {
+export const downloadGateTransactionDocument = async (transactionId, credentials = {}, transaction = {}) => {
+  requirePortHoustonScac(credentials.scac);
+  if (!matchesPortHoustonScope(transaction, credentials.scac, credentials.containerNumber) ||
+      String(transaction.nbr || transaction.gkey || '') !== String(transactionId || '').trim()) {
+    throw new Error('EIR download requires a verified company, container, and transaction.');
+  }
   const cleanId = String(transactionId || '').trim();
   if (!cleanId) {
     throw new Error('Gate transaction number is required to download EIR.');
