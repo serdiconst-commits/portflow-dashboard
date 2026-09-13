@@ -1,3 +1,6 @@
+import DriverCompletedFilter from './components/DriverCompletedFilter.jsx';
+import { filterDriverCompletedLoads, getDriverCompletion } from './utils/driverCompletedLoads.js';
+import DriverBottomNav from './components/DriverBottomNav.jsx';
 import { getLoadEditChanges } from './utils/loadEditReview.js';
 import LoadEditReview from './components/LoadEditReview.jsx';
 import { Fragment, useState, useEffect, useRef, useMemo } from 'react';
@@ -1195,6 +1198,8 @@ const [availableCustomAppointmentDate, setAvailableCustomAppointmentDate] = useS
 const [lfdDateFilter, setLfdDateFilter] = useState('all');
 const [lfdCustomDate, setLfdCustomDate] = useState(getTodayDate());
 const [driverMobileTab, setDriverMobileTab] = useState('active');
+const [driverCompletedFrom, setDriverCompletedFrom] = useState('');
+const [driverCompletedTo, setDriverCompletedTo] = useState('');
 const [driverPodLoad, setDriverPodLoad] = useState(null);
 const [driverSettlements, setDriverSettlements] = useState([]);
 const [driverSettlementDetails, setDriverSettlementDetails] = useState({});
@@ -10703,10 +10708,10 @@ const driverActiveLoads = sortDriverLoads((loadsData || []).filter((load) => {
   return driverMatchesCurrentUser(assignedDriver, currentUser) && !['delivered', 'dropped'].includes(status);
 }));
 
-const driverCompletedLoads = sortDriverLoads((loadsData || []).filter((load) => {
-  const status = String(load.status || '').trim().toLowerCase();
-  return driverMatchesCurrentUser(load.driver, currentUser) && status === 'delivered';
-}));
+const driverCompletedLoads = filterDriverCompletedLoads(
+  loadsData || [], currentUser?.driverId, driverCompletedFrom, driverCompletedTo,
+  company?.companyTimezone || APP_TIME_ZONE
+);
 
 const driverNeedsDocsLoads = driverActiveLoads.filter((load) => !hasRequiredDriverDocuments(load));
 const driverVisibleLoads =
@@ -10841,6 +10846,8 @@ const NotificationStack = () =>
   ) : null;
 
 const renderDriverLoadCard = (load) => {
+  const completion = driverMobileTab === 'completed'
+    ? getDriverCompletion(load, currentUser?.driverId, company?.companyTimezone || APP_TIME_ZONE) : null;
   const currentMove = load.currentMove || null;
   const moveOrigin = currentMove?.origin || load.pickup;
   const moveDestination = currentMove?.destination || load.delivery;
@@ -10861,6 +10868,7 @@ const renderDriverLoadCard = (load) => {
       <div className="driver-load-card-header">
         <div>
           <span className="driver-card-kicker">Load {load.id}</span>
+          {completion && <span className="driver-completed-date">{completion.day ? <>Completed · <time dateTime={completion.day}>{completion.label}</time></> : completion.label}</span>}
           <h3>{load.referenceNumber || load.poNumber || load.bookingNumber || 'No reference'}</h3>
         </div>
         <div className="driver-load-card-actions">
@@ -11266,56 +11274,17 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         </button>
       </section>
 
-      <nav className="driver-tab-bar" aria-label="Driver load tabs">
-        <button
-          type="button"
-          className={driverMobileTab === 'active' ? 'active' : ''}
-          onClick={() => setDriverMobileTab('active')}
-        >
-          Active
-        </button>
-        <button
-          type="button"
-          className={driverMobileTab === 'paperwork' ? 'active' : ''}
-          onClick={() => setDriverMobileTab('paperwork')}
-        >
-          Paperwork
-        </button>
-        <button
-          type="button"
-          className={driverMobileTab === 'completed' ? 'active' : ''}
-          onClick={() => setDriverMobileTab('completed')}
-        >
-          Completed
-        </button>
-        <button
-          type="button"
-          className={driverMobileTab === 'fuel' ? 'active' : ''}
-          onClick={() => setDriverMobileTab('fuel')}
-        >
-          Fuel
-        </button>
-        <button
-          type="button"
-          className={driverMobileTab === 'payments' ? 'active' : ''}
-          onClick={() => {
-            setDriverMobileTab('payments');
-            fetchDriverSettlements();
-          }}
-        >
-          Paystubs
-        </button>
-        <button
-          type="button"
-          className={driverMobileTab === 'profile' ? 'active' : ''}
-          onClick={() => {
-            setDriverMobileTab('profile');
-            fetchDriverProfile();
-          }}
-        >
-          Profile
-        </button>
-      </nav>
+      <DriverBottomNav activeTab={driverMobileTab} onSelect={(tab) => {
+        setDriverMobileTab(tab);
+        if (tab === 'payments') fetchDriverSettlements();
+        if (tab === 'profile') fetchDriverProfile();
+      }} />
+
+      {driverMobileTab === 'completed' && <DriverCompletedFilter
+        from={driverCompletedFrom} to={driverCompletedTo}
+        onFromChange={setDriverCompletedFrom} onToChange={setDriverCompletedTo}
+        onClear={() => { setDriverCompletedFrom(''); setDriverCompletedTo(''); }}
+        count={driverCompletedLoads.length} />}
 
       {driverMobileTab === 'payments' ? renderDriverPaymentsPanel() : driverMobileTab === 'profile' ? renderDriverProfilePanel() : driverMobileTab === 'fuel' ? (
         <section className="driver-fuel-panel">
@@ -11461,7 +11430,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       ) : driverVisibleLoads.length === 0 ? (
         <section className="driver-empty-state">
           <strong>No loads here.</strong>
-          <p>{driverMobileTab === 'paperwork' ? 'Paperwork is caught up.' : 'Assigned loads will appear here.'}</p>
+          <p>{driverMobileTab === 'completed' ? (driverCompletedFrom || driverCompletedTo ? 'No completed loads match these dates.' : 'Your completed loads will appear here.') : driverMobileTab === 'paperwork' ? 'Paperwork is caught up.' : 'Assigned loads will appear here.'}</p>
         </section>
       ) : (
         <div className="driver-load-list">

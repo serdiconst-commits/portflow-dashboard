@@ -601,7 +601,7 @@ button {
   min-height: 100vh;
   border-radius: 0 !important;
   margin: 0 !important;
-  padding: max(18px, env(safe-area-inset-top)) 14px max(24px, env(safe-area-inset-bottom)) !important;
+  padding: max(18px, env(safe-area-inset-top)) 14px calc(96px + env(safe-area-inset-bottom, 0px)) !important;
   box-shadow: none !important;
   background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
   color: #111827;
@@ -797,36 +797,6 @@ button {
   font-size: 11px;
   font-weight: 900;
   cursor: pointer;
-}
-
-.driver-tab-bar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
-  margin: 0 -2px 14px;
-  padding: 4px;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(14px);
-}
-
-.driver-tab-bar button {
-  border: none;
-  border-radius: 12px;
-  background: transparent;
-  color: #475569;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.driver-tab-bar button.active {
-  background: #111827;
-  color: #ffffff;
-  box-shadow: 0 8px 14px rgba(17, 24, 39, 0.14);
 }
 
 .driver-load-list {
