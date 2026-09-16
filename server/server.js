@@ -179,6 +179,9 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import cron from 'node-cron';
 import { db, initDatabase } from './database.js';
+import { createAccountAuthenticator } from './accountSession.js';
+import { accountAccessSchema } from './accountAccess.js';
+import createAccountAccessRoutes from './routes/accountAccess.js';
 import createAnalyticsRoutes from './routes/analyticsRoutes.js';
 import createAiAnalyticsRoutes from './routes/aiAnalyticsRoutes.js';
 import { runBackup } from './backup-database.js';
@@ -1721,6 +1724,8 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 initDatabase();
+// Fail startup rather than expose partially initialized account access routes.
+await new Promise((resolve, reject) => db.exec(accountAccessSchema, (err) => err ? reject(err) : resolve()));
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
@@ -1990,24 +1995,7 @@ const registerRateLimiter = rateLimit({
   message: { error: 'Too many registration attempts. Please try again later.' },
 });
 
-const authenticate = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized.' });
-  }
-
-  const token = authHeader.split(' ')[1];
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.company = decoded;
-    req.user = decoded;
-    next();
-  } catch (error) {
-    return res.status(401).json({ error: 'Invalid token.' });
-  }
-};
+const authenticate = createAccountAuthenticator(db, JWT_SECRET);
 
 const normalizeRole = (role) => String(role || '').trim().toLowerCase();
 const adminRoles = new Set(['admin', 'owner', 'carrier']);
@@ -2034,6 +2022,17 @@ const requireTenantOwner = (req, res, next) => {
   res.status(403).json({ error: 'Tenant Management is only available to the PortFlow owner.' });
 };
 
+// The configured owner email is a legacy owner identity; ordinary tenant users
+// must not claim it through staff/driver creation or credential edits.
+const protectOwnerEmail = (req, res, next) => {
+  if (String(req.body?.email || '').trim().toLowerCase() === PORTFLOW_OWNER_EMAIL && !isPortFlowOwner(req.user)) {
+    return res.status(403).json({ error: 'This email is reserved for the PortFlow owner.' });
+  }
+  next();
+};
+
+app.use('/api', createAccountAccessRoutes(db, { authenticate, requireTenantOwner }));
+
 app.use('/api/invoices', authenticate, createInvoiceRoutes(db));
 app.use('/api/driver-settlements', authenticate, createDriverSettlementRoutes(db));
 app.use('/api/driver-pods', authenticate, createDriverPodRoutes(db, { uploadsDir, audit: writeAuditLog }));
@@ -2041,7 +2040,7 @@ app.use('/api/analytics', authenticate, createAnalyticsRoutes(db));
 app.use('/api/payroll', authenticate, createPayrollRoutes(db));
 app.use('/api/ai', authenticate, createAiAnalyticsRoutes(db));
 
-app.post('/api/demo-requests', (req, res) => {
+app.post('/api/demo-requests', registerRateLimiter, (req, res) => {
   const companyName = String(req.body?.companyName || '').trim();
   const contactName = String(req.body?.contactName || '').trim();
   const email = String(req.body?.email || '').trim().toLowerCase();
@@ -2075,6 +2074,11 @@ app.get('/api/tenant-management/companies', authenticate, requireTenantOwner, (_
        c.id,
        c.name,
        c.email,
+       c.portHoustonScac,
+       (SELECT CASE WHEN a.pending=0 THEN 'Activated'
+         WHEN EXISTS (SELECT 1 FROM account_tokens t WHERE t.userId=a.userId AND t.purpose='invite' AND t.consumedAt IS NULL AND t.sentAt IS NOT NULL AND t.expiresAt > CAST(strftime('%s','now') AS INTEGER)*1000) THEN 'Invitation sent'
+         ELSE 'Invitation needed' END
+         FROM account_access a JOIN users au ON au.id=a.userId WHERE au.companyId=c.id AND a.invitedAt IS NOT NULL LIMIT 1) AS invitationStatus,
        COALESCE(c.serviceStatus, 'Active') AS serviceStatus,
        COALESCE(c.subscriptionPlan, 'Demo') AS subscriptionPlan,
        COALESCE(c.subscriptionNotes, '') AS subscriptionNotes,
@@ -2128,7 +2132,7 @@ app.put('/api/tenant-management/companies/:id', authenticate, requireTenantOwner
 
       const isEnabledStatus = serviceStatus === 'Active' || serviceStatus === 'Trial';
       db.run(
-        `UPDATE users SET isActive = ? WHERE companyId = ? AND role != 'owner'`,
+        `UPDATE users SET isActive = CASE WHEN EXISTS (SELECT 1 FROM account_access a WHERE a.userId=users.id AND a.pending=1) THEN 0 ELSE ? END WHERE companyId = ? AND role != 'owner'`,
         [isEnabledStatus ? 1 : 0, id],
         (userErr) => {
           if (userErr) {
@@ -3568,7 +3572,7 @@ app.put('/api/users/:id/role', authenticate, requireRoles(adminRoles), (req, res
   );
 });
 
-app.put('/api/users/:id/credentials', authenticate, requireRoles(adminRoles), (req, res) => {
+app.put('/api/users/:id/credentials', authenticate, protectOwnerEmail, requireRoles(adminRoles), (req, res) => {
   const companyId = req.company.companyId;
   const userId = String(req.params.id || '').trim();
   const email = String(req.body?.email || '').trim().toLowerCase();
@@ -3588,6 +3592,7 @@ app.put('/api/users/:id/credentials', authenticate, requireRoles(adminRoles), (r
     async (lookupErr, existingUser) => {
       if (lookupErr) return res.status(500).json({ error: lookupErr.message });
       if (!existingUser) return res.status(404).json({ error: 'User not found.' });
+      if (isPortFlowOwner(existingUser) && !isPortFlowOwner(req.user)) return res.status(403).json({ error: 'Only the PortFlow owner can change owner credentials.' });
 
       try {
         const passwordHash = password ? await bcrypt.hash(password, 10) : null;
@@ -3677,7 +3682,7 @@ app.delete('/api/users/:id', authenticate, requireRoles(adminRoles), (req, res) 
   );
 });
 
-app.post('/api/staff-users', authenticate, requireRoles(adminRoles), async (req, res) => {
+app.post('/api/staff-users', authenticate, protectOwnerEmail, requireRoles(adminRoles), async (req, res) => {
   const companyId = req.company.companyId;
   const { name, email, password, role = 'dispatcher', isActive = true } = req.body;
   const normalizedRole = normalizeRole(role);
@@ -3726,7 +3731,7 @@ app.post('/api/staff-users', authenticate, requireRoles(adminRoles), async (req,
   }
 });
 
-app.post('/api/users', authenticate, async (req, res) => {
+app.post('/api/users', authenticate, protectOwnerEmail, async (req, res) => {
   const companyId = req.company.companyId;
 
   const { name, email, password, role, truck = '', phone = '', isActive = 1 } = req.body;
@@ -3739,7 +3744,10 @@ app.post('/api/users', authenticate, async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const id = `USR-${Date.now()}`;
-    const userRole = role || 'driver';
+    const userRole = normalizeRole(role || 'driver');
+    if (!new Set(['driver', 'carrier', ...staffRoles]).has(userRole)) {
+      return res.status(400).json({ error: 'Choose a supported company user role. Owner access cannot be created here.' });
+    }
     const finishCreateUser = (driverId = null) => {
 
     db.run(
@@ -4114,7 +4122,7 @@ app.post('/api/login', loginRateLimiter, (req, res) => {
   }
 
   db.get(
-    `SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND isActive = 1`,
+    `SELECT u.*, COALESCE(a.version,0) AS accountVersion FROM users u LEFT JOIN account_access a ON a.userId=u.id WHERE LOWER(u.email) = LOWER(?) AND u.isActive = 1 AND COALESCE(a.pending,0)=0`,
     [email],
     async (err, user) => {
       if (err) {
@@ -4136,6 +4144,7 @@ app.post('/api/login', loginRateLimiter, (req, res) => {
         const token = jwt.sign(
           {
             id: user.id,
+            accountVersion: user.accountVersion,
             name: user.name,
             email: user.email,
             role: effectiveRole,
@@ -5230,7 +5239,7 @@ app.post('/api/driver-location', authenticate, (req, res) => {
   );
 });
 
-app.post('/api/drivers', authenticate, async (req, res) => {
+app.post('/api/drivers', authenticate, protectOwnerEmail, async (req, res) => {
   const companyId = req.company.companyId;
 
   const {
@@ -5355,7 +5364,7 @@ app.post('/api/drivers', authenticate, async (req, res) => {
   });
 });
 
-app.put('/api/drivers/:id', authenticate, requireRoles(dispatchLocationRoles), async (req, res) => {
+app.put('/api/drivers/:id', authenticate, protectOwnerEmail, requireRoles(dispatchLocationRoles), async (req, res) => {
   const companyId = req.company.companyId;
   const driverId = String(req.params.id || '').trim();
   const name = String(req.body?.name || '').trim();
@@ -6754,84 +6763,9 @@ app.put('/api/loads/:id/status', authenticate, (req, res) => {
 console.log('SERVER FILE LOADED');
 console.log('Invoice routes mounted at /api/invoices');
 
-app.post('/api/auth/register', registerRateLimiter, async (req, res) => {
-  const { name, email, password } = req.body;
-
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'Name, email, and password are required.' });
-  }
-
-  try {
-    db.get(
-      `SELECT * FROM companies WHERE email = ?`,
-      [email],
-      async (err, existingCompany) => {
-        if (err) {
-          console.error('Register lookup error:', err.message);
-          return res.status(500).json({ error: 'Database error.' });
-        }
-
-        if (existingCompany) {
-          return res.status(400).json({ error: 'Email already registered.' });
-        }
-
-        const companyId = uuidv4();
-        const userId = uuidv4();
-        const passwordHash = await bcrypt.hash(password, 10);
-        const createdAt = new Date().toISOString();
-
-        db.run(
-          `INSERT INTO companies (id, name, email, passwordHash, createdAt, serviceStatus, subscriptionPlan, subscriptionNotes, tenantUpdatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            companyId,
-            name,
-            email,
-            passwordHash,
-            createdAt,
-            'Trial',
-            'Pending Approval',
-            'Created from public account request. Owner approval required before login.',
-            createdAt,
-          ],
-          function (companyErr) {
-            if (companyErr) {
-              console.error('Register company insert error:', companyErr.message);
-              return res.status(500).json({ error: 'Failed to create company account.' });
-            }
-
-            db.run(
-              `INSERT INTO users (id, companyId, name, email, password, role, isActive)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`,
-              [userId, companyId, name, email, passwordHash, 'admin', 0],
-              function (userErr) {
-                if (userErr) {
-                  console.error('Register user insert error:', userErr.message);
-                  return res.status(500).json({ error: 'Failed to create admin user.' });
-                }
-
-                res.json({
-                  ok: true,
-                  pendingApproval: true,
-                  message: 'Account request received. PortFlow will approve access before login is enabled.',
-                  company: {
-                    id: companyId,
-                    name,
-                    email,
-                    serviceStatus: 'Trial',
-                    subscriptionPlan: 'Pending Approval',
-                  },
-                });
-              }
-            );
-          }
-        );
-      }
-    );
-  } catch (error) {
-    console.error('Register route error:', error.message);
-    res.status(500).json({ error: 'Server error.' });
-  }
+app.get('/account.html', (_req,res,next) => {
+  res.set({ 'Cache-Control':'no-store', 'Referrer-Policy':'no-referrer', 'X-Frame-Options':'DENY' });
+  next();
 });
 
 if (fs.existsSync(distDir)) {
