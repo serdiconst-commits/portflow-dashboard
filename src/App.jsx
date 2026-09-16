@@ -1,3 +1,4 @@
+import TenantInvitation, { TenantInvitationStatus } from './components/TenantInvitation.jsx';
 import DriverCompletedFilter from './components/DriverCompletedFilter.jsx';
 import { filterDriverCompletedLoads, getDriverCompletion } from './utils/driverCompletedLoads.js';
 import DriverBottomNav from './components/DriverBottomNav.jsx';
@@ -1424,7 +1425,6 @@ const [ownerNewPassword, setOwnerNewPassword] = useState('');
 const [showPublicLanding, setShowPublicLanding] = useState(!isDriverApp && !savedUser && !loginPathRequested);
 const [demoAccessCode, setDemoAccessCode] = useState('');
 const [demoAccessError, setDemoAccessError] = useState('');
-const [registerName, setRegisterName] = useState('');
 const [authToken, setAuthToken] = useState(getAuthStorageItem('authToken') || '');
 const [currentUser, setCurrentUser] = useState(savedUser || null);
 const [company, setCompany] = useState(savedCompany || null);
@@ -1733,48 +1733,6 @@ const handleLogin = async (e) => {
   }
 };
 
-const handleRegister = async (e) => {
-  e.preventDefault();
-
-  try {
-    const res = await fetch(`${API_BASE}/api/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: registerName,
-        email: loginEmail,
-        password: loginPassword,
-      }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(`Server said: ${data.error || 'Registration failed'}`);
-    }
-
-    if (data.pendingApproval) {
-      setLoginError(data.message || 'Account request received. PortFlow will approve access before login is enabled.');
-      setAuthMode('login');
-      setRegisterName('');
-      setLoginPassword('');
-      return;
-    }
-
-    setAuthToken(data.token);
-    setCurrentUser(data.user);
-    setCompany(data.company || null);
-    setActiveView(isDriverApp ? 'driver' : getDefaultViewForRole(data.user?.role));
-
-    saveAuthSession(data.token, data.user, data.company);
-
-    setLoginError('');
-  } catch (error) {
-    console.error('Registration failed:', error);
-    setLoginError(error.message);
-  }
-};
-
 const handleOwnerPasswordReset = async (e) => {
   e.preventDefault();
 
@@ -1837,7 +1795,7 @@ const handleStartDemo = () => {
 
 const handleSubmitDemoRequest = async (e) => {
   e.preventDefault();
-  setDemoRequestStatus('Sending demo request...');
+  setDemoRequestStatus('Sending information request...');
 
   try {
     const res = await fetch(`${API_BASE}/api/demo-requests`, {
@@ -1851,7 +1809,7 @@ const handleSubmitDemoRequest = async (e) => {
     }
 
     setDemoRequestForm({ companyName: '', contactName: '', email: '', phone: '', message: '' });
-    setDemoRequestStatus('Demo request received. PortFlow will follow up soon.');
+    setDemoRequestStatus('Information request received. PortFlow will follow up soon.');
   } catch (error) {
     console.error('Demo request failed:', error);
     setDemoRequestStatus(`Could not send demo request: ${error.message}`);
@@ -9873,7 +9831,7 @@ return (
             Client Login
           </button>
           <a className="public-primary-btn" href="#demo-request">
-            Request Demo
+            Request information
           </a>
         </div>
       </header>
@@ -9949,10 +9907,10 @@ return (
 
         <section className="public-demo-band" id="demo-request">
           <div>
-            <span className="public-kicker">Demo access by request</span>
-            <h2>Approved prospects can try PortFlow without touching your live operation.</h2>
+            <span className="public-kicker">Request information</span>
+            <h2>Get PortFlow for your company.</h2>
             <p>
-              Request demo access first. Once approved, use the access code provided by PortFlow to launch the sample workspace.
+              Tell us about your company. PortFlow will contact you about access or a demo. This request does not create an account.
             </p>
           </div>
           <div className="public-demo-access">
@@ -10002,7 +9960,7 @@ return (
                 />
               </label>
               <button type="submit" className="public-primary-btn">
-                Send Demo Request
+                Send information request
               </button>
               {demoRequestStatus && <p>{demoRequestStatus}</p>}
             </form>
@@ -10043,9 +10001,7 @@ return (
             <div>
               <span>PortFlow</span>
               <strong>
-                {authMode === 'register'
-                  ? 'Request company access'
-                  : authMode === 'reset'
+                {authMode === 'reset'
                   ? 'Reset owner password'
                   : 'Dispatcher login'}
               </strong>
@@ -10056,8 +10012,6 @@ return (
         <h2>
           {isDriverApp
             ? 'PortFlow Driver'
-            : authMode === 'register'
-            ? 'Create PortFlow Account'
             : authMode === 'reset'
             ? 'Reset Owner Password'
             : 'Welcome Back'}
@@ -10065,9 +10019,7 @@ return (
 
         {!isDriverApp && (
           <p className="auth-subtitle">
-            {authMode === 'register'
-              ? 'Send a company access request. PortFlow will approve it before login is enabled.'
-              : authMode === 'reset'
+            {authMode === 'reset'
               ? 'Use your private reset code to set a new owner password.'
               : 'Sign in to manage loads, drivers, documents, and dispatch updates.'}
           </p>
@@ -10076,24 +10028,11 @@ return (
       <form
         className={isDriverApp ? '' : 'auth-form'}
         onSubmit={
-          !isDriverApp && authMode === 'register'
-            ? handleRegister
-            : !isDriverApp && authMode === 'reset'
+          !isDriverApp && authMode === 'reset'
             ? handleOwnerPasswordReset
             : handleLogin
         }
       >
-        {!isDriverApp && authMode === 'register' && (
-          <div className="auth-field">
-            <label>Company Name</label>
-            <input
-              type="text"
-              value={registerName}
-              onChange={(e) => setRegisterName(e.target.value)}
-            />
-          </div>
-        )}
-
         <div className={isDriverApp ? '' : 'auth-field'}>
           <label>Email</label>
           <input
@@ -10140,27 +10079,25 @@ return (
         )}
 
         <button type="submit" className={isDriverApp ? '' : 'auth-primary-btn'}>
-          {authMode === 'register'
-            ? 'Request Account Access'
-            : authMode === 'reset'
+          {authMode === 'reset'
             ? 'Reset Password'
             : 'Log In'}
         </button>
       </form>
 
+      <a className="auth-secondary-btn" href={`${API_BASE}/account.html`}>Forgot password?</a>
       {!isDriverApp && (
         <>
           <button
             type="button"
             onClick={() => {
               setLoginError('');
-              setAuthMode(authMode === 'register' ? 'login' : 'register');
+              setShowPublicLanding(true);
+              window.setTimeout(() => document.getElementById('demo-request')?.scrollIntoView({ behavior:'smooth' }), 0);
             }}
             className="auth-secondary-btn"
           >
-            {authMode === 'register'
-              ? 'Already have an account? Log in'
-              : 'Request company access'}
+            Request information
           </button>
           <button
             type="button"
@@ -10170,7 +10107,7 @@ return (
             }}
             className="auth-secondary-btn"
           >
-            {authMode === 'reset' ? 'Back to login' : 'Reset owner password'}
+            {authMode === 'reset' ? 'Back to login' : 'Owner recovery code'}
           </button>
           <button
             type="button"
@@ -16176,13 +16113,15 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         <div>
           <h3>Tenant Management</h3>
           <p className="panel-subtitle">Control company access, subscription status, and service notes.</p>
-          <p className="panel-subtitle">Set status to Active or Trial to enable login. Suspended or Canceled blocks users from entering.</p>
+          <p className="panel-subtitle">Active or Trial allows login after account activation. Other statuses block access.</p>
         </div>
         <button type="button" className="secondary-btn compact-btn" onClick={fetchTenantManagement} disabled={tenantLoading}>
           {tenantLoading ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
       {tenantStatusMessage && <p className="status-message">{tenantStatusMessage}</p>}
+
+      <TenantInvitation apiBase={API_BASE} authToken={authToken} onCreated={fetchTenantManagement} />
 
       <div className="tenant-summary-row">
         <div><span>Companies</span><strong>{tenantCompanies.length}</strong></div>
@@ -16211,6 +16150,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 </button>
               </div>
 
+              <TenantInvitationStatus tenant={tenant} apiBase={API_BASE} authToken={authToken} onSent={fetchTenantManagement} />
               <div className="tenant-controls">
                 <label>
                   <span>Status</span>
@@ -16252,7 +16192,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     <section className="panel tenant-panel">
       <div className="panel-header">
         <div>
-          <h3>Demo Requests</h3>
+          <h3>Information & Demo Requests</h3>
           <p className="panel-subtitle">Prospects submitted from the public PortFlow page.</p>
         </div>
         <span>{demoRequests.length} request(s)</span>

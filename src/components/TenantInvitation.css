@@ -1,0 +1,12 @@
+.tenant-invitation { border:1px solid #cad8e7; border-radius:16px; padding:20px; margin:20px 0; background:#f7faff; }
+.tenant-invitation summary { cursor:pointer; color:#12385d; font-weight:700; font-size:17px; }
+.tenant-invitation p { color:#52647a; line-height:1.5; }
+.tenant-invitation-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; border:0; padding:0; margin:20px 0; min-width:0; }
+.tenant-invitation-fields label { display:flex; flex-direction:column; gap:7px; color:#243e59; font-size:14px; font-weight:600; }
+.tenant-invitation-fields input,.tenant-invitation-fields select { box-sizing:border-box; width:100%; border:1px solid #bfcddd; border-radius:9px; padding:11px 12px; font:inherit; background:white; color:#123047; }
+.tenant-invitation-fields input:focus,.tenant-invitation-fields select:focus { outline:2px solid #2877e7; outline-offset:2px; }
+.tenant-invitation-note { font-size:13px; }
+.tenant-invitation-message { background:#e9f1ff; padding:12px; border-radius:8px; }
+.tenant-invitation-status { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:12px 0; color:#425871; font-size:13px; }
+.tenant-invitation-status p { flex-basis:100%; margin:0; }
+@media(max-width:600px) { .tenant-invitation-fields { grid-template-columns:1fr; } .tenant-invitation { padding:16px; } }

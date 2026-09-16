@@ -554,6 +554,14 @@ button {
   color: #0f4f8f;
 }
 
+a.auth-secondary-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
 .auth-secondary-btn:hover {
   border-color: #2563eb;
   background: #eff6ff;
