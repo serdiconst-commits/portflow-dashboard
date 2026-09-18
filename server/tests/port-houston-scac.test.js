@@ -97,3 +97,29 @@ test('document download rejects unverified or foreign transactions before HTTP',
   await assert.rejects(downloadGateTransactionDocument('21416143',credentials('LCTM')));
   assert.equal(fetch.mock.callCount(),0);
 });
+
+for (const method of ['container', 'transaction numbers']) {
+  test(`Return Export RE is selected as IN EIR by ${method}, preserving OUT and SCAC isolation`, async t => {
+    const records = [
+      row('10001','LCTM',{subType:'DI'}),
+      row('10002','LCTM',{subType:'RE'}),
+      row('10003','OTHER',{subType:'RE'}),
+    ];
+    mockPort(t,records);
+    const result = method === 'container'
+      ? await getGateTransactionsByContainer(containerNumber,credentials('LCTM'),'BPT')
+      : await getGateTransactionsByNumbers(['10001','10002','10003'],credentials('LCTM'),'BPT');
+    assert.equal(result.inEirTransaction.nbr,'10002');
+    assert.equal(result.inEirTransaction.eirType,'IN EIR');
+    assert.equal(result.outEirTransaction.nbr,'10001');
+    assert.equal(result.outEirTransaction.eirType,'OUT EIR');
+    assert.deepEqual(result.transactions.map(item=>item.nbr).sort(),['10001','10002']);
+  });
+}
+
+test('an RE-only container has an IN EIR and no OUT EIR', async t => {
+  mockPort(t,[row('10002','LCTM',{subType:'RE'})]);
+  const result = await getGateTransactionsByContainer(containerNumber,credentials('LCTM'),'BCT');
+  assert.equal(result.inEirTransaction.nbr,'10002');
+  assert.equal(result.outEirTransaction,null);
+});
