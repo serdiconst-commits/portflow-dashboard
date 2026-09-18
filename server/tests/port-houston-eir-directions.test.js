@@ -6,10 +6,11 @@ import {
 } from '../integrations/portHouston.js';
 
 test('classifies Port Houston EIR transaction directions', () => {
-  assert.equal(getPortHoustonEirCategoryFromSubType('DI'), 'OUT EIR');
+  for (const subtype of ['RO', 'DM', 'DI']) assert.equal(getPortHoustonEirCategoryFromSubType(subtype), 'OUT EIR');
+  for (const subtype of ['RI', 'RC', 'RB']) assert.equal(getPortHoustonEirCategoryFromSubType(subtype), 'IN EIR');
   assert.equal(getPortHoustonEirCategoryFromSubType('DE'), 'IN EIR');
   assert.equal(getPortHoustonEirCategoryFromSubType('RM'), 'IN EIR');
-  assert.equal(getPortHoustonEirCategoryFromSubType('RE'), 'OUT EIR');
+  assert.equal(getPortHoustonEirCategoryFromSubType('RE'), 'IN EIR');
 });
 
 test('extracts gate transaction nbr from equipment history batch number', () => {
@@ -39,6 +40,7 @@ test('ignores non-gate batch numbers from equipment history', () => {
 
 test('normalizes subtype casing and rejects unknown EIR subtypes', () => {
   assert.equal(getPortHoustonEirCategoryFromSubType(' di '), 'OUT EIR');
+  assert.equal(getPortHoustonEirCategoryFromSubType(' re '), 'IN EIR');
   assert.equal(getPortHoustonEirCategoryFromSubType(''), '');
   assert.equal(getPortHoustonEirCategoryFromSubType('UNKNOWN'), '');
 });

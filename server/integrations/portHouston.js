@@ -88,8 +88,8 @@ const ASSOCIATED_EQUIPMENT_FIELDS = [
   'category',
 ].join(',');
 
-export const PORT_HOUSTON_OUT_GATE_SUBTYPES = Object.freeze(['RO', 'DM', 'DI', 'RE']);
-export const PORT_HOUSTON_IN_GATE_SUBTYPES = Object.freeze(['RI', 'RM', 'DE', 'RC', 'RB']);
+export const PORT_HOUSTON_OUT_GATE_SUBTYPES = Object.freeze(['RO', 'DM', 'DI']);
+export const PORT_HOUSTON_IN_GATE_SUBTYPES = Object.freeze(['RI', 'RM', 'DE', 'RC', 'RB', 'RE']);
 
 export const getPortHoustonEirCategoryFromSubType = (value = '') => {
   const subType = String(value || '').trim().toUpperCase();
