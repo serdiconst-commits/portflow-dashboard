@@ -155,3 +155,30 @@ const activate = async(f) => f.service.complete({...lastLink(f),password});
   const b=await (await post('/auth/forgot-password',null,{email:'unknown@example.invalid'})).json();
   assert.deepEqual(a,b);assert.equal(a.message,genericResetMessage);
  });
+
+test('open sessions use current role, email and company instead of stale signed claims', async(t)=>{
+  const f=await fixture(t);
+  await dbRun(f.db,"INSERT INTO users VALUES ('live-user','company-a','Current User','current@example.invalid','unused','admin',1)");
+  const auth=createAccountAuthenticator(f.db,'session-test',{ownerEmail:'owner@example.invalid'});
+  const token=jwt.sign({id:'live-user',role:'owner',email:'owner@example.invalid',companyId:'old-company',driverId:'old-driver'},'session-test');
+  const check=async()=>{
+    const req={headers:{authorization:`Bearer ${token}`}};
+    let status=200,passed=false;
+    await auth(req,{status(value){status=value;return this;},json(){}},()=>{passed=true;});
+    return {status,passed,user:req.user};
+  };
+  let result=await check();
+  assert.equal(result.user.role,'admin');
+  assert.equal(result.user.companyId,'company-a');
+  assert.equal(result.user.email,'current@example.invalid');
+  assert.equal(result.user.driverId,null);
+  assert.equal(result.user.password,undefined);
+  await dbRun(f.db,"UPDATE users SET role='dispatcher' WHERE id='live-user'");
+  assert.equal((await check()).user.role,'dispatcher');
+  await dbRun(f.db,"UPDATE users SET email='owner@example.invalid' WHERE id='live-user'");
+  assert.equal((await check()).user.role,'owner');
+  await dbRun(f.db,"UPDATE users SET email='current@example.invalid', isActive=0 WHERE id='live-user'");
+  result=await check();assert.equal(result.status,401);assert.equal(result.passed,false);
+  await dbRun(f.db,"DELETE FROM users WHERE id='live-user'");
+  assert.equal((await check()).status,401);
+});

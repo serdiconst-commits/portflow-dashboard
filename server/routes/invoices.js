@@ -2,6 +2,14 @@ import express from 'express';
 
 export default function createInvoiceRoutes(db) {
   const router = express.Router();
+  // Match the accounting workspace; authentication alone does not grant access.
+  const invoiceRoles = new Set(['owner', 'admin', 'carrier', 'manager', 'payroll']);
+  router.use((req, res, next) => {
+    if (!invoiceRoles.has(String(req.user?.role || '').trim().toLowerCase())) {
+      return res.status(403).json({ error: 'You do not have permission to access invoices.' });
+    }
+    next();
+  });
 
   // GET all invoices
   router.get('/', (req, res) => {

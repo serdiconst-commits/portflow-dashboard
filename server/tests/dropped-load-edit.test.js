@@ -19,8 +19,8 @@ function editDroppedLoad(existingDriver, requestedDriver, overrides = {}) {
   let result;
   let synced = false;
   const context = {
-    app: { put: (_path, _auth, callback) => { handler = callback; } },
-    authenticate: () => {}, console: { log() {}, error() {} },
+    app: { put: (_path, ...handlers) => { handler = handlers.at(-1); } },
+    authenticate: () => {}, requireRoles: () => () => {}, movePayRoles: new Set(), console: { log() {}, error() {} },
     findDuplicateContainerLoad: (_company, _container, _id, cb) => cb(null, null),
     normalizeLoadWorkflow: (value) => value,
     normalizeDriverAssignment: (_company, value, cb) => cb(null, value || ''),

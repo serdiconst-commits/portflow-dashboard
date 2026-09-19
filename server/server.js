@@ -1995,7 +1995,7 @@ const registerRateLimiter = rateLimit({
   message: { error: 'Too many registration attempts. Please try again later.' },
 });
 
-const authenticate = createAccountAuthenticator(db, JWT_SECRET);
+const authenticate = createAccountAuthenticator(db, JWT_SECRET, { ownerEmail: PORTFLOW_OWNER_EMAIL });
 
 const normalizeRole = (role) => String(role || '').trim().toLowerCase();
 const adminRoles = new Set(['admin', 'owner', 'carrier']);
@@ -3731,7 +3731,7 @@ app.post('/api/staff-users', authenticate, protectOwnerEmail, requireRoles(admin
   }
 });
 
-app.post('/api/users', authenticate, protectOwnerEmail, async (req, res) => {
+app.post('/api/users', authenticate, requireRoles(adminRoles), protectOwnerEmail, async (req, res) => {
   const companyId = req.company.companyId;
 
   const { name, email, password, role, truck = '', phone = '', isActive = 1 } = req.body;
@@ -4334,7 +4334,7 @@ console.log('POST /api/customers body:', req.body);
     }
   );
 });
-app.put('/api/loads/:id', authenticate, (req, res) => {
+app.put('/api/loads/:id', authenticate, requireRoles(movePayRoles), (req, res) => {
   const body = req.body || {};
   const l = body;
   const loadId = String(req.params.id || '').trim();
@@ -5239,7 +5239,7 @@ app.post('/api/driver-location', authenticate, (req, res) => {
   );
 });
 
-app.post('/api/drivers', authenticate, protectOwnerEmail, async (req, res) => {
+app.post('/api/drivers', authenticate, requireRoles(dispatchLocationRoles), protectOwnerEmail, async (req, res) => {
   const companyId = req.company.companyId;
 
   const {
@@ -5497,7 +5497,7 @@ app.put('/api/drivers/:id', authenticate, protectOwnerEmail, requireRoles(dispat
   );
 });
 
-app.post('/api/loads', authenticate, (req, res) => {
+app.post('/api/loads', authenticate, requireRoles(dispatchLocationRoles), (req, res) => {
   const l = req.body || {};
   const companyId = req.company.companyId;
 
@@ -6779,11 +6779,16 @@ if (fs.existsSync(distDir)) {
 
 if (isProduction) {
   const backupSchedule = process.env.BACKUP_CRON_SCHEDULE || '0 3 * * *';
-  cron.schedule(backupSchedule, () => {
+  let backupRunning = false;
+  cron.schedule(backupSchedule, async () => {
+    if (backupRunning) return;
+    backupRunning = true;
     try {
-      runBackup();
+      await runBackup();
     } catch (error) {
       console.error('Scheduled database backup failed:', error.message);
+    } finally {
+      backupRunning = false;
     }
   });
   console.log(`Scheduled database backups: "${backupSchedule}"`);

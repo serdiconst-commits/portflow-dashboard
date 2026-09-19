@@ -10,6 +10,7 @@ const root=fileURLToPath(new URL('../../',import.meta.url));
 const fixtureCode=`
   import express from 'express';
   import bcrypt from 'bcrypt';
+  import jwt from 'jsonwebtoken';
   import { dbRun } from './server/services/dbUtils.js';
   globalThis.fetch=async(url,options)=>{
     if(url!=='https://api.resend.com/emails') throw new Error('External network forbidden in account test');
@@ -27,7 +28,13 @@ const fixtureCode=`
   await dbRun(db,"INSERT INTO companies (id,name,email,passwordHash,createdAt,serviceStatus) VALUES ('QA-OWNER','QA Owner','owner@example.invalid',?,?,'Active')",[hash,new Date().toISOString()]);
   await dbRun(db,"INSERT INTO users (id,companyId,name,email,password,role,isActive) VALUES ('QA-OWNER-USER','QA-OWNER','QA Owner','owner@example.invalid',?,'owner',1)",[hash]);
   if(!server.listening) await new Promise(resolve=>server.once('listening',resolve));
-  process.send({kind:'ready',port:server.address().port});
+  const roleTokens={};
+  for(const role of ['driver','dispatcher','payroll','manager','admin','carrier']) {
+    const id='QA-ROLE-'+role;
+    await dbRun(db,'INSERT INTO users (id,companyId,name,email,password,role,isActive) VALUES (?,?,?,?,?,?,1)',[id,'QA-OWNER',role,role+'-role@example.invalid',hash,role]);
+    roleTokens[role]=jwt.sign({id,companyId:'QA-OWNER',role},process.env.JWT_SECRET,{expiresIn:'5m'});
+  }
+  process.send({kind:'ready',port:server.address().port,roleTokens});
 `;
 
 test('real server: owner creates tenant, recipient activates, resets and signs in; earlier owner and tenant controls survive', {timeout:30000},async(t)=>{
@@ -36,8 +43,8 @@ test('real server: owner creates tenant, recipient activates, resets and signs i
   let logs='';child.stdout.on('data',d=>{logs+=d;});child.stderr.on('data',d=>{logs+=d;});
   const mails=[];child.on('message',message=>{if(message.kind==='mail')mails.push(message);});
   t.after(async()=>{child.kill();await new Promise(resolve=>child.once('exit',resolve));await rm(dir,{recursive:true,force:true});});
-  const port=await new Promise((resolve,reject)=>{
-    child.on('message',m=>{if(m.kind==='ready')resolve(m.port);});
+  const {port,roleTokens}=await new Promise((resolve,reject)=>{
+    child.on('message',m=>{if(m.kind==='ready')resolve(m);});
     child.once('exit',()=>reject(new Error(`Fixture failed: ${logs}`)));
   });
   const call=async(route,body,token,method=body?'POST':'GET')=>{
@@ -46,6 +53,60 @@ test('real server: owner creates tenant, recipient activates, resets and signs i
   };
   const login=await call('/api/login',{email:'owner@example.invalid',password:'Existing-owner-password!'});assert.equal(login.status,200);
   const owner=login.data.token;
+  // Exercise real route middleware before any account writes or password hashing.
+  for(const route of ['/api/users','/api/staff-users','/api/drivers']) {
+    assert.equal((await call(route,{})).status,401);
+    for(const role of ['driver','payroll']) {
+      assert.equal((await call(route,{name:'Forbidden',email:'forbidden@example.invalid',password:'Test-password!',role:'admin'},roleTokens[role])).status,403,route+' '+role);
+    }
+  }
+  for(const role of ['dispatcher','manager']) {
+    for(const route of ['/api/users','/api/staff-users']) {
+      assert.equal((await call(route,{name:'Forbidden',email:'forbidden@example.invalid',password:'Test-password!',role:'admin'},roleTokens[role])).status,403);
+    }
+    const driver=await call('/api/drivers',{name:'Allowed driver',email:role+'-created@example.invalid',password:'Test-password!',companyId:'OTHER-TENANT'},roleTokens[role]);
+    assert.equal(driver.status,200,JSON.stringify(driver));
+    assert.equal(driver.data.driver.companyId,'QA-OWNER');
+  }
+  for(const role of ['admin','carrier']) {
+    const user=await call('/api/users',{name:'Allowed staff',email:role+'-created@example.invalid',password:'Test-password!',role:'dispatcher',companyId:'OTHER-TENANT'},roleTokens[role]);
+    assert.equal(user.status,200,JSON.stringify(user));
+    assert.equal(user.data.user.companyId,'QA-OWNER');
+    assert.equal((await call('/api/users',{name:'Forbidden owner',email:'owner-escalation@example.invalid',password:'Test-password!',role:'owner'},roleTokens[role])).status,400);
+  }
+  // Driver operational routes stay available, but generic load and billing access do not.
+  for(const [route,method] of [['/api/loads','POST'],['/api/loads/unknown','PUT'],['/api/invoices','GET'],['/api/invoices','POST'],['/api/invoices/unknown/status','PUT'],['/api/invoices/unknown/payment','PUT']]) {
+    assert.equal((await call(route,method==='GET'?null:{},roleTokens.driver,method)).status,403,route);
+    assert.equal((await call(route,method==='GET'?null:{},null,method)).status,401,route);
+  }
+  assert.equal((await call('/api/loads',{},roleTokens.payroll)).status,403);
+  assert.equal((await call('/api/loads',null,roleTokens.driver)).status,200);
+  const dispatchLoad=await call('/api/loads',{customer:'QA customer',pickup:'Bayport',delivery:'QA delivery',status:'Pending',companyId:'FORGED'},roleTokens.dispatcher);
+  assert.equal(dispatchLoad.status,200,JSON.stringify(dispatchLoad));
+  assert.equal(dispatchLoad.data.companyId,'QA-OWNER');
+  const payrollEdit=await call('/api/loads/'+dispatchLoad.data.id,{...dispatchLoad.data,driverRate:'125'},roleTokens.payroll,'PUT');
+  assert.equal(payrollEdit.status,200,JSON.stringify(payrollEdit));
+  assert.equal(Number(payrollEdit.data.driverRate),125);
+
+  assert.equal((await call('/api/loads/unknown/status',{status:'In Transit'},roleTokens.driver,'PUT')).status,404);
+  assert.equal((await call('/api/invoices',null,roleTokens.dispatcher)).status,403);
+  for(const role of ['admin','carrier','manager','payroll']) {
+    assert.equal((await call('/api/invoices',null,roleTokens[role])).status,200,role);
+  }
+  const invoice=await call('/api/invoices',{customerName:'QA customer',amount:125,companyId:'FORGED'},roleTokens.payroll);
+  assert.equal(invoice.status,201,JSON.stringify(invoice));
+  const invoiceList=await call('/api/invoices',null,roleTokens.payroll);
+  assert.equal(invoiceList.data.length,1);
+  assert.equal(invoiceList.data[0].companyId,'QA-OWNER');
+  // The already-issued admin token must lose admin rights on the next request.
+  assert.equal((await call('/api/users/QA-ROLE-admin/role',{role:'dispatcher'},owner,'PUT')).status,200);
+  assert.equal((await call('/api/users',{name:'Stale admin',email:'stale-admin@example.invalid',password:'Test-password!',role:'admin'},roleTokens.admin)).status,403);
+  assert.equal((await call('/api/company',null,roleTokens.admin)).status,200);
+  assert.equal((await call('/api/all-users',null,roleTokens.carrier)).status,200);
+  const usersAfter=await call('/api/all-users',null,owner);
+  assert.equal(usersAfter.status,200);
+  assert(!JSON.stringify(usersAfter.data).includes('forbidden@example.invalid'));
+
   assert.equal((await call('/api/tenant-management/companies')).status,401);
   const created=await call('/api/tenant-management/companies',{name:'QA Fictitious Freight',adminName:'QA Admin',email:'recipient@example.invalid',scac:'TEST',serviceStatus:'Trial',subscriptionPlan:'QA'},owner);
   assert.equal(created.status,201,JSON.stringify(created));assert.equal(created.data.invitationSent,true);
@@ -61,6 +122,11 @@ test('real server: owner creates tenant, recipient activates, resets and signs i
   assert.equal((await call('/api/auth/complete-password',{purpose:'invite',token,password:'Recipient-password!'})).status,200);
   const recipient=await call('/api/login',{email:'recipient@example.invalid',password:'Recipient-password!'});assert.equal(recipient.status,200);
   assert.equal(recipient.data.user.companyId,id);assert.equal(recipient.data.user.role,'admin');
+  const otherInvoice=invoiceList.data[0].id;
+  assert.equal((await call('/api/invoices',null,recipient.data.token)).data.length,0);
+  assert.equal((await call('/api/invoices/'+otherInvoice,null,recipient.data.token)).status,404);
+  assert.equal((await call('/api/invoices/'+otherInvoice+'/status',{status:'Paid'},recipient.data.token,'PUT')).status,404);
+
   assert.equal((await call('/api/tenant-management/companies',null,recipient.data.token)).status,403);
   assert.equal((await call('/api/users',{name:'Escalation test',email:'escalation@example.invalid',password:'Test-password!',role:'owner'},recipient.data.token)).status,400);
   for (const route of ['/api/users','/api/staff-users','/api/drivers']) {
