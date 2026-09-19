@@ -1,56 +1,59 @@
 import 'dotenv/config';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import sqlite3 from 'sqlite3';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.join(__dirname, '..');
+const filename = fileURLToPath(import.meta.url);
+const rootDir = path.resolve(path.dirname(filename), '..');
+const open = (file) => new Promise((resolve, reject) => {
+  const db = new sqlite3.Database(file, sqlite3.OPEN_READONLY, err => err ? reject(err) : resolve(db));
+});
+const close = db => new Promise((resolve, reject) => db.close(err => err ? reject(err) : resolve()));
+export async function verifyDatabase(file) {
+  const db = await open(file);
+  try {
+    const rows = await new Promise((resolve, reject) => db.all('PRAGMA integrity_check', (err, rows) => err ? reject(err) : resolve(rows)));
+    if (rows.length !== 1 || Object.values(rows[0])[0] !== 'ok') throw new Error('Backup integrity check failed.');
+  } finally { await close(db); }
+}
 
-export const runBackup = ({ retentionDays } = {}) => {
-  const dbPath = process.env.DB_PATH
-    ? path.resolve(rootDir, process.env.DB_PATH)
-    : path.join(__dirname, 'portflow.db');
-
-  const backupDir = process.env.BACKUP_DIR
-    ? path.resolve(rootDir, process.env.BACKUP_DIR)
-    : path.join(rootDir, 'backups');
-
-  if (!fs.existsSync(dbPath)) {
-    throw new Error(`Database file not found: ${dbPath}`);
+export async function runBackup({ retentionDays = process.env.BACKUP_RETENTION_DAYS ?? 14,
+  dbPath = process.env.DB_PATH ? path.resolve(process.cwd(), process.env.DB_PATH) : path.join(rootDir, 'server/portflow.db'),
+  backupDir = process.env.BACKUP_DIR ? path.resolve(process.cwd(), process.env.BACKUP_DIR) : path.join(rootDir, 'backups') } = {}) {
+  const days = Number(retentionDays);
+  if (!Number.isFinite(days) || days < 0) throw new Error('Invalid backup retention.');
+  await fs.access(dbPath);
+  await fs.mkdir(backupDir, { recursive: true, mode: 0o700 });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const target = path.join(backupDir, `portflow-${stamp}-${randomUUID()}.db`);
+  const partial = `${target}.partial`;
+  const db = await open(dbPath);
+  try {
+    db.configure('busyTimeout', 30000);
+    // Includes committed WAL pages and leaves the live database unchanged.
+    await new Promise((resolve, reject) => db.run('VACUUM INTO ?', [partial], err => err ? reject(err) : resolve()));
+    await fs.chmod(partial, 0o600);
+    await verifyDatabase(partial);
+    await fs.rename(partial, target);
+  } catch (err) {
+    await fs.rm(partial, { force: true });
+    throw err;
+  } finally { await close(db); }
+  // Prune only after a new, verified database has been published. Zero disables pruning.
+  if (days > 0) {
+    const cutoff = Date.now() - days * 86400000;
+    for (const name of await fs.readdir(backupDir)) {
+      if (!/^portflow-[\dT-]+(?:Z)(?:-[a-f\d-]+)?\.db$/.test(name)) continue;
+      const file = path.join(backupDir, name);
+      const stat = await fs.lstat(file);
+      if (file !== target && stat.isFile() && stat.mtimeMs < cutoff) await fs.unlink(file);
+    }
   }
-
-  fs.mkdirSync(backupDir, { recursive: true });
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupPath = path.join(backupDir, `portflow-${timestamp}.db`);
-
-  fs.copyFileSync(dbPath, backupPath);
-  console.log(`Database backup created: ${backupPath}`);
-
-  const effectiveRetentionDays = Number(retentionDays ?? process.env.BACKUP_RETENTION_DAYS ?? 14);
-  const cutoff = Date.now() - effectiveRetentionDays * 24 * 60 * 60 * 1000;
-
-  const removed = fs
-    .readdirSync(backupDir)
-    .filter((name) => name.startsWith('portflow-') && name.endsWith('.db'))
-    .filter((name) => {
-      const filePath = path.join(backupDir, name);
-      return fs.statSync(filePath).mtimeMs < cutoff;
-    })
-    .map((name) => {
-      fs.unlinkSync(path.join(backupDir, name));
-      return name;
-    });
-
-  if (removed.length) {
-    console.log(`Pruned ${removed.length} backup(s) older than ${effectiveRetentionDays} day(s).`);
-  }
-
-  return backupPath;
-};
-
-const isMain = process.argv[1] === __filename;
-if (isMain) {
-  runBackup();
+  console.log(`Verified database backup created: ${target}`);
+  return target;
+}
+if (process.argv[1] && path.resolve(process.argv[1]) === filename) {
+  runBackup().catch(err => { console.error('Backup failed:', err.message); process.exitCode = 1; });
 }
