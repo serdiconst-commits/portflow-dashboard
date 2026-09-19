@@ -4929,8 +4929,21 @@ useEffect(() => {
     visibleSettlementLoads[0] ||
     null;
 
-  const getSettlementPayValue = (load, field) =>
-    settlementPayDrafts[load.id]?.[field] ?? load[field] ?? '$0.00';
+  const getSettlementPayValue = (load, field) => {
+    if (field === 'driverRate') {
+      const driverMoves = (load.moves || []).filter((move) =>
+        move.status !== 'Cancelled' &&
+        normalizeDriverForStorage(move.completedBy || move.driverId) === normalizeDriverForStorage(activeSettlementDriverId)
+      );
+      if (driverMoves.length) return formatMoney(driverMoves.reduce((sum, move) => sum + parseMoney(move.driverRate), 0));
+    }
+    return settlementPayDrafts[load.id]?.[field] ?? load[field] ?? '$0.00';
+  };
+
+  const hasSettlementMovementPay = (load) => (load.moves || []).some((move) =>
+    move.status !== 'Cancelled' &&
+    normalizeDriverForStorage(move.completedBy || move.driverId) === normalizeDriverForStorage(activeSettlementDriverId)
+  );
 
   const getSettlementPayTotal = (load) =>
     calculateLoadSettlement({
@@ -5245,6 +5258,7 @@ const saveMoveDriverRate = async (moveId, currentRate = '') => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to save movement pay');
     await fetchLoads();
+    await fetchActiveBackendSettlement();
     setSettlementPayStatus('Movement pay saved and recorded in the audit.');
   } catch (error) {
     setSettlementPayStatus(error.message);
@@ -6561,10 +6575,11 @@ const handleSaveSettlementPay = async (load) => {
     setSettlementPayStatus('Unreview this settlement before changing load pay.');
     return;
   }
+  const movementPay = hasSettlementMovementPay(load);
   const draft = settlementPayDrafts[load.id] || {};
   const updatedLoad = {
     ...load,
-    driverRate: draft.driverRate ?? load.driverRate ?? '$0.00',
+    driverRate: movementPay ? load.driverRate : (draft.driverRate ?? load.driverRate ?? '$0.00'),
     detention: draft.detention ?? load.detention ?? '$0.00',
     lumper: draft.lumper ?? load.lumper ?? '$0.00',
     fuelAdvance: draft.fuelAdvance ?? load.fuelAdvance ?? '$0.00',
@@ -6612,7 +6627,7 @@ const handleSaveSettlementPay = async (load) => {
       backendSettlementForPay = await ensureBackendSettlement();
     }
 
-    if (backendSettlementForPay?.id) {
+    if (backendSettlementForPay?.id && !movementPay) {
       const backendLine = backendSettlementForPay.statement?.loads?.find((line) => line.loadId === data.id);
       const settlementPayload = {
         loadId: data.id,
@@ -6641,7 +6656,10 @@ const handleSaveSettlementPay = async (load) => {
     }
 
     handleResetSettlementPayDraft(load.id);
-    setSettlementPayStatus(`Load pay saved for ${data.id} and synced to the database statement.`);
+    if (movementPay) await fetchActiveBackendSettlement();
+    setSettlementPayStatus(movementPay
+      ? `Load adjustments saved for ${data.id}. Driver pay remains recorded separately by movement.`
+      : `Load pay saved for ${data.id} and synced to the database statement.`);
   } catch (error) {
     console.error('Failed to update load pay:', error);
     setSettlementPayStatus(`Failed to save load pay: ${error.message}`);
@@ -6805,24 +6823,32 @@ const updatedLoad = {
       : selectedLoad.dropDateTime || '',
 };
 
-  setSelectedLoad(updatedLoad);
   if (!isAvailabilityStatus && newStatus === 'Dropped') {
     setDropDetailsDraft(buildDropDetailsDraft(updatedLoad));
   }
 
   try {
-    const res = await fetch(`${API_BASE}/api/loads/${updatedLoad.id}`, {
+    const res = await fetch(`${API_BASE}/api/loads/${updatedLoad.id}${newStatus === 'Dropped' ? '/status' : ''}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
       },
-      body: JSON.stringify(updatedLoad),
+      body: JSON.stringify(newStatus === 'Dropped'
+        ? { status: 'Dropped', droppedBy: updatedLoad.droppedBy, dropDateTime: updatedLoad.dropDateTime }
+        : updatedLoad),
     });
 
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}));
       throw new Error(errorData.error || 'Failed to update status');
+    }
+
+    if (newStatus === 'Dropped') {
+      await fetchLoads();
+      setEditingLoad(null);
+      await fetchSelectedLoadAuditLogs(updatedLoad.id);
+      return;
     }
 
     const data = await res.json();
@@ -6834,6 +6860,7 @@ const updatedLoad = {
     await fetchSelectedLoadAuditLogs(data.id);
   } catch (error) {
     console.error('Failed to update status:', error);
+    alert(error.message || 'Failed to update status');
   }
 };
 
@@ -14914,11 +14941,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </div>
                 ))}
                 <label className="settlement-entry-field">
-                  <span>Load Pay</span>
+                  <span>Load Pay{hasSettlementMovementPay(selectedSettlementLoad) ? ' · Movement total (edit above)' : ''}</span>
                   <input
                     type="text"
                     inputMode="decimal"
                     value={getSettlementPayValue(selectedSettlementLoad, 'driverRate')}
+                    readOnly={hasSettlementMovementPay(selectedSettlementLoad)}
                     onChange={(e) =>
                       handleSettlementPayChange(selectedSettlementLoad.id, 'driverRate', e.target.value)
                     }
@@ -15521,6 +15549,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                               inputMode="decimal"
                               className="settlement-pay-input"
                               value={getSettlementPayValue(load, field)}
+                              readOnly={field === 'driverRate' && hasSettlementMovementPay(load)}
+                              title={field === 'driverRate' && hasSettlementMovementPay(load) ? 'Edit each movement with Save Move Pay in the load details.' : undefined}
                               onChange={(e) =>
                                 handleSettlementPayChange(load.id, field, e.target.value)
                               }

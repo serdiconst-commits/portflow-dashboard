@@ -302,7 +302,7 @@ test('settlement review workflow locks edits, records unreview reason, and final
 // isolated database, then run the existing settlement service on their output.
 async function movementFixture() {
   const db = await createDb();
-  for (const field of ['workflowType', 'pickup', 'delivery', 'returnLocation', 'notes']) {
+  for (const field of ['workflowType', 'pickup', 'delivery', 'returnLocation', 'notes', 'dropType', 'availabilityStatus', 'pickupMoveStatus']) {
     await dbRun(db, `ALTER TABLE loads ADD COLUMN ${field} TEXT`);
   }
   await dbRun(db, "INSERT INTO drivers (id, companyId, name) VALUES ('DRV-P', 'COMP-A', 'Pedro')");
@@ -311,11 +311,12 @@ async function movementFixture() {
   const statusHelper = source.slice(source.indexOf('const updateCurrentMoveForLoadStatus'), source.indexOf("app.put('/api/loads/:id/status'"));
   const handlers = {};
   const context = { db, uuidv4, reconcileLoadMoves, normalizeLoadWorkflow: (value) => value || 'LIVE_DELIVERY',
-    writeAuditLog() {}, authenticate() {}, requireRoles: () => () => {}, dispatchLocationRoles: [], movePayRoles: [],
+    getChangedFields: () => ({}), writeAuditLog() {}, authenticate() {}, requireRoles: () => () => {}, dispatchLocationRoles: [], movePayRoles: [],
     normalizeDriverAssignment: (_company, driver, cb) => cb(null, driver),
     app: { put: (path, ...args) => { handlers[path] = args.at(-1); } } };
   const routes = source.slice(source.indexOf("app.put('/api/load-moves/:id/assign'"), source.indexOf("app.get('/api/drivers'"));
-  const functions = vm.runInNewContext(helpers + statusHelper + routes + '\n({syncLoadMoves, updateCurrentMoveForLoadStatus})', context);
+  const statusRoute = source.slice(source.indexOf("app.put('/api/loads/:id/status'"), source.indexOf("console.log('SERVER FILE LOADED')"));
+  const functions = vm.runInNewContext(helpers + statusHelper + routes + statusRoute + '\n({syncLoadMoves, updateCurrentMoveForLoadStatus})', context);
   const get = (sql, args = []) => new Promise((resolve, reject) => db.get(sql, args, (err, row) => err ? reject(err) : resolve(row)));
   const all = (sql, args = []) => new Promise((resolve, reject) => db.all(sql, args, (err, rows) => err ? reject(err) : resolve(rows)));
   const load = () => get("SELECT * FROM loads WHERE id = 'LIFECYCLE'");
@@ -345,16 +346,16 @@ test('drop pay survives an in-transit edit and pickup assignment, and both drive
   const [initialDrop, initialPickup] = await f.moves();
   await f.status('DRV-A', 'In Transit');
   const beforePayEdit = await f.load();
-  await dbRun(f.db, "UPDATE loads SET driverRate = '100' WHERE id = 'LIFECYCLE'");
+  await dbRun(f.db, "UPDATE loads SET driverRate = '125' WHERE id = 'LIFECYCLE'");
   await f.sync(beforePayEdit);
-  assert.equal((await f.moves())[0].driverRate, '100');
+  assert.equal((await f.moves())[0].driverRate, '125');
   await f.status('DRV-A', 'Dropped');
   const dropped = (await f.moves())[0];
   assert.equal(dropped.id, initialDrop.id);
   assert.equal(dropped.completedBy, 'DRV-A');
-  assert.equal(dropped.driverRate, '100');
+  assert.equal(dropped.driverRate, '125');
   await dbRun(f.db, "UPDATE load_moves SET status = 'Ready for Pickup', origin = 'Stale port origin' WHERE id = ?", [initialPickup.id]);
-  await f.route('/api/load-moves/:id/assign', initialPickup.id, { driverId: 'DRV-P', driverRate: '100', returnLocation: 'Barbours Cut' });
+  await f.route('/api/load-moves/:id/assign', initialPickup.id, { driverId: 'DRV-P', driverRate: '80', returnLocation: 'Barbours Cut' });
   const beforeNotes = await f.load();
   await dbRun(f.db, "UPDATE loads SET notes = 'Dispatch correction' WHERE id = 'LIFECYCLE'");
   await f.sync(beforeNotes);
@@ -366,12 +367,12 @@ test('drop pay survives an in-transit edit and pickup assignment, and both drive
   assert.equal(pickup.driverId, 'DRV-P');
   assert.equal(pickup.origin, 'Plastics');
   assert.equal(pickup.destination, 'Barbours Cut');
-  assert.equal(pickup.driverRate, '100');
+  assert.equal(pickup.driverRate, '80');
   await f.status('DRV-P', 'Delivered');
   const day = new Date().toISOString().slice(0, 10);
-  for (const [driverId, moveId] of [['DRV-A', drop.id], ['DRV-P', pickup.id]]) {
+  for (const [driverId, moveId, expectedPay] of [['DRV-A', drop.id, 125], ['DRV-P', pickup.id, 80]]) {
     const pay = await createSettlement(f.db, 'COMP-A', { driverId, periodStart: day, periodEnd: day }, 'Payroll');
-    assert.equal(pay.statement.totals.grossPay, 100);
+    assert.equal(pay.statement.totals.grossPay, expectedPay);
     assert.equal(pay.statement.loads.length, 1);
     assert.equal(pay.statement.loads[0].moveId, moveId);
     const again = await createSettlement(f.db, 'COMP-A', { driverId, periodStart: day, periodEnd: day }, 'Payroll');
@@ -401,4 +402,29 @@ test('payroll can deliberately set zero drop pay without completion restoring an
   assert.equal((await f.load()).driverRate, '0');
   await f.status('DRV-A', 'Dropped');
   assert.equal((await f.moves())[0].driverRate, '0');
+});
+
+
+test('dispatcher Drop uses the driver status route, preserves first pay and releases pickup assignment', async (t) => {
+  const f = await movementFixture();
+  t.after(() => f.db.close());
+  await dbRun(f.db, "UPDATE loads SET driverRate = '125' WHERE id = 'LIFECYCLE'");
+  await f.sync();
+  await f.route('/api/loads/:id/status', 'LIFECYCLE', { status: 'Dropped', droppedBy: 'DRV-A' });
+  const [drop, pickup] = await f.moves();
+  assert.equal(drop.status, 'Completed');
+  assert.equal(drop.completedBy, 'DRV-A');
+  assert.equal(drop.driverRate, '125');
+  assert.ok(drop.completedAt);
+  assert.equal(pickup.status, 'Waiting Customer');
+  assert.equal(pickup.origin, 'Plastics');
+  const load = await f.load();
+  assert.equal(load.status, 'Dropped');
+  assert.equal(load.driver, '');
+  assert.equal(load.droppedBy, 'DRV-A');
+  await dbRun(f.db, "UPDATE load_moves SET status = 'Ready for Pickup' WHERE id = ?", [pickup.id]);
+  await f.route('/api/load-moves/:id/assign', pickup.id, { driverId: 'DRV-P', driverRate: '80', returnLocation: 'Barbours Cut' });
+  const result = await f.moves();
+  assert.equal(result[0].driverRate, '125');
+  assert.equal(result[1].driverRate, '80');
 });
