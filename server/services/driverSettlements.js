@@ -1,3 +1,5 @@
+import { ensureLifecycle, lifecycleInfo, fail, validPayrollDate } from './payrollLifecycle.js';
+import { ensureAdjustmentSchema, normalizeAdjustment, saveSpec, validateSavedSelection, resolveAdjustments } from './payrollAdjustments.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const roundMoney = (value) => Math.round((Number(value) || 0) * 100) / 100;
@@ -14,6 +16,7 @@ const normalizeDate = (value) => String(value || '').slice(0, 10);
 const normalizeSettlementStatus = (value) => {
   const status = String(value || 'Draft').trim().toLowerCase();
   if (status === 'complete' || status === 'completed' || status === 'finalized') return 'Finalized';
+  if (status === 'paid') return 'Paid';
   if (status === 'reviewed') return 'Reviewed';
   return 'Draft';
 };
@@ -151,6 +154,7 @@ const buildStatement = ({ settlement, driver, loads, deductions, auditLogs }) =>
       description: item.description,
       amount: roundMoney(item.amount),
       stage: item.stage || 'gross_adjustment',
+      calculation: item.calculation || null,
       addedBy: item.added_by || '',
       createdAt: item.created_at,
     })),
@@ -222,7 +226,7 @@ async function getSettlementParts(db, companyId, settlementId) {
     [settlementId]
   );
 
-  return { settlement, driver, loads, deductions, auditLogs };
+  return { settlement, driver, loads, deductions: await resolveAdjustments(db, settlement, loads, deductions), auditLogs };
 }
 
 async function writeSettlementAudit(db, settlementId, action, oldValue, newValue, changedBy) {
@@ -250,6 +254,8 @@ async function syncCompletedMovementLines(db, {
   periodEnd,
   createdAt = new Date().toISOString(),
 }) {
+  await ensureLifecycle(db);
+  if ((await lifecycleInfo(db,companyId,settlementId)).correction) return 0;
   const completedMoves = await dbAll(
     db,
     `SELECT
@@ -267,8 +273,10 @@ async function syncCompletedMovementLines(db, {
        AND DATE(SUBSTR(lm.completedAt, 1, 10)) BETWEEN DATE(?) AND DATE(?)
        AND COALESCE(l.deletedAt, '') = ''
        AND paidMove.id IS NULL
+       AND NOT EXISTS (SELECT 1 FROM payroll_items pi JOIN payroll_runs pr ON pr.id=pi.payrollRunId WHERE pi.companyId=lm.companyId AND pi.loadId=lm.loadId AND pi.driverId=? AND LOWER(pr.status)!='voided')
+       AND NOT EXISTS (SELECT 1 FROM settlement_move_exclusions e WHERE e.settlementId=? AND e.moveId=lm.id)
      ORDER BY lm.completedAt, lm.loadId, lm.sequence`,
-    [companyId, driverId, periodStart, periodEnd]
+    [companyId, driverId, periodStart, periodEnd, driverId, settlementId]
   );
 
   for (const move of completedMoves) {
@@ -314,6 +322,9 @@ export async function recalculateSettlement(db, companyId, settlementId, changed
     });
   }
   const parts = await getSettlementParts(db, companyId, settlementId);
+  for (const item of parts.deductions) {
+    if (item.calculation) await dbRun(db, 'UPDATE deductions SET amount=? WHERE id=? AND settlement_id=?', [item.amount,item.id,settlementId]);
+  }
 
   const statement = buildStatement(parts);
   const now = new Date().toISOString();
@@ -346,14 +357,19 @@ export async function recalculateSettlement(db, companyId, settlementId, changed
 export async function getSettlement(db, companyId, settlementId) {
   const parts = await getSettlementParts(db, companyId, settlementId);
   if (!parts) return null;
-  return {
-    ...parts.settlement,
-    status: normalizeSettlementStatus(parts.settlement.status),
-    statement: buildStatement(parts),
-  };
+  const info=await lifecycleInfo(db,companyId,settlementId);
+  let statement=buildStatement(parts);
+  if (['Reviewed','Finalized'].includes(normalizeSettlementStatus(parts.settlement.status)) && parts.settlement.statementJson) {
+    try { statement=JSON.parse(parts.settlement.statementJson); } catch { /* Legacy statements use their saved lines. */ }
+    statement.auditTrail=buildStatement(parts).auditTrail;
+  }
+  const status=info.payment?'Paid':normalizeSettlementStatus(parts.settlement.status);
+  statement.settlement={...statement.settlement,status,version:parts.settlement.version,correctionOf:info.correction?.parentId||'',payment:info.payment};
+  return {...parts.settlement,status,statement,...info};
 }
 
 export async function listSettlements(db, companyId, filters = {}) {
+  await ensureLifecycle(db);
   const clauses = ['s.companyId = ?'];
   const params = [companyId];
 
@@ -372,9 +388,11 @@ export async function listSettlements(db, companyId, filters = {}) {
 
   return dbAll(
     db,
-    `SELECT s.*, d.name AS driverName, d.email AS driverEmail,
+    `SELECT s.*, CASE WHEN p.settlementId IS NOT NULL THEN 'Paid' ELSE s.status END AS status, c.parentId AS correctionOf, d.name AS driverName, d.email AS driverEmail,
             (SELECT COUNT(*) FROM settlement_loads sl WHERE sl.settlementId = s.id) AS loadCount
      FROM settlements s
+     LEFT JOIN settlement_payments p ON p.settlementId=s.id AND p.companyId=s.companyId
+     LEFT JOIN settlement_corrections c ON c.settlementId=s.id AND c.companyId=s.companyId
      LEFT JOIN drivers d ON d.id = s.driverId AND d.companyId = s.companyId
      WHERE ${clauses.join(' AND ')}
      ORDER BY s.periodStart DESC, d.name`,
@@ -383,11 +401,12 @@ export async function listSettlements(db, companyId, filters = {}) {
 }
 
 export async function createSettlement(db, companyId, input = {}, createdBy = '') {
+  await ensureLifecycle(db);
   const driverId = String(input.driverId || '').trim();
   const periodStart = normalizeDate(input.periodStart);
   const periodEnd = normalizeDate(input.periodEnd);
 
-  if (!driverId || !periodStart || !periodEnd) {
+  if (!driverId || !validPayrollDate(periodStart) || !validPayrollDate(periodEnd) || periodStart>periodEnd) {
     throw new Error('driverId, periodStart, and periodEnd are required.');
   }
 
@@ -402,6 +421,7 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
     db,
     `SELECT id FROM settlements
      WHERE companyId = ? AND driverId = ? AND periodStart = ? AND periodEnd = ?
+       AND NOT EXISTS (SELECT 1 FROM settlement_corrections c WHERE c.settlementId=settlements.id)
      ORDER BY createdAt DESC
      LIMIT 1`,
     [companyId, driverId, periodStart, periodEnd]
@@ -427,7 +447,7 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
       : getSettlement(db, companyId, existing.id);
   }
 
-  const settlementId = input.id || uuidv4();
+  const settlementId = uuidv4();
   const now = new Date().toISOString();
 
   await dbRun(db, 'BEGIN IMMEDIATE');
@@ -442,7 +462,7 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
         driverId,
         periodStart,
         periodEnd,
-        input.status || 'Draft',
+        'Draft',
         String(input.notes || ''),
         now,
         now,
@@ -466,6 +486,8 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
        FROM loads
        WHERE companyId = ?
          AND COALESCE(deletedAt, '') = ''
+         AND NOT EXISTS (SELECT 1 FROM payroll_items pi JOIN payroll_runs pr ON pr.id=pi.payrollRunId WHERE pi.companyId=loads.companyId AND pi.loadId=loads.id AND pi.driverId=? AND LOWER(pr.status)!='voided')
+         AND NOT EXISTS (SELECT 1 FROM settlement_loads sl JOIN settlements ss ON ss.id=sl.settlementId WHERE sl.loadId=loads.id AND ss.companyId=loads.companyId AND ss.driverId=? AND sl.moveId IS NULL)
          AND NOT EXISTS (
            SELECT 1 FROM load_moves lm
            WHERE lm.companyId = loads.companyId
@@ -480,7 +502,7 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
              AND DATE(SUBSTR(dropDateTime, 1, 10)) BETWEEN DATE(?) AND DATE(?))
          )
        ORDER BY COALESCE(dropDateTime, appointmentTime, loadDate), id`,
-      [companyId, driverId, periodStart, periodEnd, driverId, periodStart, periodEnd]
+      [companyId, driverId, driverId, driverId, periodStart, periodEnd, driverId, periodStart, periodEnd]
     );
 
     for (const load of loads) {
@@ -515,6 +537,7 @@ export async function createSettlement(db, companyId, input = {}, createdBy = ''
       }
     }
 
+
     await dbRun(db, 'COMMIT');
   } catch (error) {
     await dbRun(db, 'ROLLBACK');
@@ -532,6 +555,7 @@ export async function updateSettlement(db, companyId, settlementId, input = {}, 
   const nextPeriodStart = normalizeDate(input.periodStart) || existing.periodStart;
   const nextPeriodEnd = normalizeDate(input.periodEnd) || existing.periodEnd;
   assertSettlementEditable(existing);
+  if (!validPayrollDate(nextPeriodStart) || !validPayrollDate(nextPeriodEnd) || nextPeriodStart > nextPeriodEnd) fail('Choose a valid payroll period.', 400);
   const nextStatus = normalizeSettlementStatus(existing.status);
   const nextNotes = Object.prototype.hasOwnProperty.call(input, 'notes')
     ? String(input.notes || '')
@@ -562,30 +586,23 @@ export async function addSettlementLoad(db, companyId, settlementId, input = {},
   if (!settlement) return null;
   assertSettlementEditable(settlement);
 
-  const loadId = String(input.loadId || '').trim();
-  const load = loadId
-    ? await dbGet(db, `SELECT * FROM loads WHERE id = ? AND companyId = ? AND COALESCE(deletedAt, '') = ''`, [loadId, companyId])
-    : null;
-  const payAmount = parseMoney(input.payAmount);
-  const movesCount = Math.max(1, Number.parseInt(input.movesCount || load?.movesCount || 1, 10) || 1);
-  const driver = await dbGet(db, `SELECT * FROM drivers WHERE id = ? AND companyId = ?`, [settlement.driverId, companyId]);
-  const calculatedPay = load && !payAmount ? calculateLoadPay(load, getDriverPayConfig(driver)) : payAmount;
-
-  await dbRun(
-    db,
-    `INSERT INTO settlement_loads (id, settlementId, loadId, payAmount, movesCount, description, source, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      uuidv4(),
-      settlementId,
-      loadId || null,
-      roundMoney(calculatedPay),
-      movesCount,
-      input.description || (load ? 'Manual load add' : 'Manual payment'),
-      input.source || 'manual',
-      new Date().toISOString(),
-    ]
-  );
+  const reason=String(input.description||'').trim();
+  if(!reason)fail('A reason is required for a manual payment.',400);
+  const info=await lifecycleInfo(db,companyId,settlementId);
+  if(input.moveId){
+    const move=await dbGet(db,`SELECT lm.* FROM load_moves lm JOIN loads l ON l.id=lm.loadId AND l.companyId=lm.companyId WHERE lm.id=? AND lm.companyId=? AND COALESCE(l.deletedAt,'')=''`,[input.moveId,companyId]);
+    if(!move||String(move.completedBy||move.driverId).trim().toLowerCase()!==String(settlement.driverId).trim().toLowerCase()||String(move.status).toLowerCase()!=='completed')fail('Completed movement for this driver was not found.',404);
+    if(await dbGet(db,`SELECT pi.id FROM payroll_items pi JOIN payroll_runs pr ON pr.id=pi.payrollRunId WHERE pi.companyId=? AND pi.loadId=? AND pi.driverId=? AND LOWER(pr.status)!='voided'`,[companyId,move.loadId,settlement.driverId]))fail('This load already belongs to a legacy payroll run. Resolve that record before adding it.');
+    if(await dbGet(db,'SELECT id FROM settlement_loads WHERE moveId=?',[move.id]))fail('This movement is already included in a settlement.');
+    const pay=input.payAmount===undefined?Number(move.driverRate):Number(input.payAmount);
+    if(!Number.isFinite(pay)||pay<0)fail('Enter a non-negative movement payment.',400);
+    try { await dbRun(db,`INSERT INTO settlement_loads(id,settlementId,loadId,moveId,payAmount,movesCount,description,source,createdAt) VALUES(?,?,?,?,?,1,?,'manual_move',?)`,[uuidv4(),settlementId,move.loadId,move.id,roundMoney(pay),reason,new Date().toISOString()]); }
+    catch(e){if(e.code==='SQLITE_CONSTRAINT')fail('This movement is already included in a settlement.');throw e;}
+  }else{
+    if(input.loadId)fail('Select the specific completed movement rather than adding the entire load.',400);
+    const pay=Number(input.payAmount);if(!Number.isFinite(pay)||pay===0)fail('Enter a non-zero manual payment.',400);
+    await dbRun(db,`INSERT INTO settlement_loads(id,settlementId,payAmount,movesCount,description,source,createdAt) VALUES(?,?,?,1,?,?,?)`,[uuidv4(),settlementId,roundMoney(pay),reason,info.correction?'correction':'manual',new Date().toISOString()]);
+  }
 
   await writeSettlementAudit(db, settlementId, 'ADD_LOAD_OR_PAYMENT', null, input, changedBy);
   return recalculateSettlement(db, companyId, settlementId, changedBy);
@@ -605,7 +622,9 @@ export async function updateSettlementLoad(db, companyId, settlementId, settleme
   );
   if (!existing) return null;
 
+  if(input.payAmount!==undefined && (!Number.isFinite(Number(input.payAmount)) || !String(input.description||'').trim()))fail('A valid payment and correction reason are required.',400);
   const payAmount = roundMoney(parseMoney(input.payAmount ?? existing.payAmount));
+  if (existing.moveId && payAmount < 0) fail('Movement pay cannot be negative. Use a separate adjustment for a deduction.', 400);
   const movesCount = Math.max(1, Number.parseInt(input.movesCount || existing.movesCount || 1, 10) || 1);
   const description = input.description !== undefined ? String(input.description || '') : existing.description;
 
@@ -642,6 +661,7 @@ export async function removeSettlementLoad(db, companyId, settlementId, settleme
   );
   if (!existing) return null;
 
+  if(existing.moveId){await ensureLifecycle(db);await dbRun(db,'INSERT OR IGNORE INTO settlement_move_exclusions VALUES(?,?)',[settlementId,existing.moveId]);}
   await dbRun(db, `DELETE FROM settlement_loads WHERE id = ? AND settlementId = ?`, [settlementLoadId, settlementId]);
   await writeSettlementAudit(db, settlementId, 'REMOVE_LOAD_OR_PAYMENT', existing, null, changedBy);
   return recalculateSettlement(db, companyId, settlementId, changedBy);
@@ -657,6 +677,12 @@ export async function addDeduction(db, companyId, settlementId, input = {}, chan
     throw new Error('Deduction description is required.');
   }
 
+  if (input.ruleId) {
+    if (!input.basis) fail('A saved adjustment requires its calculation.', 400);
+    await validateSavedSelection(db, settlement, input.ruleId);
+  }
+  if (input.basis) normalizeAdjustment(input);
+  const deductionId = uuidv4();
   const stage = input.stage === 'net_deduction' ? 'net_deduction' : 'gross_adjustment';
   const amount = stage === 'net_deduction'
     ? -Math.abs(roundMoney(parseMoney(input.amount)))
@@ -665,9 +691,10 @@ export async function addDeduction(db, companyId, settlementId, input = {}, chan
     db,
     `INSERT INTO deductions (id, settlement_id, description, amount, stage, added_by, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [uuidv4(), settlementId, description, amount, stage, input.addedBy || changedBy || '', new Date().toISOString()]
+    [deductionId, settlementId, description, amount, stage, input.addedBy || changedBy || '', new Date().toISOString()]
   );
 
+  if (input.basis) await saveSpec(db, settlement, deductionId, input, changedBy);
   await writeSettlementAudit(db, settlementId, 'ADD_DEDUCTION', null, { description, amount, stage }, changedBy);
   return recalculateSettlement(db, companyId, settlementId, changedBy);
 }
@@ -691,7 +718,8 @@ export async function updateDeduction(db, companyId, settlementId, deductionId, 
     throw new Error('Deduction description is required.');
   }
 
-  const stage = input.stage === 'net_deduction' ? 'net_deduction' : existing.stage || 'gross_adjustment';
+  if (input.basis) normalizeAdjustment(input);
+  const stage = input.basis ? 'gross_adjustment' : input.stage === 'net_deduction' ? 'net_deduction' : existing.stage || 'gross_adjustment';
   const amount = stage === 'net_deduction'
     ? -Math.abs(roundMoney(parseMoney(input.amount)))
     : roundMoney(parseMoney(input.amount));
@@ -709,6 +737,7 @@ export async function updateDeduction(db, companyId, settlementId, deductionId, 
     deductionId,
     settlementId,
   ]);
+  if (input.basis) await saveSpec(db, settlement, deductionId, input, changedBy);
   await writeSettlementAudit(db, settlementId, 'UPDATE_DEDUCTION', existing, updated, changedBy);
   return recalculateSettlement(db, companyId, settlementId, changedBy);
 }
@@ -727,6 +756,8 @@ export async function removeDeduction(db, companyId, settlementId, deductionId, 
   );
   if (!existing) return null;
 
+  await ensureAdjustmentSchema(db);
+  await dbRun(db, `DELETE FROM payroll_adjustment_specs WHERE deductionId = ? AND settlementId = ?`, [deductionId, settlementId]);
   await dbRun(db, `DELETE FROM deductions WHERE id = ? AND settlement_id = ?`, [deductionId, settlementId]);
   await writeSettlementAudit(db, settlementId, 'REMOVE_DEDUCTION', existing, null, changedBy);
   return recalculateSettlement(db, companyId, settlementId, changedBy);
@@ -771,6 +802,12 @@ export async function transitionSettlement(db, companyId, settlementId, input = 
     auditAction = 'UNREVIEW';
     extraSql = ', unreviewReason = ?';
     extraParams = [reason];
+  } else if (action === 'reopen') {
+    if(currentStatus!=='Finalized'||existing.payment)fail('Only finalized, unpaid settlements can be revised.');
+    const reason=String(input.reason||'').trim();if(!reason)fail('A revision reason is required.',400);
+    await ensureLifecycle(db);
+    await dbRun(db,'INSERT INTO settlement_versions VALUES(?,?,?,?,?,?,?)',[uuidv4(),companyId,settlementId,JSON.stringify(existing),reason,changedBy,now]);
+    nextStatus='Draft';auditAction='REOPEN_REVISION';extraSql=', version=COALESCE(version,1)+1, reviewedAt=NULL, reviewedBy=NULL, finalizedAt=NULL, finalizedBy=NULL, emailedAt=NULL, emailedTo=NULL';
   } else if (action === 'finalize') {
     if (currentStatus !== 'Reviewed') {
       const error = new Error('Review the settlement before finalizing it.');

@@ -286,7 +286,7 @@ test('settlement review workflow locks edits, records unreview reason, and final
   const reopened = await transitionSettlement(db, 'COMP-A', draft.id, { action: 'unreview', reason: 'Correct driver rate' }, 'Manager User');
   assert.equal(reopened.status, 'Draft');
   assert.equal(reopened.unreviewReason, 'Correct driver rate');
-  await updateSettlementLoad(db, 'COMP-A', draft.id, reopened.statement.loads[0].settlementLoadId, { payAmount: 425 }, 'Manager User');
+  await updateSettlementLoad(db, 'COMP-A', draft.id, reopened.statement.loads[0].settlementLoadId, { payAmount: 425, description: 'Correct driver rate' }, 'Manager User');
 
   await transitionSettlement(db, 'COMP-A', draft.id, { action: 'review' }, 'Manager User');
   const finalized = await transitionSettlement(db, 'COMP-A', draft.id, { action: 'finalize' }, 'Manager User');

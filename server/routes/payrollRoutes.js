@@ -3,11 +3,8 @@ import {
   canUsePayroll,
   ensurePayrollSettings,
   exportPayrollRunCsv,
-  generatePayrollRun,
   getPayrollRun,
   listPayrollRuns,
-  recalculatePayrollRun,
-  transitionPayrollRun,
   updatePayrollSettings,
   writeFinancialAudit,
 } from '../services/payrollService.js';
@@ -22,6 +19,12 @@ const sendError = (res, error) => res.status(error.status || 500).json({ error: 
 export default function createPayrollRoutes(db) {
   const router = express.Router();
   router.use(requirePayrollAccess);
+  // Preserve old reports; all new pay processing uses Driver Payroll settlements.
+  const readOnlyHistory = (req, res, next) => ['GET', 'HEAD'].includes(req.method)
+    ? next()
+    : res.status(409).json({ error: 'Legacy payroll is read-only. Use Driver Payroll for new payments and corrections.' });
+  router.use('/runs', readOnlyHistory);
+  router.use('/adjustments', readOnlyHistory);
 
   router.get('/settings', async (req, res) => {
     try {
@@ -36,19 +39,6 @@ export default function createPayrollRoutes(db) {
       const settings = await updatePayrollSettings(db, req.user.companyId, req.body || {});
       await writeFinancialAudit(db, req.user.companyId, req.user, 'PAYROLL_SETTINGS_CHANGED', 'PAYROLL_SETTINGS', settings.id, {});
       res.json(settings);
-    } catch (error) {
-      sendError(res, error);
-    }
-  });
-
-  router.post('/runs/generate', async (req, res) => {
-    try {
-      const run = await generatePayrollRun(db, req.user.companyId, req.body || {}, req.user);
-      await writeFinancialAudit(db, req.user.companyId, req.user, 'PAYROLL_GENERATED', 'PAYROLL_RUN', run.id, {
-        periodStart: run.periodStart,
-        periodEnd: run.periodEnd,
-      });
-      res.status(201).json(run);
     } catch (error) {
       sendError(res, error);
     }
@@ -71,37 +61,6 @@ export default function createPayrollRoutes(db) {
       sendError(res, error);
     }
   });
-
-  router.post('/runs/:id/recalculate', async (req, res) => {
-    try {
-      const run = await recalculatePayrollRun(db, req.user.companyId, req.params.id, req.user);
-      if (!run) return res.status(404).json({ error: 'Payroll run not found.' });
-      res.json(run);
-    } catch (error) {
-      sendError(res, error);
-    }
-  });
-
-  const transition = (status) => async (req, res) => {
-    try {
-      const run = await transitionPayrollRun(db, req.user.companyId, req.params.id, status, req.user);
-      if (!run) return res.status(404).json({ error: 'Payroll run not found.' });
-      res.json(run);
-    } catch (error) {
-      sendError(res, error);
-    }
-  };
-
-  router.post('/runs/:id/submit-review', transition('Review'));
-  router.post('/runs/:id/approve', transition('Approved'));
-  router.post('/runs/:id/finalize', transition('Finalized'));
-  router.post('/runs/:id/mark-paid', transition('Paid'));
-  router.post('/runs/:id/void', transition('Voided'));
-
-  router.post('/runs/:id/adjustments', (_req, res) => res.status(501).json({ error: 'Payroll adjustments API is scaffolded but not implemented in this pass.' }));
-  router.put('/adjustments/:id', (_req, res) => res.status(501).json({ error: 'Payroll adjustments API is scaffolded but not implemented in this pass.' }));
-  router.post('/adjustments/:id/approve', (_req, res) => res.status(501).json({ error: 'Payroll adjustment approval is scaffolded but not implemented in this pass.' }));
-  router.delete('/adjustments/:id', (_req, res) => res.status(501).json({ error: 'Payroll adjustment deletion is scaffolded but not implemented in this pass.' }));
 
   router.get('/drivers/:driverId/history', async (req, res) => {
     try {
