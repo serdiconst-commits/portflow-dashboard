@@ -1,3 +1,4 @@
+import { prepareDocumentImage } from './services/documentImage.js';
 import { reconcileLoadMoves, movementPickupOrigin } from './loadMovePlan.js';
 import { normalizeScac, requirePortHoustonScac, matchesPortHoustonScope, portHoustonDocumentMetadata, isPortHoustonDocumentVisible, portHoustonDocumentScopeColumns } from './portHoustonScope.js';
 import 'dotenv/config';
@@ -6065,25 +6066,7 @@ app.post('/api/loads/:id/documents', authenticate, upload.array('files'), async 
       if (isImage) {
         const pdfDoc = await PDFDocument.create();
 
-        let imageBuffer;
-        try {
-          imageBuffer = await sharp(f.path)
-            .rotate()
-            .trim({ threshold: 18 })
-            .resize({ width: 1700, height: 2200, fit: 'inside', withoutEnlargement: true })
-            .grayscale()
-            .normalize()
-            .sharpen()
-            .jpeg({ quality: 90 })
-            .toBuffer();
-        } catch (scanErr) {
-          console.error('Document scan cleanup failed, using original image:', scanErr.message);
-          imageBuffer = await sharp(f.path)
-            .rotate()
-            .resize({ width: 1700, height: 2200, fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 90 })
-            .toBuffer();
-        }
+        const imageBuffer = await prepareDocumentImage(f.path);
         const jpgImage = await pdfDoc.embedJpg(imageBuffer);
 
         const jpgDims = jpgImage.scale(1);
