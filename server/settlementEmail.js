@@ -64,6 +64,9 @@ export async function buildSettlementPdf(settlement, company = {}) {
   drawText(page, settlement.status || statement.settlement?.status || 'Draft', 468, y, { size: 9, font: bold, color: teal });
   y -= 34;
 
+  drawText(page, `Version ${settlement.version || statement.settlement?.version || 1}${statement.settlement?.correctionOf ? ' | Supplemental correction' : ''}`, 42, y, {size:9,font:regular,color:slate});
+  y -= 18;
+  if(statement.settlement?.payment){drawText(page, `Payment recorded: ${statement.settlement.payment.paidOn} | ${statement.settlement.payment.method} | ${String(statement.settlement.payment.reference).slice(0,45)}`,42,y,{size:8,font:regular,color:slate});y-=18;}
   drawText(page, 'COMPLETED MOVES & PAY', 42, y, { size: 10, font: bold, color: navy });
   y -= 20;
   row(['Date', 'Container / Load', 'Movement & Route', 'Pay'], [76, 120, 250, 80], true);

@@ -1,3 +1,5 @@
+import { candidates, recordPayment, createCorrection, get as lifecycleGet, ensureLifecycle } from '../services/payrollLifecycle.js';
+import { listRules, changeRule } from '../services/payrollAdjustments.js';
 import express from 'express';
 import {
   addDeduction,
@@ -16,7 +18,8 @@ import {
 } from '../services/driverSettlements.js';
 import { buildSettlementPdf, sendSettlementEmail } from '../settlementEmail.js';
 
-const settlementRoles = new Set(['admin', 'manager', 'dispatcher', 'payroll']);
+const mutationQueues = new WeakMap();
+const settlementRoles = new Set(['owner', 'carrier', 'admin', 'manager', 'dispatcher', 'payroll']);
 
 const getActor = (req) => req.user?.name || req.user?.email || req.user?.id || 'system';
 
@@ -70,6 +73,22 @@ export default function createDriverSettlementRoutes(db) {
   });
 
   router.use(requireSettlementAccess);
+  // A shared SQLite connection must not interleave settlement write transactions.
+  router.use(async (req,res,next)=>{
+    if(['GET','HEAD','OPTIONS'].includes(req.method))return next();
+    const previous=mutationQueues.get(db)||Promise.resolve();let release;
+    const pending=new Promise(resolve=>{release=resolve;});mutationQueues.set(db,pending);
+    await previous;
+    if(res.destroyed){release();return;}
+    res.once('finish',release);res.once('close',release);next();
+  });
+
+  router.get('/rules/:driverId', async (req,res) => {
+    try { res.json(await listRules(db,req.company.companyId,req.params.driverId)); } catch(e) { sendError(res,e); }
+  });
+  router.put('/rules/:ruleId', async (req,res) => {
+    try { const rule=await changeRule(db,req.company.companyId,req.params.ruleId,req.body,getActor(req)); if(!rule)return res.status(404).json({error:'Rule not found.'});res.json(rule); } catch(e) {sendError(res,e);}
+  });
 
   router.get('/', async (req, res) => {
     try {
@@ -87,6 +106,19 @@ export default function createDriverSettlementRoutes(db) {
     } catch (error) {
       sendError(res, error);
     }
+  });
+
+  router.get('/:id/candidates', async (req,res)=>{
+    try { const settlement=await getSettlement(db,req.company.companyId,req.params.id);if(!settlement)return res.status(404).json({error:'Settlement not found.'});res.json(await candidates(db,req.company.companyId,settlement,String(req.query.q||''))); }catch(e){sendError(res,e);}
+  });
+  router.post('/:id/payment', async (req,res)=>{
+    try {const settlement=await getSettlement(db,req.company.companyId,req.params.id);if(!settlement)return res.status(404).json({error:'Settlement not found.'});await recordPayment(db,req.company.companyId,settlement,req.body,getActor(req));res.json(await getSettlement(db,req.company.companyId,req.params.id));}catch(e){sendError(res,e);}
+  });
+  router.post('/:id/correction', async (req,res)=>{
+    try {const settlement=await getSettlement(db,req.company.companyId,req.params.id);if(!settlement)return res.status(404).json({error:'Settlement not found.'});const id=await createCorrection(db,req.company.companyId,settlement,req.body,getActor(req));res.status(201).json(await recalculateSettlement(db,req.company.companyId,id,getActor(req)));}catch(e){sendError(res,e);}
+  });
+  router.get('/:id/versions/:versionId/pdf', async (req,res)=>{
+    try {await ensureLifecycle(db);const row=await lifecycleGet(db,'SELECT * FROM settlement_versions WHERE id=? AND settlementId=? AND companyId=?',[req.params.versionId,req.params.id,req.company.companyId]);if(!row)return res.status(404).json({error:'Version not found.'});const snapshot=JSON.parse(row.snapshot);snapshot.status='Replaced';const company=await dbGet(db,'SELECT name,invoiceName,settlementCompanyName FROM companies WHERE id=?',[req.company.companyId]);res.type('pdf').send(await buildSettlementPdf(snapshot,company||{}));}catch(e){sendError(res,e);}
   });
 
   router.get('/:id', async (req, res) => {
@@ -173,7 +205,7 @@ export default function createDriverSettlementRoutes(db) {
     try {
       const settlement = await getSettlement(db, req.company.companyId, req.params.id);
       if (!settlement) return res.status(404).json({ error: 'Settlement not found.' });
-      if (!['reviewed', 'finalized'].includes(String(settlement.status || '').trim().toLowerCase())) {
+      if (!['reviewed', 'finalized', 'paid'].includes(String(settlement.status || '').trim().toLowerCase())) {
         return res.status(409).json({ error: 'Review the settlement before emailing it to the driver.' });
       }
 
