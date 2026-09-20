@@ -2081,11 +2081,11 @@ const startFuelReceiptScan = async () => {
       responseType: ResponseType.Base64,
       scannerMode: ScannerMode.Full,
       letUserAdjustCrop: true,
-      reviewCapturedDocument: false,
+      reviewCapturedDocument: true,
       maxNumDocuments: 1,
-      croppedImageQuality: 95,
-      brightness: 4,
-      contrast: 1.12,
+      croppedImageQuality: 100,
+      brightness: 0,
+      contrast: 1,
     });
 
     if (result?.status === ScanDocumentResponseStatus.Cancel) {
@@ -2304,11 +2304,11 @@ const startNativeDocumentScan = async (loadId) => {
       responseType: ResponseType.Base64,
       scannerMode: ScannerMode.Full,
       letUserAdjustCrop: true,
-      reviewCapturedDocument: false,
+      reviewCapturedDocument: true,
       maxNumDocuments: 8,
-      croppedImageQuality: 95,
-      brightness: 6,
-      contrast: 1.18,
+      croppedImageQuality: 100,
+      brightness: 0,
+      contrast: 1,
     });
 
     if (result?.status === ScanDocumentResponseStatus.Cancel) {
@@ -2428,8 +2428,9 @@ const detectDocumentBounds = (imageData, guideBounds) => {
 };
 
 const enhanceDocumentCanvas = (sourceCanvas, bounds) => {
-  const outputWidth = 1400;
-  const outputHeight = Math.round(outputWidth * 1.32);
+  const scale = Math.min(1, 3300 / Math.max(bounds.width, bounds.height));
+  const outputWidth = Math.max(1, Math.round(bounds.width * scale));
+  const outputHeight = Math.max(1, Math.round(bounds.height * scale));
   const outputCanvas = document.createElement('canvas');
   outputCanvas.width = outputWidth;
   outputCanvas.height = outputHeight;
@@ -2449,18 +2450,6 @@ const enhanceDocumentCanvas = (sourceCanvas, bounds) => {
     outputHeight
   );
 
-  const imageData = outputContext.getImageData(0, 0, outputWidth, outputHeight);
-  const { data } = imageData;
-
-  for (let i = 0; i < data.length; i += 4) {
-    const grayscale = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-    const contrasted = Math.max(0, Math.min(255, (grayscale - 118) * 1.55 + 138));
-    data[i] = contrasted;
-    data[i + 1] = contrasted;
-    data[i + 2] = contrasted;
-  }
-
-  outputContext.putImageData(imageData, 0, 0);
   return outputCanvas;
 };
 
@@ -2482,7 +2471,7 @@ const captureDriverCameraPhoto = () => {
   const documentBounds = detectDocumentBounds(imageData, guideBounds);
   const processedCanvas = enhanceDocumentCanvas(canvas, documentBounds);
 
-  const dataUrl = processedCanvas.toDataURL('image/jpeg', 0.92);
+  const dataUrl = processedCanvas.toDataURL('image/jpeg', 0.98);
   setDriverScannerPreview({
     loadId,
     dataUrls: [dataUrl],
