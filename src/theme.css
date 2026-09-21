@@ -1,0 +1,56 @@
+/* Follow the operating system automatically; light fallbacks preserve the existing UI. */
+@media screen and (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --pf-control-scheme: dark;
+    --pf-surface-rgb: 23 34 51;
+    --pf-amber-bg: #443720;
+    --pf-amber-text: #f3d296;
+    --pf-blue-bg: #183553;
+    --pf-blue-text: #9dcaff;
+    --pf-border: #40536a;
+    --pf-green-bg: #183d32;
+    --pf-green-text: #9ee1ba;
+    --pf-muted: #b5c3d4;
+    --pf-purple-text: #cec0ff;
+    --pf-red-bg: #48272e;
+    --pf-red-text: #ffb2b4;
+    --pf-surface: #172233;
+    --pf-surface-soft: #1d2b3e;
+    --pf-teal-bg: #173a3b;
+    --pf-teal-text: #97ddd4;
+    --pf-text: #e8eef6;
+  }
+  body { background: #101927; color: #e8eef6; }
+  input, select, textarea { color-scheme: dark; }
+  dialog { background: var(--pf-surface); color: var(--pf-text); }
+}
+/* Printed statements and documents remain light, regardless of OS appearance. */
+@media print {
+  :root {
+    color-scheme: light;
+    --pf-control-scheme: light;
+    --pf-surface-rgb: 255 255 255;
+    --pf-amber-bg: initial;
+    --pf-amber-text: initial;
+    --pf-blue-bg: initial;
+    --pf-blue-text: initial;
+    --pf-border: initial;
+    --pf-green-bg: initial;
+    --pf-green-text: initial;
+    --pf-muted: initial;
+    --pf-purple-text: initial;
+    --pf-red-bg: initial;
+    --pf-red-text: initial;
+    --pf-surface: initial;
+    --pf-surface-soft: initial;
+    --pf-teal-bg: initial;
+    --pf-teal-text: initial;
+    --pf-text: initial;
+  }
+}
+
+@media print {
+  :root { --text: #334155; --text-h: #111827; --bg: #ffffff; }
+  body { background: #ffffff; color: #111827; }
+}

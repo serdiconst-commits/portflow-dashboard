@@ -6,8 +6,8 @@
   grid-template-columns: repeat(6, minmax(0, 1fr));
   margin: 0;
   padding: 8px max(4px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px));
-  border-top: 1px solid #dce3ec;
-  background: #ffffff;
+  border-top: 1px solid var(--pf-border, #dce3ec);
+  background: var(--pf-surface, #ffffff);
   box-shadow: 0 -4px 20px #0f172a08;
 }
 .driver-mobile-shell .driver-tab-bar button {
@@ -22,7 +22,7 @@
   border: 0;
   border-radius: 10px;
   background: transparent;
-  color: #64748b;
+  color: var(--pf-muted, #64748b);
   font-size: clamp(10px, 2.65vw, 12px);
   font-weight: 600;
   line-height: 1.25;
@@ -30,6 +30,6 @@
   -webkit-tap-highlight-color: transparent;
 }
 .driver-tab-bar svg { width: 23px; height: 23px; flex-shrink: 0; }
-.driver-mobile-shell .driver-tab-bar button.active { color: #0f62fe; background: #edf4ff; font-weight: 800; }
+.driver-mobile-shell .driver-tab-bar button.active { color: var(--pf-blue-text, #0f62fe); background: var(--pf-blue-bg, #edf4ff); font-weight: 800; }
 .driver-mobile-shell .driver-tab-bar button:focus-visible { outline: 2px solid #0f62fe; outline-offset: -2px; }
-.driver-mobile-shell .driver-tab-bar button:active { background: #e2edff; }
+.driver-mobile-shell .driver-tab-bar button:active { background: var(--pf-blue-bg, #e2edff); }
