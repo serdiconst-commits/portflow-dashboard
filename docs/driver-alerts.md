@@ -15,7 +15,7 @@ Provider credentials are installed separately as Render secret files. Keep `DRIV
 ## Phone acceptance checks
 
 - Drop opens with the correct container and actual drop destination. Cancel/Escape sends no request. Confirm sends one status update; stale displayed routes require review again.
-- Tap **Enable alerts & test sound** and grant notification permission. Change an assigned load from dispatch. Verify the notice and sound in the foreground, background, and on a locked device on both platforms.
+- On first driver sign-in, grant the automatic notification permission prompt. Existing grants register automatically; a denied permission is not repeatedly requested. The optional sound test is under **Profile → Notification settings**. Change an assigned load from dispatch. Verify the notice and sound in the foreground, background, and on a locked device on both platforms.
 - Verify new assignments, reassignments, route/appointment changes, two different drivers, and company isolation. Completed actions initiated by a driver do not generate dispatch push events.
 - Logout removes that account's token registration. If unregistering fails, the app explains the failure and keeps the session open for retry. Inactive driver records are excluded. Registrations expire after 30 days without refresh. Invalid provider tokens are removed.
 - Mark a newer store version as available and verify the banner/store button; equal, lower, and unset versions must show no update notice. Updating never reloads the app or discards a document capture automatically.
