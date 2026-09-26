@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
+import { initialDriverPushPermission } from '../utils/driverPushPermission.js';
 import { newerVersion, safeStoreUrl } from '../../shared/driverAlerts.js';
 import { enableDriverSound, playDriverAlert } from '../utils/driverAlertSound.js';
 
@@ -16,11 +17,11 @@ export async function removeDriverPushRegistration(apiBase, authToken) {
   localStorage.removeItem(tokenKey);
 }
 
-export default function DriverAppUpdates({ apiBase, authToken, onNotification, onRefresh }) {
+export default function DriverAppUpdates({ apiBase, authToken, onNotification, onRefresh, showSettings = false }) {
   const [release, setRelease] = useState(null);
-  const [available, setAvailable] = useState(false);
-  const [pushEnabled, setPushEnabled] = useState(false);
   const [status, setStatus] = useState('');
+  const callbacks = useRef({ onNotification, onRefresh });
+  callbacks.current = { onNotification, onRefresh };
   const platform = Capacitor.getPlatform();
   const native = Capacitor.isNativePlatform();
   useEffect(() => {
@@ -31,21 +32,31 @@ export default function DriverAppUpdates({ apiBase, authToken, onNotification, o
       const listener = await PushNotifications.addListener(event, callback);
       if (disposed) await listener.remove(); else listeners.push(listener);
     };
+    let checking = false;
+    let ready = !native;
     const check = async () => {
+      if (checking || disposed || !ready) return;
+      checking = true;
       try {
         const response = await fetch(`${apiBase}/api/driver-app/release?platform=${platform}`, { cache: 'no-store' });
         if (!response.ok) return;
         const data = await response.json();
         if (disposed) return;
-        setAvailable(Boolean(data.pushAvailable));
+
         if (native) {
           const info = await App.getInfo();
           if (!disposed) setRelease(newerVersion(info.version, data.version) ? { ...data, url: safeStoreUrl(data.storeUrl, platform) } : null);
         }
-        return Boolean(data.pushAvailable);
-      } catch { /* Offline checks must not interrupt driver work. */ }
+        if (native && data.pushAvailable && !disposed) {
+          const permission = await initialDriverPushPermission(PushNotifications, localStorage);
+          if (disposed) return;
+          if (permission.receive === 'granted') await PushNotifications.register();
+          else setStatus('Allow PortFlow notifications in your phone Settings to receive dispatch alerts.');
+        }
+      } catch { /* Retry on resume or the next scheduled check without interrupting work. */ }
+      finally { checking = false; }
     };
-    const setup = async (configured) => {
+    const setup = async () => {
       if (!native) return;
       await add('registration', async ({ value }) => {
         if (disposed) return;
@@ -55,37 +66,29 @@ export default function DriverAppUpdates({ apiBase, authToken, onNotification, o
           const response = await fetch(`${apiBase}/api/driver-app/devices`, { method: 'PUT', headers, body: JSON.stringify({ token: value, platform }) });
           if (!response.ok) throw new Error();
           registeredToken = value;
-          if (!disposed) { setPushEnabled(true); setStatus('Notifications enabled. Keep your phone volume up.'); }
-        } catch { if (!disposed) setStatus('Notifications could not connect. Tap Enable alerts to retry.'); }
+          if (!disposed) setStatus('Notifications enabled. Keep your phone volume up.');
+        } catch { if (!disposed) setStatus('Notifications could not connect. PortFlow will retry when you reopen the app.'); }
       });
-      await add('registrationError', () => { if (!disposed) setStatus('Notifications could not connect. Tap Enable alerts to retry.'); });
-      await add('pushNotificationReceived', notification => { if (!disposed) { onNotification(notification.title || 'Dispatch update', notification.body || 'Open your loads to see the changes.'); onRefresh(); } });
-      await add('pushNotificationActionPerformed', () => { if (!disposed) onRefresh(); });
+      await add('registrationError', () => { if (!disposed) setStatus('Notifications could not connect. PortFlow will retry when you reopen the app.'); });
+      await add('pushNotificationReceived', notification => { if (!disposed) { callbacks.current.onNotification(notification.title || 'Dispatch update', notification.body || 'Open your loads to see the changes.'); callbacks.current.onRefresh(); } });
+      await add('pushNotificationActionPerformed', () => { if (!disposed) callbacks.current.onRefresh(); });
       if (platform === 'android') await PushNotifications.createChannel({ id: 'driver-dispatch-v1', name: 'Dispatch changes', importance: 5, visibility: 1, vibration: true, sound: 'driver_alert.wav' });
-      const permission = await PushNotifications.checkPermissions();
-      if (configured && permission.receive === 'granted' && !disposed) await PushNotifications.register();
+      ready = true;
     };
-    const resume = () => { if (!document.hidden) { check(); onRefresh(); } };
-    check().then(setup).catch(() => { if (!disposed) setStatus('Push notifications are unavailable in this build.'); });
+    const resume = () => { if (!document.hidden) { check(); callbacks.current.onRefresh(); } };
+    setup().then(check).catch(() => { if (!disposed) setStatus('Push notifications are unavailable in this build.'); });
     const timer = setInterval(check, 15 * 60 * 1000);
     document.addEventListener('visibilitychange', resume);
-    const nativeResume = native ? App.addListener('appStateChange', ({ isActive }) => { if (isActive) { check(); onRefresh(); } }) : null;
+    const nativeResume = native ? App.addListener('appStateChange', ({ isActive }) => { if (isActive) { check(); callbacks.current.onRefresh(); } }) : null;
     return () => { disposed = true; clearInterval(timer); document.removeEventListener('visibilitychange', resume); listeners.forEach(listener => listener.remove()); nativeResume?.then(listener => listener.remove()); };
   }, [apiBase, authToken, platform, native]);
 
-  const enable = async () => {
-    try {
-      await enableDriverSound(); await playDriverAlert(true);
-      if (!native) { setStatus('Sound enabled while PortFlow is open. Use the mobile app for alerts when closed.'); return; }
-      if (!available) { setStatus('Sound enabled in the app. Notifications while closed are not yet configured.'); return; }
-      const permission = await PushNotifications.requestPermissions();
-      if (permission.receive !== 'granted') { setStatus('Allow PortFlow notifications in your phone Settings, then try again.'); return; }
-      if (platform === 'android') await PushNotifications.createChannel({ id: 'driver-dispatch-v1', name: 'Dispatch changes', description: 'New loads and changes from dispatch', importance: 5, visibility: 1, vibration: true, sound: 'driver_alert.wav' });
-      await PushNotifications.register();
-    } catch { setStatus('Could not enable alerts. Check notification permissions and try again.'); }
+  const testSound = async () => {
+    try { await enableDriverSound(); await playDriverAlert(true); }
+    catch { setStatus('Could not play the sound. Check your phone volume and try again.'); }
   };
   return <div className="driver-update-notices">
     {release && <section className="driver-update-banner" role="status"><strong>A new version of PortFlow Driver is available</strong><p>Version {release.version}. Update when you are safely parked.</p>{release.url ? <a href={release.url} target="_blank" rel="noreferrer">Update app</a> : <p>Open {platform === 'ios' ? 'the App Store' : 'Google Play'} to update PortFlow Driver.</p>}</section>}
-    <section className="driver-alert-settings"><button type="button" onClick={enable}>{pushEnabled ? 'Test alert sound' : 'Enable alerts & test sound'}</button>{status && <p role="status">{status}</p>}</section>
+    <details className="driver-alert-settings" hidden={!showSettings}><summary>Notification settings</summary><p>Dispatch alerts follow your phone notification permissions and sound settings.</p><button type="button" onClick={testSound}>Test alert sound</button>{status && <p role="status">{status}</p>}</details>
   </div>;
 }

@@ -11151,7 +11151,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       </header>
 
       <NotificationStack />
-      <DriverAppUpdates apiBase={API_BASE} authToken={authToken}
+      <DriverAppUpdates apiBase={API_BASE} authToken={authToken} showSettings={driverMobileTab === 'profile'}
         onNotification={(title, message) => pushAppNotification('driver', title, message)}
         onRefresh={fetchLoads} />
       {driverDropLoad && <DriverDropConfirmation load={driverDropLoad}
