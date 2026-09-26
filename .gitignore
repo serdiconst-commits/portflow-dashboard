@@ -45,3 +45,8 @@ ios/App/DerivedData/
 *.njsproj
 *.sln
 *.sw?
+
+# Push provider credentials (install locally; never commit)
+android/app/google-services.json
+*service-account*.json
+AuthKey_*.p8

@@ -1,3 +1,5 @@
+import createDriverAppRoutes from './routes/driverApp.js';
+import { startDriverNotifications } from './services/driverNotifications.js';
 import { prepareDocumentImage } from './services/documentImage.js';
 import { reconcileLoadMoves, movementPickupOrigin } from './loadMovePlan.js';
 import { normalizeScac, requirePortHoustonScac, matchesPortHoustonScope, portHoustonDocumentMetadata, isPortHoustonDocumentVisible, portHoustonDocumentScopeColumns } from './portHoustonScope.js';
@@ -2035,6 +2037,7 @@ const protectOwnerEmail = (req, res, next) => {
 app.use('/api', createAccountAccessRoutes(db, { authenticate, requireTenantOwner }));
 
 app.use('/api/invoices', authenticate, createInvoiceRoutes(db));
+app.use('/api/driver-app', createDriverAppRoutes(db, authenticate));
 app.use('/api/driver-settlements', authenticate, createDriverSettlementRoutes(db));
 app.use('/api/driver-pods', authenticate, createDriverPodRoutes(db, { uploadsDir, audit: writeAuditLog }));
 app.use('/api/analytics', authenticate, createAnalyticsRoutes(db));
@@ -6782,4 +6785,5 @@ app.listen(PORT, '0.0.0.0', () => {
   startAutomaticPortHoustonAvailabilityChecks();
   startAutomaticPortHoustonEirChecks();
   startDriverExpirationReminderChecks(db);
+  startDriverNotifications(db);
 });

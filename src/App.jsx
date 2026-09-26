@@ -1,3 +1,7 @@
+import DriverDropConfirmation from './components/DriverDropConfirmation.jsx';
+import DriverAppUpdates, { removeDriverPushRegistration } from './components/DriverAppUpdates.jsx';
+import { driverLoadChanges } from '../shared/driverAlerts.js';
+import { enableDriverSound, playDriverAlert } from './utils/driverAlertSound.js';
 import DriverPayroll from './components/DriverPayroll.jsx';
 import TenantInvitation, { TenantInvitationStatus } from './components/TenantInvitation.jsx';
 import DriverCompletedFilter from './components/DriverCompletedFilter.jsx';
@@ -1508,6 +1512,15 @@ const [portHoustonScacStatus, setPortHoustonScacStatus] = useState('');
 const [portHoustonScacSaving, setPortHoustonScacSaving] = useState(false);
 const [portHoustonSettingsStatus, setPortHoustonSettingsStatus] = useState('');
 const [appNotifications, setAppNotifications] = useState([]);
+const [driverDropLoad, setDriverDropLoad] = useState(null);
+const driverStatusPendingRef = useRef(new Set());
+useEffect(() => {
+  if (currentUser?.role !== 'driver') return;
+  const unlock = () => { enableDriverSound().catch(() => {}); };
+  window.addEventListener('pointerdown', unlock, { once: true });
+  window.addEventListener('keydown', unlock, { once: true });
+  return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
+}, [currentUser?.role]);
 const previousLoadsRef = useRef(null);
 const driverAssignmentSeenRef = useRef(new Set());
 const [portHoustonSettingsSaving, setPortHoustonSettingsSaving] = useState('');
@@ -3811,7 +3824,8 @@ const pushAppNotification = (type, title, message) => {
     ...prev.slice(0, 2),
   ]);
 
-  window.setTimeout(() => {
+  if (type === 'driver') playDriverAlert().catch(() => {});
+  if (type !== 'driver') window.setTimeout(() => {
     setAppNotifications((prev) => prev.filter((notice) => notice.id !== id));
   }, 12000);
 
@@ -3832,7 +3846,7 @@ const detectLoadNotifications = (nextLoads = []) => {
     const activeAssignedLoads = nextLoads.filter((load) => {
       const status = String(load.status || '').trim().toLowerCase();
       return (
-        driverMatchesCurrentUser(load.driver, currentUser) &&
+        driverMatchesCurrentUser(load.currentMove?.driverId || load.driver, currentUser) &&
         !['delivered', 'completed', 'dropped'].includes(status)
       );
     });
@@ -3844,16 +3858,25 @@ const detectLoadNotifications = (nextLoads = []) => {
       return;
     }
 
-    activeAssignedLoads.forEach((load) => {
-      if (driverAssignmentSeenRef.current.has(load.id)) return;
-
+    const previousById = new Map(previousLoads.map(load => [load.id, load]));
+    const assigned = load => driverMatchesCurrentUser(load?.currentMove?.driverId || load?.driver, currentUser);
+    const changes = [];
+    activeAssignedLoads.forEach(load => {
+      const previous = previousById.get(load.id);
+      if (!previous || !assigned(previous) || previous.currentMove?.id !== load.currentMove?.id) {
+        changes.push(`${getLoadAlertLabel(load)}: new assignment.`);
+      } else if (driverLoadChanges(previous, load).length) {
+        changes.push(`${getLoadAlertLabel(load)}: load details changed.`);
+      }
       driverAssignmentSeenRef.current.add(load.id);
-      pushAppNotification(
-        'driver',
-        'New load assigned',
-        `${getLoadAlertLabel(load)} is now assigned to you.`
-      );
     });
+    previousLoads.filter(assigned).forEach(previous => {
+      const next = nextLoads.find(load => load.id === previous.id);
+      if (!['dropped', 'delivered', 'completed'].includes(String(previous.status).toLowerCase()) && (!next || !assigned(next))) {
+        changes.push(`${getLoadAlertLabel(previous)}: assignment changed. Review your loads.`);
+      }
+    });
+    if (changes.length) pushAppNotification('driver', 'Dispatch update', changes.join(' '));
 
     saveSeenDriverAssignments();
   }
@@ -9078,7 +9101,11 @@ const handleGeneratePOD = (loadForPod = selectedInvoiceLoad) => {
   newWindow.print();
 };
 
-const handleLogout = () => {
+const handleLogout = async () => {
+  if (currentUser?.role === 'driver') {
+    try { await removeDriverPushRegistration(API_BASE, authToken); }
+    catch (error) { alert(error.message); return; }
+  }
   clearAuthSession();
   setAuthToken('');
   setCurrentUser(null);
@@ -9371,9 +9398,13 @@ const handleSelectSavedLocation = (field, locationId) => {
   }));
 };
 
-const handleDriverStatusUpdate = async (loadId, newStatus) => {
+const handleDriverStatusUpdate = async (loadId, newStatus, confirmedDrop = false) => {
+  if (driverStatusPendingRef.current.has(loadId)) return;
+  const loadToUpdate = loadsData.find((load) => load.id === loadId);
+  if (!loadToUpdate) return;
+  if (newStatus === 'Dropped' && !confirmedDrop) { setDriverDropLoad(loadToUpdate); return; }
+  driverStatusPendingRef.current.add(loadId);
   try {
-    const loadToUpdate = loadsData.find((load) => load.id === loadId);
 
     if (newStatus === 'Delivered' && !hasRequiredDriverDocuments(loadToUpdate)) {
       const missing = getMissingDriverDocuments(loadToUpdate).join(', ');
@@ -9426,7 +9457,7 @@ const handleDriverStatusUpdate = async (loadId, newStatus) => {
   } catch (error) {
     console.error('STATUS UPDATE ERROR:', error);
     alert(`Failed to update status: ${error.message}`);
-  }
+  } finally { driverStatusPendingRef.current.delete(loadId); }
 };
 
 const setDriverEquipmentDraft = (loadId, field, value) => {
@@ -11120,6 +11151,18 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       </header>
 
       <NotificationStack />
+      <DriverAppUpdates apiBase={API_BASE} authToken={authToken}
+        onNotification={(title, message) => pushAppNotification('driver', title, message)}
+        onRefresh={fetchLoads} />
+      {driverDropLoad && <DriverDropConfirmation load={driverDropLoad}
+        onCancel={() => setDriverDropLoad(null)}
+        onConfirm={() => {
+          const current = loadsData.find(load => load.id === driverDropLoad.id);
+          const route = load => JSON.stringify([load?.status, load?.driver, load?.currentMove?.id, load?.currentMove?.destination, load?.delivery, load?.dropLocation]);
+          setDriverDropLoad(null);
+          if (!current || route(current) !== route(driverDropLoad)) { alert('This load changed. Review it before confirming the drop.'); return; }
+          handleDriverStatusUpdate(current.id, 'Dropped', true);
+        }} />}
 
       {driverCameraLoadId && (
         <section className="driver-camera-modal" aria-label="PortFlow document scanner">
