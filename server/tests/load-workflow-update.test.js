@@ -12,5 +12,5 @@ test('edit-load route normalizes workflows and resyncs the remaining movement pl
   assert.match(updateRoute, /const nextWorkflowType = normalizeLoadWorkflow/);
   assert.doesNotMatch(updateRoute, /nextWorkflowType === 'PRE_PULL_LIVE' && !nextDropLocation/);
   assert.match(updateRoute, /syncLoadMoves\(updatedLoad/);
-  assert.match(updateRoute, /attachMovesToLoads\(\[updatedLoad\]/);
+  assert.match(updateRoute, /attachMovesToLoads\(\[load\]/);
 });

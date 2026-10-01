@@ -4386,11 +4386,11 @@ app.put('/api/loads/:id', authenticate, requireRoles(movePayRoles), (req, res) =
         const driverChanged = Boolean(normalizedDriver) && normalizedDriver !== String(existingLoad.driver || '').trim();
         if (
           driverChanged &&
-          nextWorkflowType === 'DROP_AND_PICK' &&
+          ['DROP_AND_PICK', 'PRE_PULL_LIVE'].includes(nextWorkflowType) &&
           String(existingLoad.status || '').trim().toLowerCase() === 'dropped'
         ) {
           return res.status(409).json({
-            error: 'Mark the container Ready for Pickup, add the return location, and assign the driver from the Ready for Pickup screen.',
+            error: 'Use Ready for Pickup / Assign Delivery to assign the next movement and its pay.',
           });
         }
 
@@ -4548,13 +4548,20 @@ console.log('LOAD AFTER UPDATE =', updatedLoad);
                   return res.status(500).json({ error: 'Load updated, but its movement plan could not be saved.' });
                 }
 
-                attachMovesToLoads([updatedLoad], (attachErr, rows) => {
-                  if (attachErr) {
-                    console.error('Error reading load moves after workflow edit:', attachErr.message);
-                    return res.status(500).json({ error: 'Load updated, but its movement plan could not be read.' });
-                  }
+                const respondWithMoves = (load) => attachMovesToLoads([load], (attachErr, rows) => {
+                  if (attachErr) return res.status(500).json({ error: 'Load updated, but its movement plan could not be read.' });
                   res.json(rows[0]);
                 });
+                if (nextWorkflowType === 'PRE_PULL_LIVE' &&
+                    ['Delivered', 'Completed'].includes(nextStatus) &&
+                    !['Delivered', 'Completed'].includes(existingLoad.status)) {
+                  return updateCurrentMoveForLoadStatus(req, loadId, 'Delivered', (completeErr) => {
+                    if (completeErr) return res.status(500).json({ error: 'Could not save delivery movement completion.' });
+                    db.get('SELECT * FROM loads WHERE id = ? AND companyId = ?', [loadId, companyId],
+                      (reloadErr, load) => reloadErr ? res.status(500).json({ error: 'Could not reload completed load.' }) : respondWithMoves(load));
+                  });
+                }
+                respondWithMoves(updatedLoad);
               }, existingLoad);
             }
           );
@@ -4691,7 +4698,11 @@ app.get('/api/loads', authenticate, (req, res) => {
 
           attachMovesToLoads(loadsWithDocuments, (movesErr, loadsWithMoves) => {
             if (movesErr) return res.status(500).json({ error: movesErr.message });
-            res.json(loadsWithMoves);
+            // Installed Driver versions already recognize Delivered as terminal.
+            // Keep the stored dispatcher status intact while supporting those clients.
+            res.json(loadsWithMoves.map((load) =>
+              String(load.status || '').trim().toLowerCase() === 'completed'
+                ? { ...load, status: 'Delivered' } : load));
           });
         });
       }
@@ -5025,7 +5036,7 @@ app.put('/api/load-moves/:id/assign', authenticate, requireRoles(dispatchLocatio
       `SELECT load_moves.*, loads.containerNumber, loads.returnLocation,
          (SELECT prior.destination FROM load_moves prior
           WHERE prior.companyId = load_moves.companyId AND prior.loadId = load_moves.loadId
-            AND prior.moveType = 'DROP' AND prior.status = 'Completed' AND prior.sequence < load_moves.sequence
+            AND prior.moveType IN ('DROP', 'PRE_PULL') AND prior.status = 'Completed' AND prior.sequence < load_moves.sequence
           ORDER BY prior.sequence DESC LIMIT 1) AS recordedDropLocation
        FROM load_moves JOIN loads ON loads.id = load_moves.loadId AND loads.companyId = load_moves.companyId
        WHERE load_moves.id = ? AND load_moves.companyId = ?`,
@@ -5036,11 +5047,14 @@ app.put('/api/load-moves/:id/assign', authenticate, requireRoles(dispatchLocatio
         if (['Completed', 'Cancelled', 'Waiting Customer'].includes(move.status)) {
           return res.status(409).json({ error: 'This movement is not ready for driver assignment.' });
         }
+        if (move.moveType === 'DELIVERY' && !move.recordedDropLocation) {
+          return res.status(409).json({ error: 'Complete the pre-pull movement before assigning delivery.' });
+        }
         const effectiveReturnLocation = requestedReturnLocation || String(move.destination || move.returnLocation || '').trim();
-        if (move.moveType === 'PICKUP_RETURN' && !effectiveReturnLocation) {
+        if (['PICKUP_RETURN', 'DELIVERY'].includes(move.moveType) && !effectiveReturnLocation) {
           return res.status(400).json({ error: 'Add the return location before assigning a driver.' });
         }
-        const pickupOrigin = move.moveType === 'PICKUP_RETURN'
+        const pickupOrigin = ['PICKUP_RETURN', 'DELIVERY'].includes(move.moveType)
           ? (move.recordedDropLocation || move.origin || '') : (move.origin || '');
         const assignedAt = new Date().toISOString();
         db.run(
@@ -5050,7 +5064,7 @@ app.put('/api/load-moves/:id/assign', authenticate, requireRoles(dispatchLocatio
             if (updateErr) return res.status(500).json({ error: updateErr.message });
             db.run(
               `UPDATE loads SET driver = ?, driverRate = ?, status = 'Dispatched', pickup = ?, delivery = ?, returnLocation = ? WHERE id = ? AND companyId = ?`,
-              [normalizedDriver, driverRate, pickupOrigin, effectiveReturnLocation || move.destination || '', effectiveReturnLocation || move.returnLocation || '', move.loadId, companyId],
+              [normalizedDriver, driverRate, pickupOrigin, effectiveReturnLocation || move.destination || '', (move.moveType === 'DELIVERY' ? move.returnLocation : effectiveReturnLocation) || move.returnLocation || '', move.loadId, companyId],
               (loadErr) => {
                 if (loadErr) return res.status(500).json({ error: loadErr.message });
                 writeAuditLog(req, {
@@ -6495,7 +6509,7 @@ app.put('/api/loads/:id/billing-status', authenticate, (req, res) => {
 
 const updateCurrentMoveForLoadStatus = (req, loadId, status, callback, allowInitialPlan = true) => {
   const companyId = req.company.companyId;
-  const driverId = String(req.user?.driverId || '').trim();
+  const driverId = req.user?.role === 'driver' ? String(req.user?.driverId || '').trim() : '';
   db.get(
     `SELECT * FROM load_moves
      WHERE companyId = ? AND loadId = ? AND status NOT IN ('Completed', 'Cancelled', 'Waiting Customer', 'Ready for Pickup')
@@ -6504,12 +6518,15 @@ const updateCurrentMoveForLoadStatus = (req, loadId, status, callback, allowInit
     [companyId, loadId, driverId, driverId],
     (findErr, move) => {
       if (findErr) return callback(findErr);
+      if (move?.moveType === 'DELIVERY' && !String(move.driverId || '').trim()) {
+        return callback(new Error('Assign the delivery driver before updating this movement.'));
+      }
       if (!move) {
         if (!allowInitialPlan) return callback(null);
         // Capture an unplanned first movement while its driver and initial pay
         // still belong to this load; never infer a historical driver's pay.
         return db.get(
-          `SELECT * FROM loads WHERE id = ? AND companyId = ? AND workflowType = 'DROP_AND_PICK'
+          `SELECT * FROM loads WHERE id = ? AND companyId = ? AND workflowType IN ('DROP_AND_PICK', 'PRE_PULL_LIVE')
            AND TRIM(COALESCE(driver, '')) != ''
            AND NOT EXISTS (SELECT 1 FROM load_moves WHERE companyId = loads.companyId AND loadId = loads.id)`,
           [loadId, companyId],
@@ -6521,19 +6538,21 @@ const updateCurrentMoveForLoadStatus = (req, loadId, status, callback, allowInit
         );
       }
       const now = new Date().toISOString();
+      const completedAt = status === 'Dropped' && req.body?.dropDateTime && Number.isFinite(Date.parse(req.body.dropDateTime))
+        ? new Date(req.body.dropDateTime).toISOString() : now;
       const isComplete = status === 'Dropped' || status === 'Delivered';
       const nextMoveStatus = isComplete ? 'Completed' : status;
       db.run(
         `UPDATE load_moves SET status = ?, startedAt = CASE WHEN startedAt = '' THEN ? ELSE startedAt END,
            completedAt = ?, completedBy = ?, updatedAt = ?,
-           driverRate = CASE WHEN moveType = 'DROP' THEN COALESCE(
+           driverRate = CASE WHEN moveType IN ('DROP', 'PRE_PULL') THEN COALESCE(
              (SELECT driverRate FROM loads WHERE id = load_moves.loadId AND companyId = load_moves.companyId
               AND TRIM(LOWER(driver)) = TRIM(LOWER(load_moves.driverId))), driverRate) ELSE driverRate END
          WHERE id = ? AND companyId = ?`,
         [
           nextMoveStatus,
           now,
-          isComplete ? now : '',
+          isComplete ? completedAt : '',
           isComplete ? (driverId || move.driverId || '') : '',
           now,
           move.id,
@@ -6545,7 +6564,7 @@ const updateCurrentMoveForLoadStatus = (req, loadId, status, callback, allowInit
             action: isComplete ? 'MOVE_COMPLETE' : 'MOVE_STATUS_CHANGE',
             entityType: 'LOAD_MOVE', entityId: move.id, entityLabel: loadId,
             oldValue: { status: move.status, completedAt: move.completedAt || '', completedBy: move.completedBy || '' },
-            newValue: { status: nextMoveStatus, completedAt: isComplete ? now : '', completedBy: isComplete ? (driverId || move.driverId || '') : '' },
+            newValue: { status: nextMoveStatus, completedAt: isComplete ? completedAt : '', completedBy: isComplete ? (driverId || move.driverId || '') : '' },
           });
           if (!isComplete) return callback(null);
           db.get(
@@ -6553,7 +6572,8 @@ const updateCurrentMoveForLoadStatus = (req, loadId, status, callback, allowInit
             [companyId, loadId, move.sequence],
             (nextErr, nextMove) => {
               if (nextErr) return callback(nextErr);
-              const waitingForCustomer = nextMove?.status === 'Waiting Customer';
+              const waitingForCustomer = nextMove?.status === 'Waiting Customer' ||
+                (move.moveType === 'PRE_PULL' && nextMove?.moveType === 'DELIVERY');
               const nextLoadStatus = status === 'Delivered'
                 ? 'Delivered'
                 : waitingForCustomer

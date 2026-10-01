@@ -1,3 +1,5 @@
+import DispatchLfdAlerts from './components/DispatchLfdAlerts.jsx';
+import { hasAssignedDriver } from './utils/lfdAlerts.js';
 import DriverDropConfirmation from './components/DriverDropConfirmation.jsx';
 import DriverAppUpdates, { removeDriverPushRegistration } from './components/DriverAppUpdates.jsx';
 import { driverLoadChanges } from '../shared/driverAlerts.js';
@@ -5,7 +7,7 @@ import { enableDriverSound, playDriverAlert } from './utils/driverAlertSound.js'
 import DriverPayroll from './components/DriverPayroll.jsx';
 import TenantInvitation, { TenantInvitationStatus } from './components/TenantInvitation.jsx';
 import DriverCompletedFilter from './components/DriverCompletedFilter.jsx';
-import { filterDriverCompletedLoads, getDriverCompletion } from './utils/driverCompletedLoads.js';
+import { filterDriverCompletedLoads, getDriverCompletion, isDriverLoadActive } from './utils/driverCompletedLoads.js';
 import DriverBottomNav from './components/DriverBottomNav.jsx';
 import { getLoadEditChanges } from './utils/loadEditReview.js';
 import LoadEditReview from './components/LoadEditReview.jsx';
@@ -3844,10 +3846,9 @@ const detectLoadNotifications = (nextLoads = []) => {
 
   if (currentUser.role === 'driver') {
     const activeAssignedLoads = nextLoads.filter((load) => {
-      const status = String(load.status || '').trim().toLowerCase();
       return (
         driverMatchesCurrentUser(load.currentMove?.driverId || load.driver, currentUser) &&
-        !['delivered', 'completed', 'dropped'].includes(status)
+        isDriverLoadActive(load)
       );
     });
 
@@ -5137,14 +5138,15 @@ const getAccountingDeliveryFilterDate = () => {
 
 const pickupQueue = loadsData.flatMap((load) =>
   (load.moves || [])
-    .filter((move) => ['Waiting Customer', 'Ready for Pickup'].includes(move.status))
+    .filter((move) => ['Waiting Customer', 'Ready for Pickup'].includes(move.status) ||
+      (load.workflowType === 'PRE_PULL_LIVE' && load.status === 'Dropped' && move.moveType === 'DELIVERY' && move.status === 'Planned'))
     .map((move) => ({ load, move }))
 );
 
 const selectedPickupReturnMove = (selectedLoad?.moves || []).find(
   (move) =>
-    move.moveType === 'PICKUP_RETURN' &&
-    ['Waiting Customer', 'Ready for Pickup'].includes(move.status)
+    (move.moveType === 'PICKUP_RETURN' && ['Waiting Customer', 'Ready for Pickup'].includes(move.status)) ||
+    (selectedLoad?.workflowType === 'PRE_PULL_LIVE' && move.moveType === 'DELIVERY' && move.status === 'Planned' && selectedLoad.status === 'Dropped')
 );
 
 const openReadyPickupModal = async () => {
@@ -5213,7 +5215,7 @@ const assignPickupMove = async (moveId) => {
     return;
   }
   if (!returnLocation) {
-    alert('Add the return location before assigning a driver.');
+    alert(queueItem?.move?.moveType === 'DELIVERY' ? 'Add the delivery location before assigning a driver.' : 'Add the return location before assigning a driver.');
     return;
   }
   try {
@@ -5355,10 +5357,7 @@ const matchesAppointmentDeliveryTypeFilter = (load) =>
 const matchesAvailableDeliveryTypeFilter = (load) =>
   availableDeliveryTypeFilter === 'all' ||
   getDeliveryTypeKey(load) === availableDeliveryTypeFilter;
-const hasAssignedDriver = (load) => {
-  const rawDriver = String(load?.driver || '').trim();
-  return Boolean(rawDriver && !/^(-+\s*)?(no driver|assign later|select driver|not assigned)$/i.test(rawDriver));
-};
+
 
 const isDriverAssignedDispatchLoad = (load) => {
   const status = String(load?.status || '').trim().toLowerCase();
@@ -10214,11 +10213,10 @@ const sortLoadsNewestFirst = (a, b) => getNewestLoadSortValue(b) - getNewestLoad
 const viewFilteredLoadsData =
   activeView === 'driver'
     ? (loadsData || []).filter((load) => {
-        const status = String(load.status || '').trim().toLowerCase();
         const matchesDriver = driverMatchesCurrentUser(load.driver, currentUser);
         const isReleased = Number(load.isDriverReleased ?? 1) === 1;
 
-        return matchesDriver && isReleased && !['delivered', 'dropped'].includes(status);
+        return matchesDriver && isReleased && isDriverLoadActive(load);
       })
     : baseFilteredLoadsData;
 
@@ -10673,9 +10671,8 @@ const sortDriverLoads = (loads = []) =>
   });
 
 const driverActiveLoads = sortDriverLoads((loadsData || []).filter((load) => {
-  const status = String(load.status || '').trim().toLowerCase();
   const assignedDriver = load.currentMove?.driverId || load.driver;
-  return driverMatchesCurrentUser(assignedDriver, currentUser) && !['delivered', 'dropped'].includes(status);
+  return driverMatchesCurrentUser(assignedDriver, currentUser) && isDriverLoadActive(load);
 }));
 
 const driverCompletedLoads = filterDriverCompletedLoads(
@@ -10953,7 +10950,7 @@ const renderDriverLoadCard = (load) => {
           Start
         </button>
         {(!isDropHookLoad(load) || !isHookMoveActive(load)) && (
-          <button type="button" onClick={() => handleDriverStatusUpdate(load.id, 'Dropped')}>Dropped</button>
+          <button type="button" onClick={() => handleDriverStatusUpdate(load.id, 'Dropped')}>{currentMove?.moveType === 'PRE_PULL' ? 'Pre-pull · At yard' : 'Dropped'}</button>
         )}
         <button
           type="button"
@@ -11151,6 +11148,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       </header>
 
       <NotificationStack />
+
       <DriverAppUpdates apiBase={API_BASE} authToken={authToken} showSettings={driverMobileTab === 'profile'}
         onNotification={(title, message) => pushAppNotification('driver', title, message)}
         onRefresh={fetchLoads} />
@@ -12047,6 +12045,16 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       </header>
 
       <NotificationStack />
+      {roleCanAccessView(currentUser?.role, 'dispatch') && (
+        <DispatchLfdAlerts loads={loadsData || []} timeZone={company?.companyTimezone || APP_TIME_ZONE}
+          onOpenLoad={(load) => {
+            setActiveView('dispatch');
+            setShowForm(false);
+            setIsEditing(false);
+            setReadyPickupOpen(false);
+            setSelectedLoad(load);
+          }} />
+      )}
 
       {activeView === 'businessDashboard' && (
         <section className="panel business-dashboard-panel">
@@ -13760,8 +13768,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       <div className="quick-actions-grid">
                         <div className="quick-driver-box">
                           <label htmlFor="quick-driver-select">Quick Driver Change</label>
-                          {selectedLoad.workflowType === 'DROP_AND_PICK' && getLoadQuickStatusKey(selectedLoad) === 'dropped' ? (
-                            <p className="documents-empty">Use Ready for Pickup after adding the return location.</p>
+                          {['DROP_AND_PICK', 'PRE_PULL_LIVE'].includes(selectedLoad.workflowType) && getLoadQuickStatusKey(selectedLoad) === 'dropped' ? (
+                            <p className="documents-empty">{selectedLoad.workflowType === 'PRE_PULL_LIVE' ? 'Use Assign Delivery to choose the next driver and delivery pay.' : 'Use Ready for Pickup after adding the return location.'}</p>
                           ) : (
                           <select
   id="quick-driver-select"
@@ -13822,7 +13830,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           >
                             <option value="Dispatched">Dispatched</option>
                             <option value="In Transit">In Transit</option>
-                            <option value="Dropped">Dropped</option>
+                            <option value="Dropped">{selectedLoad.workflowType === 'PRE_PULL_LIVE' ? 'Pre-pull (at yard)' : 'Dropped'}</option>
                             <option value="Completed">Completed</option>
                             <option value="Available">Available</option>
                             <option value="Not Available">Not Available</option>
@@ -13830,16 +13838,16 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         </div>
                       </div>
 
-                      {String(selectedLoad.workflowType || '').trim().toUpperCase() === 'DROP_AND_PICK' &&
+                      {['DROP_AND_PICK', 'PRE_PULL_LIVE'].includes(String(selectedLoad.workflowType || '').trim().toUpperCase()) &&
                         getLoadQuickStatusKey(selectedLoad) === 'dropped' && (
                           <section className="ready-pickup-callout">
                             <div>
-                              <span>Container dropped</span>
+                              <span>{selectedLoad.workflowType === 'PRE_PULL_LIVE' ? 'Pre-pull completed · At yard' : 'Container dropped'}</span>
                               <strong>{selectedLoad.containerNumber || selectedLoad.id}</strong>
                               <p>{selectedPickupReturnMove?.origin || selectedLoad.dropLocation || selectedLoad.delivery}</p>
                             </div>
                             <button type="button" className="primary-btn" onClick={openReadyPickupModal}>
-                              Ready for Pickup
+                              {selectedLoad.workflowType === 'PRE_PULL_LIVE' ? 'Assign Delivery' : 'Ready for Pickup'}
                             </button>
                           </section>
                         )}
@@ -13855,8 +13863,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           >
                             <div className="modal-header">
                               <div>
-                                <span className="driver-card-kicker">Drop &amp; Pick</span>
-                                <h3 id="ready-pickup-title">Ready for Pickup</h3>
+                                <span className="driver-card-kicker">{selectedLoad.workflowType === 'PRE_PULL_LIVE' ? 'Pre-Pull Live Load' : 'Drop & Pick'}</span>
+                                <h3 id="ready-pickup-title">{selectedLoad.workflowType === 'PRE_PULL_LIVE' ? 'Assign Delivery' : 'Ready for Pickup'}</h3>
                                 <p className="panel-subtitle">
                                   {selectedLoad.containerNumber || selectedLoad.id}
                                 </p>
@@ -13878,11 +13886,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
                             <div className="ready-pickup-form-grid">
                               <label>
-                                <span>Return Location</span>
+                                <span>{selectedPickupReturnMove.moveType === 'DELIVERY' ? 'Delivery Location' : 'Return Location'}</span>
                                 <input
                                   type="text"
                                   list="ready-pickup-return-options"
-                                  placeholder="Select or enter return location"
+                                  placeholder={selectedPickupReturnMove.moveType === 'DELIVERY' ? 'Select or enter delivery location' : 'Select or enter return location'}
                                   value={moveAssignmentDrafts[selectedPickupReturnMove.id]?.returnLocation ?? selectedPickupReturnMove.destination ?? selectedLoad.returnLocation ?? ''}
                                   onChange={(event) =>
                                     setMoveAssignmentDrafts((prev) => ({
@@ -13896,14 +13904,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                                 />
                               </label>
                               <datalist id="ready-pickup-return-options">
-                                {returnLocations.map((location) => {
+                                {(selectedPickupReturnMove.moveType === 'DELIVERY' ? deliveryLocations : returnLocations).map((location) => {
                                   const address = formatLocationAddress(location);
                                   return <option key={location.id} value={address}>{getLocationOptionLabel(location)}</option>;
                                 })}
                               </datalist>
 
                               <label>
-                                <span>Pickup Driver</span>
+                                <span>{selectedPickupReturnMove.moveType === 'DELIVERY' ? 'Delivery Driver (same or different)' : 'Pickup Driver'}</span>
                                 <select
                                   value={moveAssignmentDrafts[selectedPickupReturnMove.id]?.driverId || ''}
                                   onChange={(event) =>
