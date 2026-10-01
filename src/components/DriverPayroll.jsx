@@ -100,6 +100,7 @@ export default function DriverPayroll({
     if (active && !dialog.current?.open) dialog.current?.showModal();
     if (!active && dialog.current?.open) dialog.current.close();
   }, [active]);
+  useEffect(() => { setAddingMovement(null); }, [active?.id]);
   const totals = rows.reduce(
     (sum, row) => ({
       gross: sum.gross + Number(row.grossPay || 0),
@@ -613,7 +614,7 @@ export default function DriverPayroll({
                             setTab("Movements");
                           });
                         }}>
-                          <h4>Add {addingMovement.loadId} · {addingMovement.moveType.replaceAll("_", " ")} · {money(addingMovement.driverRate)}</h4>
+                          <h4>Add {addingMovement.loadId} · {String(addingMovement.moveType || "Movement").replaceAll("_", " ")} · {money(addingMovement.driverRate)}</h4>
                           <PayrollRouteFields locations={locations} pickup={addingMovement.origin} delivery={addingMovement.destination} />
                           <label>Reason for adding this movement<input name="reason" required /></label>
                           <div className="payroll-toolbar">
