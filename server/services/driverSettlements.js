@@ -176,6 +176,7 @@ const buildStatement = ({ settlement, driver, loads, deductions, auditLogs }) =>
 };
 
 async function getSettlementParts(db, companyId, settlementId) {
+  await ensureLifecycle(db);
   const settlement = await dbGet(
     db,
     `SELECT * FROM settlements WHERE id = ? AND companyId = ?`,
@@ -205,15 +206,16 @@ async function getSettlementParts(db, companyId, settlementId) {
        l.bookingNumber,
        l.miles,
        lm.moveType,
-       lm.origin AS moveOrigin,
-       lm.destination AS moveDestination,
+       COALESCE(NULLIF(route.origin, ''), lm.origin) AS moveOrigin,
+       COALESCE(NULLIF(route.destination, ''), lm.destination) AS moveDestination,
        lm.completedAt AS moveCompletedAt
      FROM settlement_loads sl
      LEFT JOIN loads l ON l.id = sl.loadId
      LEFT JOIN load_moves lm ON lm.id = sl.moveId
+     LEFT JOIN settlement_line_routes route ON route.settlementLoadId = sl.id AND route.companyId = ?
      WHERE sl.settlementId = ?
      ORDER BY COALESCE(lm.completedAt, l.appointmentTime, sl.createdAt), sl.createdAt`,
-    [settlementId]
+    [companyId, settlementId]
   );
   const deductions = await dbAll(
     db,
@@ -588,7 +590,13 @@ export async function addSettlementLoad(db, companyId, settlementId, input = {},
 
   const reason=String(input.description||'').trim();
   if(!reason)fail('A reason is required for a manual payment.',400);
+  const origin = String(input.pickupLocation ?? '').trim();
+  const destination = String(input.deliveryLocation ?? '').trim();
+  if (origin.length > 500 || destination.length > 500) fail('Locations must be 500 characters or fewer.', 400);
+  const lineId = uuidv4();
   const info=await lifecycleInfo(db,companyId,settlementId);
+  await dbRun(db, 'BEGIN IMMEDIATE');
+  try {
   if(input.moveId){
     const move=await dbGet(db,`SELECT lm.* FROM load_moves lm JOIN loads l ON l.id=lm.loadId AND l.companyId=lm.companyId WHERE lm.id=? AND lm.companyId=? AND COALESCE(l.deletedAt,'')=''`,[input.moveId,companyId]);
     if(!move||String(move.completedBy||move.driverId).trim().toLowerCase()!==String(settlement.driverId).trim().toLowerCase()||String(move.status).toLowerCase()!=='completed')fail('Completed movement for this driver was not found.',404);
@@ -596,16 +604,25 @@ export async function addSettlementLoad(db, companyId, settlementId, input = {},
     if(await dbGet(db,'SELECT id FROM settlement_loads WHERE moveId=?',[move.id]))fail('This movement is already included in a settlement.');
     const pay=input.payAmount===undefined?Number(move.driverRate):Number(input.payAmount);
     if(!Number.isFinite(pay)||pay<0)fail('Enter a non-negative movement payment.',400);
-    try { await dbRun(db,`INSERT INTO settlement_loads(id,settlementId,loadId,moveId,payAmount,movesCount,description,source,createdAt) VALUES(?,?,?,?,?,1,?,'manual_move',?)`,[uuidv4(),settlementId,move.loadId,move.id,roundMoney(pay),reason,new Date().toISOString()]); }
+    try { await dbRun(db,`INSERT INTO settlement_loads(id,settlementId,loadId,moveId,payAmount,movesCount,description,source,createdAt) VALUES(?,?,?,?,?,1,?,'manual_move',?)`,[lineId,settlementId,move.loadId,move.id,roundMoney(pay),reason,new Date().toISOString()]); }
     catch(e){if(e.code==='SQLITE_CONSTRAINT')fail('This movement is already included in a settlement.');throw e;}
   }else{
     if(input.loadId)fail('Select the specific completed movement rather than adding the entire load.',400);
     const pay=Number(input.payAmount);if(!Number.isFinite(pay)||pay===0)fail('Enter a non-zero manual payment.',400);
-    await dbRun(db,`INSERT INTO settlement_loads(id,settlementId,payAmount,movesCount,description,source,createdAt) VALUES(?,?,?,1,?,?,?)`,[uuidv4(),settlementId,roundMoney(pay),reason,info.correction?'correction':'manual',new Date().toISOString()]);
+    await dbRun(db,`INSERT INTO settlement_loads(id,settlementId,payAmount,movesCount,description,source,createdAt) VALUES(?,?,?,1,?,?,?)`,[lineId,settlementId,roundMoney(pay),reason,info.correction?'correction':'manual',new Date().toISOString()]);
   }
 
+  if (origin || destination) {
+    await dbRun(db, 'INSERT INTO settlement_line_routes(settlementLoadId,companyId,origin,destination) VALUES(?,?,?,?)', [lineId,companyId,origin,destination]);
+  }
   await writeSettlementAudit(db, settlementId, 'ADD_LOAD_OR_PAYMENT', null, input, changedBy);
-  return recalculateSettlement(db, companyId, settlementId, changedBy);
+  const result = await recalculateSettlement(db, companyId, settlementId, changedBy);
+  await dbRun(db, 'COMMIT');
+  return result;
+  } catch (error) {
+    await dbRun(db, 'ROLLBACK');
+    throw error;
+  }
 }
 
 export async function updateSettlementLoad(db, companyId, settlementId, settlementLoadId, input = {}, changedBy = '') {

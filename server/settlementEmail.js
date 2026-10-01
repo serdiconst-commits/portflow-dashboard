@@ -34,20 +34,44 @@ export async function buildSettlementPdf(settlement, company = {}) {
     y = 738;
   };
   const row = (columns, widths, isHeader = false, shaded = false) => {
-    ensureSpace(25);
+    const font = isHeader ? bold : regular;
+    const size = isHeader ? 8 : 8.5;
+    const wrapped = columns.map((value, index) => {
+      const lines = [];
+      let line = '';
+      for (const word of clean(value).split(/\s+/)) {
+        if (!word) continue;
+        const candidate = line ? `${line} ${word}` : word;
+        if (font.widthOfTextAtSize(candidate, size) <= widths[index] - 10) {
+          line = candidate;
+          continue;
+        }
+        if (line) lines.push(line);
+        line = '';
+        for (const character of word) {
+          if (line && font.widthOfTextAtSize(line + character, size) > widths[index] - 10) {
+            lines.push(line);
+            line = '';
+          }
+          line += character;
+        }
+      }
+      if (line) lines.push(line);
+      return lines.length ? lines : [''];
+    });
+    const height = Math.max(20, Math.max(...wrapped.map(lines => lines.length)) * 11 + 9);
+    ensureSpace(height);
     if (isHeader || shaded) {
-      page.drawRectangle({ x: 38, y: y - 6, width: 536, height: 20, color: isHeader ? navy : pale });
+      page.drawRectangle({ x: 38, y: y + 14 - height, width: 536, height, color: isHeader ? navy : pale });
     }
     let x = 42;
-    columns.forEach((value, index) => {
-      drawText(page, clean(value).slice(0, Math.max(8, Math.floor(widths[index] / 5.3))), x, y, {
-        size: isHeader ? 8 : 8.5,
-        font: isHeader ? bold : regular,
-        color: isHeader ? rgb(1, 1, 1) : navy,
-      });
+    wrapped.forEach((lines, index) => {
+      lines.forEach((line, rowIndex) => drawText(page, line, x, y - rowIndex * 11, {
+        size, font, color: isHeader ? rgb(1, 1, 1) : navy,
+      }));
       x += widths[index];
     });
-    y -= 20;
+    y -= height;
   };
 
   page.drawRectangle({ x: 0, y: 690, width: 612, height: 102, color: navy });
