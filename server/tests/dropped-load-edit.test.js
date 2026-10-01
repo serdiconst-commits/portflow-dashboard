@@ -18,6 +18,7 @@ function editDroppedLoad(existingDriver, requestedDriver, overrides = {}) {
   let code = 200;
   let result;
   let synced = false;
+  const completions = [];
   const context = {
     app: { put: (_path, ...handlers) => { handler = handlers.at(-1); } },
     authenticate: () => {}, requireRoles: () => () => {}, movePayRoles: new Set(), console: { log() {}, error() {} },
@@ -29,6 +30,7 @@ function editDroppedLoad(existingDriver, requestedDriver, overrides = {}) {
     parseNumericField: (value) => Number(value) || 0,
     getChangedFields: () => ({}), writeAuditLog() {},
     syncLoadMoves: (_load, cb) => { synced = true; cb(null); },
+    updateCurrentMoveForLoadStatus: (_req, id, status, cb) => { completions.push({ id, status }); cb(null); },
     attachMovesToLoads: (loads, cb) => cb(null, loads),
     db: {
       get: (_sql, _args, cb) => cb(null, updated || existing),
@@ -44,7 +46,7 @@ function editDroppedLoad(existingDriver, requestedDriver, overrides = {}) {
   const res = { status(value) { code = value; return this; }, json(value) { result = value; } };
   handler({ params: { id: existing.id }, company: { companyId: existing.companyId },
     body: { ...existing, driver: requestedDriver, notes: 'Edited without scheduling return', ...overrides.request } }, res);
-  return { code, result, updated, synced };
+  return { code, result, updated, synced, completions };
 }
 
 for (const driver of ['', 'DRV-001']) {
@@ -85,3 +87,24 @@ for (const status of ['Pending', 'Available', 'Dropped']) {
     assert.equal(synced, true);
   });
 }
+
+for (const status of ['Delivered', 'Completed']) {
+  test(`dispatcher ${status} records the pre-pull delivery movement without POD`, () => {
+    const { code, completions } = editDroppedLoad('DRV-002', 'DRV-002', {
+      existing: { workflowType: 'PRE_PULL_LIVE', status: 'In Transit' }, request: { status },
+    });
+    assert.equal(code, 200);
+    assert.deepEqual(completions, [{ id: 'LD-DROP', status: 'Delivered' }]);
+    const repeated = editDroppedLoad('DRV-002', 'DRV-002', {
+      existing: { workflowType: 'PRE_PULL_LIVE', status }, request: { status },
+    });
+    assert.deepEqual(repeated.completions, []);
+  });
+}
+test('pre-pull at yard requires assigning the delivery movement', () => {
+  const { code, updated } = editDroppedLoad('', 'DRV-002', {
+    existing: { workflowType: 'PRE_PULL_LIVE' },
+  });
+  assert.equal(code, 409);
+  assert.equal(updated, undefined);
+});

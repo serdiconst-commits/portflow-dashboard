@@ -1,5 +1,10 @@
 const normalized = (value) => String(value || '').trim().toLowerCase();
 
+// Dispatch completion is final for the active list, even when paperwork is missing.
+export function isDriverLoadActive(load = {}) {
+  return !['delivered', 'completed', 'dropped'].includes(normalized(load.status));
+}
+
 export function getDriverCompletion(load, driverId, timeZone = 'America/Chicago') {
   const candidates = (load.moves || []).filter((move) => normalized(move.status) === 'completed' &&
     normalized(move.completedBy || move.driverId) === normalized(driverId))
