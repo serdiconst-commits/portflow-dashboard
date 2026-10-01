@@ -26,6 +26,10 @@ export function ensureLifecycle(db) {
       (async () => {
         await run(
           db,
+          `CREATE TABLE IF NOT EXISTS settlement_line_routes(settlementLoadId TEXT PRIMARY KEY,companyId TEXT NOT NULL,origin TEXT NOT NULL DEFAULT '',destination TEXT NOT NULL DEFAULT '')`,
+        );
+        await run(
+          db,
           `CREATE TABLE IF NOT EXISTS settlement_versions(id TEXT PRIMARY KEY,companyId TEXT NOT NULL,settlementId TEXT NOT NULL,snapshot TEXT NOT NULL,reason TEXT NOT NULL,actor TEXT,createdAt TEXT NOT NULL)`,
         );
         await run(

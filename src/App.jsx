@@ -12260,7 +12260,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         </section>
       )}
 
-      {['payroll', 'settlements'].includes(activeView) && <DriverPayroll apiBase={API_BASE} token={authToken} drivers={driversList} loads={loadsData} />}
+      {['payroll', 'settlements'].includes(activeView) && <DriverPayroll apiBase={API_BASE} token={authToken} drivers={driversList} loads={loadsData} locations={locations} />}
 
       {activeView === 'dispatch' && (
         <>

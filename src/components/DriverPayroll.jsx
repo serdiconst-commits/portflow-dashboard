@@ -1,3 +1,4 @@
+import PayrollRouteFields from "./PayrollRouteFields.jsx";
 import { useEffect, useRef, useState } from "react";
 import "./DriverPayroll.css";
 const money = (value) =>
@@ -22,6 +23,7 @@ export default function DriverPayroll({
   token,
   drivers = [],
   loads = [],
+  locations = [],
 }) {
   const [start, setStart] = useState(date(initialStart)),
     [end, setEnd] = useState(
@@ -46,6 +48,7 @@ export default function DriverPayroll({
     [rules, setRules] = useState([]);
   const [moveQuery, setMoveQuery] = useState(""),
     [moveCandidates, setMoveCandidates] = useState([]),
+    [addingMovement, setAddingMovement] = useState(null),
     [editingLine, setEditingLine] = useState(null),
     [paymentOpen, setPaymentOpen] = useState(false),
     [correctionOpen, setCorrectionOpen] = useState(false),
@@ -97,6 +100,7 @@ export default function DriverPayroll({
     if (active && !dialog.current?.open) dialog.current?.showModal();
     if (!active && dialog.current?.open) dialog.current.close();
   }, [active]);
+  useEffect(() => { setAddingMovement(null); }, [active?.id]);
   const totals = rows.reduce(
     (sum, row) => ({
       gross: sum.gross + Number(row.grossPay || 0),
@@ -133,6 +137,7 @@ export default function DriverPayroll({
       setTab("Movements");
       setEditingLine(null);
       setMoveCandidates([]);
+      setAddingMovement(null);
       setPaymentOpen(false);
       setCorrectionOpen(false);
       setEditingRule(null);
@@ -581,22 +586,7 @@ export default function DriverPayroll({
                                   <button
                                     disabled={busy || !!m.includedIn}
                                     className="secondary-btn"
-                                    onClick={() => {
-                                      const reason = window
-                                        .prompt(
-                                          `Add ${m.loadId} ${m.moveType} (${money(m.driverRate)}) to this period? Enter the reason:`,
-                                        )
-                                        ?.trim();
-                                      if (reason)
-                                        run(async () => {
-                                          await mutate("/loads", "POST", {
-                                            moveId: m.moveId,
-                                            description: reason,
-                                          });
-                                          setMoveCandidates([]);
-                                          setTab("Movements");
-                                        });
-                                    }}
+                                    onClick={() => setAddingMovement(m)}
                                   >
                                     {m.includedIn
                                       ? "Already included"
@@ -608,6 +598,31 @@ export default function DriverPayroll({
                           </tbody>
                         </table>
                       </div>
+                      {addingMovement && (
+                        <form key={addingMovement.moveId} className="payroll-route-form" onSubmit={(e) => {
+                          e.preventDefault();
+                          const fields = new FormData(e.currentTarget);
+                          run(async () => {
+                            await mutate("/loads", "POST", {
+                              moveId: addingMovement.moveId,
+                              description: String(fields.get("reason")).trim(),
+                              pickupLocation: String(fields.get("pickupLocation")).trim(),
+                              deliveryLocation: String(fields.get("deliveryLocation")).trim(),
+                            });
+                            setAddingMovement(null);
+                            setMoveCandidates([]);
+                            setTab("Movements");
+                          });
+                        }}>
+                          <h4>Add {addingMovement.loadId} · {String(addingMovement.moveType || "Movement").replaceAll("_", " ")} · {money(addingMovement.driverRate)}</h4>
+                          <PayrollRouteFields locations={locations} pickup={addingMovement.origin} delivery={addingMovement.destination} />
+                          <label>Reason for adding this movement<input name="reason" required /></label>
+                          <div className="payroll-toolbar">
+                            <button className="primary-btn" disabled={busy}>Save movement</button>
+                            <button type="button" className="secondary-btn" disabled={busy} onClick={() => setAddingMovement(null)}>Cancel</button>
+                          </div>
+                        </form>
+                      )}
                       <details>
                         <summary>
                           Manual payment / correction difference
@@ -633,6 +648,8 @@ export default function DriverPayroll({
                               await mutate("/loads", "POST", {
                                 payAmount: pay,
                                 description: String(f.get("reason")).trim(),
+                                pickupLocation: String(f.get("pickupLocation")).trim(),
+                                deliveryLocation: String(f.get("deliveryLocation")).trim(),
                               });
                               setTab("Movements");
                             });
@@ -650,6 +667,7 @@ export default function DriverPayroll({
                           <label>
                             Reason / Load #<input name="reason" required />
                           </label>
+                          <PayrollRouteFields locations={locations} />
                           <button disabled={busy} className="primary-btn">
                             Add manual payment
                           </button>
