@@ -1,3 +1,4 @@
+import { formatDocumentDate, formatDocumentAppointment } from '../shared/documentDates.js';
 import createDriverAppRoutes from './routes/driverApp.js';
 import { startDriverNotifications } from './services/driverNotifications.js';
 import { prepareDocumentImage } from './services/documentImage.js';
@@ -5871,7 +5872,7 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
           drawLabel('Bill To', 56, 683);
           drawValue(loadRow.customer, 56, 660, 12, 36);
           drawLabel('Invoice Details', 332, 683);
-          drawValue(`Date: ${loadRow.loadDate || '-'}`, 332, 663, 9, 36);
+          drawValue(`Date: ${formatDocumentDate(loadRow.loadDate, '-')}`, 332, 663, 9, 36);
           let detailsY = 647;
           if (invoiceSettings.showLoadId) {
             drawValue(`Load ID: ${loadRow.id || '-'}`, 332, detailsY, 9, 36);
@@ -5887,7 +5888,7 @@ app.get('/api/loads/:id/customer-packet', authenticate, (req, res) => {
           drawLabel('Container', 42, 572);
           drawValue(loadRow.containerNumber, 42, 554, 10, 22);
           drawLabel('Appointment', 220, 572);
-          drawValue(loadRow.appointmentTime, 220, 554, 10, 28);
+          drawValue(formatDocumentAppointment(loadRow.appointmentTime), 220, 554, 10, 28);
           if (invoiceSettings.showRouteDetails) {
             drawLabel('Route', 42, 526);
             drawValue(`Pickup: ${loadRow.pickup || '-'}`, 42, 508, 9, 88);

@@ -1,3 +1,4 @@
+import { formatDocumentDate, formatDocumentAppointment } from '../../shared/documentDates.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -87,7 +88,7 @@ test('customer packet reads only verified EIR bytes, not JVXC or legacy document
  const file=await PDFDocument.create();file.addPage();const bytes=await file.save();
  const reads=[];
  const packet=route(db,"app.get('/api/loads/:id/customer-packet'","app.post('/api/loads/:id/documents'",{
-  PDFDocument,StandardFonts,rgb,customerPacketOrder:['OUT EIR','IN EIR','POD'],
+  PDFDocument,StandardFonts,rgb,formatDocumentDate,formatDocumentAppointment,customerPacketOrder:['OUT EIR','IN EIR','POD'],
   normalizePacketCategory:value=>String(value).toUpperCase(),companyProfileSelect:'id',
   sanitizePdfFilename:value=>value,parseInvoiceSettings:()=>({}),invoicePdfColor:()=>rgb(0,0,0),
   getMimeTypeFromName:()=> 'application/pdf',

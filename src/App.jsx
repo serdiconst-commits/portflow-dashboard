@@ -1,3 +1,4 @@
+import { formatDocumentDate } from '../shared/documentDates.js';
 import DispatchLfdAlerts from './components/DispatchLfdAlerts.jsx';
 import { hasAssignedDriver } from './utils/lfdAlerts.js';
 import DriverDropConfirmation from './components/DriverDropConfirmation.jsx';
@@ -231,9 +232,9 @@ const roleCanAccessView = (role, view) => {
   if (view === 'tenants') return normalizedRole === 'owner';
   if (fullAccessRoles.has(normalizedRole)) return true;
   if (normalizedRole === 'driver') return view === 'driver';
-  if (normalizedRole === 'payroll') return ['businessDashboard', 'payroll', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
+  if (normalizedRole === 'payroll') return ['businessDashboard', 'payroll', 'settlements', 'invoices', 'accounting', 'accountingReports', 'settings'].includes(view);
   if (normalizedRole === 'manager') {
-    return ['dispatch', 'live-tracking', 'completed', 'deleted-loads', 'drivers', 'customers', 'settlements', 'invoices', 'accounting', 'settings'].includes(view);
+    return ['dispatch', 'live-tracking', 'completed', 'deleted-loads', 'drivers', 'customers', 'settlements', 'invoices', 'accounting', 'accountingReports', 'settings'].includes(view);
   }
   if (normalizedRole === 'dispatcher') {
     return ['dispatch', 'live-tracking', 'completed', 'deleted-loads', 'drivers', 'customers', 'settings'].includes(view);
@@ -8216,7 +8217,7 @@ const handleDeleteUser = async (user) => {
       .map(
         (line) => `
           <tr>
-            <td>${escapeHtml(formatAppointmentTime(line.completedAt || line.appointmentTime) || '-')}</td>
+            <td>${escapeHtml(formatDocumentDate(line.completedAt || line.appointmentTime) || '-')}</td>
             <td>${escapeHtml(line.description || line.loadId || '-')}</td>
             <td>${escapeHtml(line.containerNumber || '-')}</td>
             <td>${escapeHtml(formatMiles(line.miles))}</td>
@@ -8234,7 +8235,7 @@ const handleDeleteUser = async (user) => {
             <td>${parseMoney(item.amount) < 0 ? 'Deduction' : 'Reimbursement'}</td>
             <td>${escapeHtml(item.description || '-')}</td>
             <td>${escapeHtml(item.addedBy || '-')}</td>
-            <td>${escapeHtml(formatDateTime(item.createdAt))}</td>
+            <td>${escapeHtml(formatDocumentDate(item.createdAt))}</td>
             <td>${escapeHtml(formatMoney(item.amount || 0))}</td>
           </tr>
         `
@@ -8247,7 +8248,7 @@ const handleDeleteUser = async (user) => {
           <tr>
             <td>${escapeHtml(item.description || '-')}</td>
             <td>${escapeHtml(item.addedBy || '-')}</td>
-            <td>${escapeHtml(formatDateTime(item.createdAt))}</td>
+            <td>${escapeHtml(formatDocumentDate(item.createdAt))}</td>
             <td>${escapeHtml(formatMoney(item.amount || 0))}</td>
           </tr>
         `
@@ -8281,7 +8282,7 @@ const handleDeleteUser = async (user) => {
           <h1>${escapeHtml(settlementCompanyName)}</h1>
           <p>Database Settlement Payroll Report</p>
           <p>Driver: ${escapeHtml(`${statement.driver?.id || ''} - ${statement.driver?.name || ''}`.trim())}</p>
-          <p>Period: ${escapeHtml(statement.settlement?.periodStart || '')} to ${escapeHtml(statement.settlement?.periodEnd || '')}</p>
+          <p>Period: ${escapeHtml(formatDocumentDate(statement.settlement?.periodStart))} to ${escapeHtml(formatDocumentDate(statement.settlement?.periodEnd))}</p>
           <p>Status: ${escapeHtml(activeBackendSettlement.status || statement.settlement?.status || 'Draft')}</p>
           <p>Statement Version: ${escapeHtml(statement.settlement?.version || activeBackendSettlement.version || 1)}</p>
 
@@ -9194,6 +9195,7 @@ const handlePrintInvoice = () => {
           <div>
             <h1>Invoice</h1>
             <p>Invoice Number: ${invoiceNumber}</p>
+            <p>Invoice Date: ${formatDocumentDate(selectedInvoiceLoad.loadDate)}</p>
             <p>Load ID: ${selectedInvoiceLoad.id || '—'}</p>
           </div>
         </div>
@@ -11918,6 +11920,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           ['deleted-loads', 'Deleted Loads'],
           ['settlements', 'Driver Payroll'],
           ['businessDashboard', t('businessDashboard')],
+          ['accountingReports', 'Revenue & Mileage'],
           ['customers', 'Customers'],
           ['drivers', 'Drivers'],
           ['invoices', 'Invoices'],
@@ -12017,6 +12020,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             drivers: 'Drivers',
             invoices: 'Invoices',
             accounting: 'Accounting',
+            accountingReports: 'Revenue & Mileage',
             businessDashboard: t('businessDashboard'),
             payroll: 'Driver Payroll',
             settings: 'Settings',
@@ -16678,39 +16682,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
           )}
         </section>
       )}
-      {activeView === 'accounting' && (
+      {activeView === 'accountingReports' && (
         <section className="panel accounting-panel">
-          <div className="panel-header">
-            <div>
-              <h3>Accounting</h3>
-              <span>{completedAccountingLoads.length} completed loads ready for billing</span>
-            </div>
-            <div className="details-actions">
-              <button type="button" className="primary-btn compact-btn">
-                Bill
-              </button>
-            </div>
-          </div>
-
-          <div className="accounting-summary-strip">
-            <div>
-              <span>Completed Loads</span>
-              <strong>{completedAccountingLoads.length}</strong>
-            </div>
-            <div>
-              <span>Total Load Revenue</span>
-              <strong>
-                {formatMoney(
-                  completedAccountingLoads.reduce((sum, load) => sum + getCustomerBillAmount(load), 0)
-                )}
-              </strong>
-            </div>
-            <div>
-              <span>Saved Invoices</span>
-              <strong>{savedInvoices.length}</strong>
-            </div>
-          </div>
-
+          <div className="panel-header"><div><h3>Revenue &amp; Mileage</h3><p className="panel-subtitle">Revenue, broker balances and annual driver miles</p></div><button type="button" className="secondary-btn compact-btn" onClick={() => setActiveView('accounting')}>Open Accounting</button></div>
           <div className="accounting-fuel-panel">
             <div className="panel-header">
               <div>
@@ -16877,6 +16851,42 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <p>No completed loads with dates for {mileageReportYear || 'this year'} yet.</p>
               </div>
             )}
+          </div>
+
+        </section>
+      )}
+      {activeView === 'accounting' && (
+        <section className="panel accounting-panel">
+          <div className="panel-header">
+            <div>
+              <h3>Accounting</h3>
+              <span>{completedAccountingLoads.length} completed loads ready for billing</span>
+            </div>
+            <div className="details-actions">
+              <button type="button" className="secondary-btn compact-btn" onClick={() => setActiveView('accountingReports')}>Revenue &amp; Mileage</button>
+              <button type="button" className="primary-btn compact-btn">
+                Bill
+              </button>
+            </div>
+          </div>
+
+          <div className="accounting-summary-strip">
+            <div>
+              <span>Completed Loads</span>
+              <strong>{completedAccountingLoads.length}</strong>
+            </div>
+            <div>
+              <span>Total Load Revenue</span>
+              <strong>
+                {formatMoney(
+                  completedAccountingLoads.reduce((sum, load) => sum + getCustomerBillAmount(load), 0)
+                )}
+              </strong>
+            </div>
+            <div>
+              <span>Saved Invoices</span>
+              <strong>{savedInvoices.length}</strong>
+            </div>
           </div>
 
           <div className="accounting-search-bar">
