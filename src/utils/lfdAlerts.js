@@ -34,3 +34,16 @@ export function getLfdTodayAlerts(loads = [], now = new Date(), timeZone = 'Amer
     !hasAssignedDriver(load) &&
     lfdCalendarDate(text(load.lastFreeDay) || load.lfd) === today);
 }
+
+// Compare calendar days, rather than elapsed hours, across daylight-saving changes.
+export function getLfdPriorityAlerts(loads = [], now = new Date(), timeZone = 'America/Chicago') {
+  const today = Date.parse(`${companyCalendarDate(now, timeZone)}T12:00:00Z`);
+  return loads.flatMap(load => {
+    const date = lfdCalendarDate(text(load.lastFreeDay) || load.lfd);
+    if (!date || load.deletedAt || hasAssignedDriver(load) ||
+      ['completed', 'delivered', 'cancelled', 'canceled'].includes(text(load.status).toLowerCase())) return [];
+    const days = Math.round((Date.parse(`${date}T12:00:00Z`) - today) / 86400000);
+    if (days > 1) return [];
+    return [{ load, date, days, priority: days < 0 ? 'overdue' : days === 0 ? 'today' : 'tomorrow' }];
+  }).sort((a, b) => a.days - b.days || text(a.load.containerNumber || a.load.id).localeCompare(text(b.load.containerNumber || b.load.id)));
+}

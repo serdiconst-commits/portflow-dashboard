@@ -35,3 +35,20 @@ test('date-only values and legacy missing-driver labels remain valid', () => {
     assert.equal(getLfdTodayAlerts([{ ...load, driver, lastFreeDay: '', lfd: '2026-10-01' }], today).length, 1);
   }
 });
+
+test('priority watch includes past, today and tomorrow, ordered by urgency and stable container order', async () => {
+  const { getLfdPriorityAlerts } = await import('../../src/utils/lfdAlerts.js');
+  const rows = ['2026-10-02','2026-09-28','2026-10-01','2026-10-03'].map((lastFreeDay,i)=>({...load,id:String(i),lastFreeDay}));
+  assert.deepEqual(getLfdPriorityAlerts(rows,today).map(a=>[a.days,a.priority]),[[-3,'overdue'],[0,'today'],[1,'tomorrow']]);
+  assert.equal(getLfdPriorityAlerts(rows.map(l=>({...l,driver:'DRV-A'})),today).length,0);
+  assert.equal(getLfdPriorityAlerts(rows.map(l=>({...l,status:'Completed'})),today).length,0);
+  assert.equal(getLfdPriorityAlerts([{...load,lastFreeDay:'invalid'}],today).length,0);
+});
+test('priority watch respects DST calendar boundaries and restores removed assignments', async () => {
+  const { getLfdPriorityAlerts } = await import('../../src/utils/lfdAlerts.js');
+  const day = new Date('2026-11-01T18:00:00Z');
+  const row = {...load,lastFreeDay:'2026-11-02'};
+  assert.equal(getLfdPriorityAlerts([row],day)[0].days,1);
+  assert.equal(getLfdPriorityAlerts([{...row,driver:'DRV-A'}],day).length,0);
+  assert.equal(getLfdPriorityAlerts([{...row,driver:'',currentMove:{driverId:'DRV-A'}}],day).length,1);
+});
