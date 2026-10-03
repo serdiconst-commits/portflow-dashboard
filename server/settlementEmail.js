@@ -96,7 +96,7 @@ export async function buildSettlementPdf(settlement, company = {}) {
   row(['Date', 'Container / Load', 'Movement & Route', 'Pay'], [76, 120, 250, 80], true);
   (statement.loads || []).forEach((line, index) => row([
     line.completedAt?.slice?.(0, 10) || line.appointmentTime?.slice?.(0, 10) || '',
-    line.containerNumber || line.loadId || '',
+    [clean(line.containerNumber), line.loadId ? `Load # ${line.loadId}` : ''].filter(Boolean).join(' / ') || '—',
     [clean(line.moveType).replaceAll('_', ' '), [line.moveOrigin, line.moveDestination].filter(Boolean).join(' to ') || line.description].filter(Boolean).join(' - '),
     money(line.payAmount),
   ], [76, 120, 250, 80], false, index % 2 === 1));

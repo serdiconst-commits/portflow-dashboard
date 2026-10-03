@@ -10,10 +10,12 @@ test('installed Driver receives Completed without POD as terminal while stored s
   const db = await createDb();
   t.after(() => new Promise(resolve => db.close(resolve)));
   await dbRun(db, 'ALTER TABLE loads ADD COLUMN isDriverReleased INTEGER DEFAULT 1');
+  await dbRun(db, 'ALTER TABLE loads ADD COLUMN appointmentNumber TEXT');
   for (const [id, company, driver, status] of [
     ['OWN','COMP-A','DRV-A','Completed'], ['ACTIVE','COMP-A','DRV-A','Dispatched'],
     ['FOREIGN','COMP-B','DRV-A','Completed'], ['OTHER-DRIVER','COMP-A','DRV-B','Completed'],
   ]) await dbRun(db, 'INSERT INTO loads(id,companyId,driver,status) VALUES (?,?,?,?)', [id,company,driver,status]);
+  await dbRun(db, "UPDATE loads SET appointmentNumber = '001-APT' WHERE id = 'ACTIVE'");
   let handler;
   vm.runInNewContext(route, {
     app: { get: (_path,...handlers) => { handler=handlers.at(-1); } }, db, authenticate() {}, console,
@@ -24,5 +26,6 @@ test('installed Driver receives Completed without POD as terminal while stored s
   assert.deepEqual(loads.map(load=>load.id).sort(), ['ACTIVE','OWN']);
   assert.equal(loads.find(load=>load.id==='OWN').status,'Delivered');
   assert.equal(loads.find(load=>load.id==='ACTIVE').status,'Dispatched');
+  assert.equal(loads.find(load=>load.id==='ACTIVE').appointmentNumber,'001-APT');
   assert.equal((await dbGet(db,"SELECT status FROM loads WHERE id='OWN'")).status,'Completed');
 });

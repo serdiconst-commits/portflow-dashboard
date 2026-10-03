@@ -201,7 +201,7 @@ async function getSettlementParts(db, companyId, settlementId) {
        sl.source,
        l.appointmentTime,
        l.customer,
-       l.containerNumber,
+       COALESCE(NULLIF(TRIM(l.containerNumber), ''), container.containerNumber) AS containerNumber,
        l.referenceNumber,
        l.bookingNumber,
        l.miles,
@@ -210,8 +210,10 @@ async function getSettlementParts(db, companyId, settlementId) {
        COALESCE(NULLIF(route.destination, ''), lm.destination) AS moveDestination,
        lm.completedAt AS moveCompletedAt
      FROM settlement_loads sl
-     LEFT JOIN loads l ON l.id = sl.loadId
-     LEFT JOIN load_moves lm ON lm.id = sl.moveId
+     JOIN settlements owner ON owner.id = sl.settlementId
+     LEFT JOIN load_moves lm ON lm.id = sl.moveId AND lm.companyId = owner.companyId
+     LEFT JOIN loads l ON l.id = COALESCE(NULLIF(sl.loadId, ''), lm.loadId) AND l.companyId = owner.companyId
+     LEFT JOIN settlement_line_containers container ON container.settlementLoadId = sl.id AND container.companyId = owner.companyId
      LEFT JOIN settlement_line_routes route ON route.settlementLoadId = sl.id AND route.companyId = ?
      WHERE sl.settlementId = ?
      ORDER BY COALESCE(lm.completedAt, l.appointmentTime, sl.createdAt), sl.createdAt`,
@@ -365,6 +367,18 @@ export async function getSettlement(db, companyId, settlementId) {
     try { statement=JSON.parse(parts.settlement.statementJson); } catch { /* Legacy statements use their saved lines. */ }
     statement.auditTrail=buildStatement(parts).auditTrail;
   }
+  // Repair missing display data only; never recalculate or overwrite a saved snapshot.
+  statement.loads = (statement.loads || []).map(line => {
+    if (String(line.containerNumber || '').trim()) return line;
+    const matches = parts.loads.filter(row => line.settlementLoadId
+      ? row.settlementLoadId === line.settlementLoadId
+      : line.moveId ? row.moveId === line.moveId : line.loadId && row.loadId === line.loadId);
+    const containers = [...new Set(matches.map(row => String(row.containerNumber || '').trim()).filter(Boolean))];
+    if (containers.length === 1) return { ...line, containerNumber: containers[0] };
+    // Older manual entries sometimes stored the container in the reason field.
+    const mentioned = [...new Set(`${line.loadId || ''} ${line.description || ''}`.toUpperCase().match(/\b[A-Z]{3}[UJZ]\d{7}\b/g) || [])];
+    return !line.moveId && mentioned.length === 1 ? { ...line, containerNumber: mentioned[0] } : line;
+  });
   const status=info.payment?'Paid':normalizeSettlementStatus(parts.settlement.status);
   statement.settlement={...statement.settlement,status,version:parts.settlement.version,correctionOf:info.correction?.parentId||'',payment:info.payment};
   return {...parts.settlement,status,statement,...info};
@@ -590,6 +604,8 @@ export async function addSettlementLoad(db, companyId, settlementId, input = {},
 
   const reason=String(input.description||'').trim();
   if(!reason)fail('A reason is required for a manual payment.',400);
+  const containerNumber = String(input.containerNumber ?? '').trim().toUpperCase();
+  if (containerNumber.length > 30) fail('Container number must be 30 characters or fewer.', 400);
   const origin = String(input.pickupLocation ?? '').trim();
   const destination = String(input.deliveryLocation ?? '').trim();
   if (origin.length > 500 || destination.length > 500) fail('Locations must be 500 characters or fewer.', 400);
@@ -612,6 +628,9 @@ export async function addSettlementLoad(db, companyId, settlementId, input = {},
     await dbRun(db,`INSERT INTO settlement_loads(id,settlementId,payAmount,movesCount,description,source,createdAt) VALUES(?,?,?,1,?,?,?)`,[lineId,settlementId,roundMoney(pay),reason,info.correction?'correction':'manual',new Date().toISOString()]);
   }
 
+  if (containerNumber) {
+    await dbRun(db, 'INSERT INTO settlement_line_containers(settlementLoadId,companyId,containerNumber) VALUES(?,?,?)', [lineId,companyId,containerNumber]);
+  }
   if (origin || destination) {
     await dbRun(db, 'INSERT INTO settlement_line_routes(settlementLoadId,companyId,origin,destination) VALUES(?,?,?,?)', [lineId,companyId,origin,destination]);
   }
@@ -645,6 +664,16 @@ export async function updateSettlementLoad(db, companyId, settlementId, settleme
   const movesCount = Math.max(1, Number.parseInt(input.movesCount || existing.movesCount || 1, 10) || 1);
   const description = input.description !== undefined ? String(input.description || '') : existing.description;
 
+  const containerNumber = input.containerNumber === undefined ? undefined : String(input.containerNumber || '').trim().toUpperCase();
+  if (containerNumber !== undefined && (existing.loadId || existing.moveId)) fail('Update the container on the linked load.', 400);
+  if (containerNumber?.length > 30) fail('Container number must be 30 characters or fewer.', 400);
+  await ensureLifecycle(db);
+  await dbRun(db, 'BEGIN IMMEDIATE');
+  try {
+  if (containerNumber !== undefined) {
+    await dbRun(db, `INSERT INTO settlement_line_containers(settlementLoadId,companyId,containerNumber) VALUES(?,?,?)
+      ON CONFLICT(settlementLoadId) DO UPDATE SET containerNumber=excluded.containerNumber WHERE companyId=excluded.companyId`, [settlementLoadId,companyId,containerNumber]);
+  }
   await dbRun(
     db,
     `UPDATE settlement_loads
@@ -658,10 +687,16 @@ export async function updateSettlementLoad(db, companyId, settlementId, settleme
     settlementId,
     'UPDATE_LOAD_PAY',
     existing,
-    { ...existing, payAmount, movesCount, description },
+    { ...existing, payAmount, movesCount, description, ...(containerNumber === undefined ? {} : {containerNumber}) },
     changedBy
   );
-  return recalculateSettlement(db, companyId, settlementId, changedBy);
+  const result = await recalculateSettlement(db, companyId, settlementId, changedBy);
+  await dbRun(db, 'COMMIT');
+  return result;
+  } catch (error) {
+    await dbRun(db, 'ROLLBACK');
+    throw error;
+  }
 }
 
 export async function removeSettlementLoad(db, companyId, settlementId, settlementLoadId, changedBy = '') {
