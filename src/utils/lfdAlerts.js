@@ -27,9 +27,19 @@ export function companyCalendarDate(now = new Date(), timeZone = 'America/Chicag
   return ['year', 'month', 'day'].map(type => parts.find(part => part.type === type).value).join('-');
 }
 
+// A completed yard/customer drop resolves the port pickup deadline, even when
+// the next delivery/return leg is unassigned or the overall status changes.
+export function hasCompletedLfdDrop(load = {}) {
+  const normalized = value => text(value).toLowerCase();
+  const complete = value => ['complete', 'completed'].includes(normalized(value));
+  return normalized(load.status) === 'dropped' || complete(load.dropMoveStatus) ||
+    (Array.isArray(load.moves) && load.moves.some(move =>
+      ['drop', 'pre_pull'].includes(normalized(move.moveType)) && complete(move.status)));
+}
+
 export function getLfdTodayAlerts(loads = [], now = new Date(), timeZone = 'America/Chicago') {
   const today = companyCalendarDate(now, timeZone);
-  return loads.filter(load => !load.deletedAt &&
+  return loads.filter(load => !load.deletedAt && !hasCompletedLfdDrop(load) &&
     !['completed', 'delivered', 'cancelled', 'canceled'].includes(text(load.status).toLowerCase()) &&
     !hasAssignedDriver(load) &&
     lfdCalendarDate(text(load.lastFreeDay) || load.lfd) === today);
@@ -40,7 +50,7 @@ export function getLfdPriorityAlerts(loads = [], now = new Date(), timeZone = 'A
   const today = Date.parse(`${companyCalendarDate(now, timeZone)}T12:00:00Z`);
   return loads.flatMap(load => {
     const date = lfdCalendarDate(text(load.lastFreeDay) || load.lfd);
-    if (!date || load.deletedAt || hasAssignedDriver(load) ||
+    if (!date || load.deletedAt || hasAssignedDriver(load) || hasCompletedLfdDrop(load) ||
       ['completed', 'delivered', 'cancelled', 'canceled'].includes(text(load.status).toLowerCase())) return [];
     const days = Math.round((Date.parse(`${date}T12:00:00Z`) - today) / 86400000);
     if (days > 1) return [];

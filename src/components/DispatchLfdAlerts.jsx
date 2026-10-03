@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { getLfdPriorityAlerts } from '../utils/lfdAlerts.js';
 import './DispatchLfdAlerts.css';
 
@@ -9,6 +9,13 @@ export default function DispatchLfdAlerts({ loads, timeZone, onOpenLoad }) {
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
   const panelId = useId();
+  const reviewButton = useRef(null);
+  const closePanel = () => {
+    setExpanded(false);
+    setFilter('all');
+    setQuery('');
+    reviewButton.current?.focus();
+  };
   useEffect(() => {
     const refresh = () => setNow(new Date());
     const timer = setInterval(refresh, 30000);
@@ -21,13 +28,13 @@ export default function DispatchLfdAlerts({ loads, timeZone, onOpenLoad }) {
   const visible = alerts.filter(a => (filter === 'all' || a.priority === filter) &&
     [a.load.id, a.load.containerNumber, a.load.customer, a.load.pickupLocationName, a.load.pickup].some(value => String(value || '').toLowerCase().includes(needle)));
   if (!alerts.length) return null;
-  return <section className="dispatch-lfd-alerts" aria-label="LFD watch">
+  return <section className="dispatch-lfd-alerts" aria-label="LFD watch" onKeyDown={e => { if (expanded && e.key === 'Escape') { e.stopPropagation(); closePanel(); } }}>
     <div className="lfd-watch-bar">
       <div className="lfd-watch-title"><span className={`lfd-watch-icon ${counts.overdue || counts.today ? 'urgent' : ''}`} aria-hidden="true">!</span><strong>LFD watch</strong><span className="lfd-watch-total" role="status">{alerts.length} unassigned</span></div>
       <div className="lfd-watch-counts" aria-label="Filter LFD alerts">
         {groups.map(([key, label]) => <button key={key} type="button" className={`lfd-watch-count ${key}`} aria-pressed={expanded && filter === key} onClick={() => { setFilter(key); setQuery(''); setExpanded(true); }}><span>{label}</span><b>{counts[key]}</b></button>)}
       </div>
-      <button type="button" className="lfd-watch-toggle" aria-expanded={expanded} aria-controls={panelId} onClick={() => { if (!expanded) { setFilter('all'); setQuery(''); } setExpanded(!expanded); }}>{expanded ? 'Collapse' : 'Review'} <span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button>
+      <button ref={reviewButton} type="button" className="lfd-watch-toggle" aria-expanded={expanded} aria-controls={panelId} onClick={() => { if (expanded) closePanel(); else { setFilter('all'); setQuery(''); setExpanded(true); } }}>{expanded ? 'Close' : 'Review'} <span aria-hidden="true">{expanded ? '×' : '⌄'}</span></button>
     </div>
     {expanded && <div id={panelId} className="lfd-watch-panel">
       <div className="lfd-watch-tools">
@@ -44,7 +51,7 @@ export default function DispatchLfdAlerts({ loads, timeZone, onOpenLoad }) {
         </li>)}
       </ul>
       {!visible.length && <p className="lfd-watch-empty">No unassigned containers match this view.</p>}
-      <p className="lfd-watch-hint">Assign a driver to clear the alert. Removing the driver brings it back. Dates follow your company’s time zone.</p>
+      <div className="lfd-watch-footer"><p className="lfd-watch-hint">Assign a driver to clear the alert. It returns if the driver is removed before a yard or customer drop. Dates follow your company’s time zone.</p><button type="button" className="lfd-watch-toggle" onClick={closePanel}>Close <span aria-hidden="true">×</span></button></div>
     </div>}
   </section>;
 }

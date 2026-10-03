@@ -52,3 +52,36 @@ test('priority watch respects DST calendar boundaries and restores removed assig
   assert.equal(getLfdPriorityAlerts([{...row,driver:'DRV-A'}],day).length,0);
   assert.equal(getLfdPriorityAlerts([{...row,driver:'',currentMove:{driverId:'DRV-A'}}],day).length,1);
 });
+
+test('yard and customer drops clear both LFD lists without an assigned driver', async () => {
+  const { getLfdPriorityAlerts } = await import('../../src/utils/lfdAlerts.js');
+  for (const dropType of ['Yard', 'Customer']) {
+    const dropped = {...load, driver:'', status:'Dropped', dropType};
+    assert.equal(getLfdTodayAlerts([dropped],today).length,0);
+    for (const lastFreeDay of ['2026-09-30','2026-10-01','2026-10-02']) {
+      assert.equal(getLfdPriorityAlerts([{...dropped,lastFreeDay}],today).length,0);
+    }
+  }
+});
+test('completed drop history keeps alert cleared after next driver assignment and removal', async () => {
+  const { getLfdPriorityAlerts } = await import('../../src/utils/lfdAlerts.js');
+  for (const moveType of ['PRE_PULL','DROP']) {
+    for (const driver of ['DRV-B','']) {
+      const nextLeg = {...load,status:'Dispatched',driver,moves:[
+        {moveType,status:'Completed',driverId:'DRV-A'},
+        {moveType:'DELIVERY',status:driver?'Assigned':'Planned',driverId:driver},
+      ]};
+      assert.equal(getLfdTodayAlerts([nextLeg],today).length,0);
+      assert.equal(getLfdPriorityAlerts([nextLeg],today).length,0);
+    }
+  }
+  assert.equal(getLfdPriorityAlerts([{...load,dropMoveStatus:'Complete'}],today).length,0);
+});
+test('planned or cancelled drops do not hide a pickup deadline', async () => {
+  const { getLfdPriorityAlerts } = await import('../../src/utils/lfdAlerts.js');
+  for (const status of ['Planned','Assigned','Cancelled']) {
+    const notDropped = {...load,dropType:'Yard',dropLocation:'Main Yard',dropDateTime:'2026-10-01T10:00:00Z',dropMoveStatus:status,moves:[{moveType:'PRE_PULL',status}]};
+    assert.equal(getLfdTodayAlerts([notDropped],today).length,1);
+    assert.equal(getLfdPriorityAlerts([notDropped],today).length,1);
+  }
+});

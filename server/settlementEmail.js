@@ -1,3 +1,4 @@
+import { formatDocumentDate } from '../shared/documentDates.js';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 const money = (value) => `$${Number(value || 0).toFixed(2)}`;
@@ -84,18 +85,18 @@ export async function buildSettlementPdf(settlement, company = {}) {
   drawText(page, 'STATUS', 468, y, { size: 7, font: bold, color: slate });
   y -= 16;
   drawText(page, `${statement.driver?.id || settlement.driverId} - ${statement.driver?.name || ''}`, 42, y, { size: 10, font: bold, color: navy });
-  drawText(page, `${settlement.periodStart} to ${settlement.periodEnd}`, 264, y, { size: 9, font: bold, color: navy });
+  drawText(page, `${formatDocumentDate(settlement.periodStart)} to ${formatDocumentDate(settlement.periodEnd)}`, 264, y, { size: 9, font: bold, color: navy });
   drawText(page, settlement.status || statement.settlement?.status || 'Draft', 468, y, { size: 9, font: bold, color: teal });
   y -= 34;
 
   drawText(page, `Version ${settlement.version || statement.settlement?.version || 1}${statement.settlement?.correctionOf ? ' | Supplemental correction' : ''}`, 42, y, {size:9,font:regular,color:slate});
   y -= 18;
-  if(statement.settlement?.payment){drawText(page, `Payment recorded: ${statement.settlement.payment.paidOn} | ${statement.settlement.payment.method} | ${String(statement.settlement.payment.reference).slice(0,45)}`,42,y,{size:8,font:regular,color:slate});y-=18;}
+  if(statement.settlement?.payment){drawText(page, `Payment recorded: ${formatDocumentDate(statement.settlement.payment.paidOn)} | ${statement.settlement.payment.method} | ${String(statement.settlement.payment.reference).slice(0,45)}`,42,y,{size:8,font:regular,color:slate});y-=18;}
   drawText(page, 'COMPLETED MOVES & PAY', 42, y, { size: 10, font: bold, color: navy });
   y -= 20;
   row(['Date', 'Container / Load', 'Movement & Route', 'Pay'], [76, 120, 250, 80], true);
   (statement.loads || []).forEach((line, index) => row([
-    line.completedAt?.slice?.(0, 10) || line.appointmentTime?.slice?.(0, 10) || '',
+    formatDocumentDate(line.completedAt || line.appointmentTime, ''),
     [clean(line.containerNumber), line.loadId ? `Load # ${line.loadId}` : ''].filter(Boolean).join(' / ') || '—',
     [clean(line.moveType).replaceAll('_', ' '), [line.moveOrigin, line.moveDestination].filter(Boolean).join(' to ') || line.description].filter(Boolean).join(' - '),
     money(line.payAmount),
@@ -162,8 +163,8 @@ export async function sendSettlementEmail({ settlement, company, driver, pdfBuff
     body: JSON.stringify({
       from: process.env.DRIVER_COMPLIANCE_FROM_EMAIL,
       to: [driver.email],
-      subject: `Driver settlement ${settlement.periodStart} to ${settlement.periodEnd}`,
-      html: `<div style="font-family:Arial,sans-serif;color:#0b1f33;max-width:560px"><h2 style="margin:0 0 8px">Your driver settlement is ready</h2><p>Hello ${clean(driver.name, 'Driver')},</p><p>Your ${clean(settlement.status, 'reviewed').toLowerCase()} driver settlement for <strong>${settlement.periodStart} to ${settlement.periodEnd}</strong> is attached.</p><div style="background:#f0faf9;border-left:4px solid #0b8c80;padding:14px 18px;margin:18px 0"><span style="color:#64748b">Net pay</span><br><strong style="font-size:24px">${money(settlement.statement?.totals?.netPay)}</strong></div><p>Please contact payroll if you have any questions.</p><p>${clean(company.settlementCompanyName || company.name, 'PortFlow')}</p></div>`,
+      subject: `Driver settlement ${formatDocumentDate(settlement.periodStart)} to ${formatDocumentDate(settlement.periodEnd)}`,
+      html: `<div style="font-family:Arial,sans-serif;color:#0b1f33;max-width:560px"><h2 style="margin:0 0 8px">Your driver settlement is ready</h2><p>Hello ${clean(driver.name, 'Driver')},</p><p>Your ${clean(settlement.status, 'reviewed').toLowerCase()} driver settlement for <strong>${formatDocumentDate(settlement.periodStart)} to ${formatDocumentDate(settlement.periodEnd)}</strong> is attached.</p><div style="background:#f0faf9;border-left:4px solid #0b8c80;padding:14px 18px;margin:18px 0"><span style="color:#64748b">Net pay</span><br><strong style="font-size:24px">${money(settlement.statement?.totals?.netPay)}</strong></div><p>Please contact payroll if you have any questions.</p><p>${clean(company.settlementCompanyName || company.name, 'PortFlow')}</p></div>`,
       attachments: [{
         filename: `Settlement-${clean(driver.id || settlement.driverId)}-${settlement.periodStart}-${settlement.periodEnd}.pdf`,
         content: pdfBuffer.toString('base64'),

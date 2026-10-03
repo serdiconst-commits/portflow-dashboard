@@ -30,5 +30,7 @@
 .lfd-watch-assign { border:1px solid var(--pf-border,#dce3eb); border-radius:7px; padding:6px 9px; min-height:32px; background:var(--pf-surface,#fff); color:var(--pf-teal-text,#117665); white-space:nowrap; }
 .lfd-watch-assign:hover { background:var(--pf-teal-bg,#edf8f5); }
 .lfd-watch-hint,.lfd-watch-empty { margin:0; padding:9px 12px; font-size:11px; color:var(--pf-muted,#64748b); }
-.lfd-watch-hint { border-top:1px solid var(--pf-border,#dce3eb); }
+.lfd-watch-footer { display:flex; align-items:center; gap:8px; padding-right:12px; border-top:1px solid var(--pf-border,#dce3eb); }
+.lfd-watch-footer .lfd-watch-hint { flex:1; }
+.lfd-watch-footer button { flex-shrink:0; min-height:40px; }
 @media(max-width:600px) { .lfd-watch-bar { gap:6px; padding:8px; }.lfd-watch-title { flex:1; }.lfd-watch-counts { order:3; width:100%; margin:0; }.lfd-watch-count { flex:1; justify-content:center; min-height:38px; }.lfd-watch-list li { gap:7px; flex-wrap:wrap; }.lfd-watch-due { flex-basis:88px; }.lfd-watch-list time { display:none; }.lfd-watch-assign { min-height:40px; font-size:11px!important; }.lfd-watch-tools { gap:5px; }.lfd-watch-tools input { flex:1; width:0; }.lfd-watch-tools > span { display:none; } }
