@@ -1,6 +1,6 @@
 const labels = {
   loadDate: 'Load date', customer: 'Customer', referenceNumber: 'Reference #',
-  poNumber: 'PO #', pickupNumber: 'Pickup #', reservationNumber: 'Reservation #',
+  poNumber: 'PO #', pickupNumber: 'Pickup #', reservationNumber: 'Reservation #', appointmentNumber: 'Appointment #',
   returnNumber: 'Return #', pod: 'POD', driver: 'Driver', truck: 'Truck',
   pickup: 'Pickup location', delivery: 'Delivery location', deliveryType: 'Delivery type',
   workflowType: 'Load flow', appointmentTime: 'Appointment', eta: 'ETA',

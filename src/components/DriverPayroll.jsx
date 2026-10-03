@@ -493,6 +493,7 @@ export default function DriverPayroll({
                         {
                           payAmount: Number(f.get("pay")),
                           description: String(f.get("reason")).trim(),
+                          ...(!editingLine.loadId && !editingLine.moveId ? { containerNumber: String(f.get("containerNumber") || "").trim() } : {}),
                         },
                       );
                       setEditingLine(null);
@@ -512,6 +513,10 @@ export default function DriverPayroll({
                       defaultValue={editingLine.payAmount}
                     />
                   </label>
+                  {!editingLine.loadId && !editingLine.moveId && <label>
+                    Container #
+                    <input name="containerNumber" maxLength={30} defaultValue={editingLine.containerNumber || ""} />
+                  </label>}
                   <label>
                     Reason
                     <input name="reason" required />
@@ -648,6 +653,7 @@ export default function DriverPayroll({
                               await mutate("/loads", "POST", {
                                 payAmount: pay,
                                 description: String(f.get("reason")).trim(),
+                                containerNumber: String(f.get("containerNumber") || "").trim(),
                                 pickupLocation: String(f.get("pickupLocation")).trim(),
                                 deliveryLocation: String(f.get("deliveryLocation")).trim(),
                               });
@@ -666,6 +672,9 @@ export default function DriverPayroll({
                           </label>
                           <label>
                             Reason / Load #<input name="reason" required />
+                          </label>
+                          <label>
+                            Container #<input name="containerNumber" maxLength={30} placeholder="MRKU1234567" />
                           </label>
                           <PayrollRouteFields locations={locations} />
                           <button disabled={busy} className="primary-btn">
@@ -719,6 +728,10 @@ export default function DriverPayroll({
                       defaultValue={active.periodEnd}
                     />
                   </label>
+                  {!editingLine.loadId && !editingLine.moveId && <label>
+                    Container #
+                    <input name="containerNumber" maxLength={30} defaultValue={editingLine.containerNumber || ""} />
+                  </label>}
                   <label>
                     Reason
                     <input name="reason" required />
@@ -805,7 +818,7 @@ export default function DriverPayroll({
                         <tr key={line.settlementLoadId}>
                           <td>
                             <strong>{line.loadId || line.description}</strong>
-                            <small>{line.containerNumber}</small>
+                            <small>Container #: {line.containerNumber || "—"}</small>
                           </td>
                           <td>
                             {line.moveType?.replaceAll("_", " ") || "Load"}

@@ -1,19 +1,41 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Capacitor } from '@capacitor/core';
+import { bindIosSignatureTouch } from '../utils/iosSignatureTouch.js';
 import './DriverPodCapture.css';
 
 function SignaturePad({ value, onChange, disabled }) {
   const drawing = useRef(false);
+  const surface = useRef(null);
+  const latest = useRef({ disabled, onChange });
+  latest.current = { disabled, onChange };
+  const iosTouch = Capacitor.getPlatform() === 'ios' || /iPhone|iPod/.test(navigator.userAgent);
+  useEffect(() => {
+    if (!iosTouch) return;
+    return bindIosSignatureTouch(surface.current, {
+      disabled: () => latest.current.disabled,
+      start: p => {
+        const next = [...strokes.current, [p]];
+        strokes.current = next;
+        latest.current.onChange(next);
+      },
+      move: p => {
+        const next = strokes.current.map((s, i) => i === strokes.current.length - 1 ? [...s, p] : s);
+        strokes.current = next;
+        latest.current.onChange(next);
+      },
+    });
+  }, [iosTouch]);
   const strokes = useRef(value);
   useEffect(() => { strokes.current = value; }, [value]);
   const point = e => {
     const rect = e.currentTarget.getBoundingClientRect();
     return {x: Math.max(0, Math.min(1, (e.clientX-rect.left)/rect.width)), y: Math.max(0, Math.min(1, (e.clientY-rect.top)/rect.height))};
   };
-  return <div className="pod-signature-wrap">
+  return <div ref={surface} className={`pod-signature-wrap${iosTouch ? ' pod-signature-ios' : ''}`}>
     <svg viewBox="0 0 600 220" preserveAspectRatio="none" role="img" aria-label="Receiver signature pad. Draw with a finger, stylus, or mouse."
       className={`pod-signature-pad${disabled ? ' locked' : ''}`}
-      onPointerDown={e => { if (disabled || e.button > 0) return; e.preventDefault(); drawing.current = true; e.currentTarget.setPointerCapture(e.pointerId); const next = [...strokes.current, [point(e)]]; strokes.current = next; onChange(next); }}
+      onPointerDown={e => { if (disabled || e.button > 0 || (iosTouch && e.pointerType === 'touch')) return; e.preventDefault(); drawing.current = true; e.currentTarget.setPointerCapture(e.pointerId); const next = [...strokes.current, [point(e)]]; strokes.current = next; onChange(next); }}
       onPointerMove={e => { if (!drawing.current || disabled) return; const next = strokes.current.map((s,i) => i === strokes.current.length-1 ? [...s,point(e)] : s); strokes.current = next; onChange(next); }}
       onPointerUp={() => { drawing.current = false; }} onPointerCancel={() => { drawing.current = false; }}>
       <line x1="28" x2="572" y1="182" y2="182" stroke="#d4dfe6" strokeDasharray="5 5" />

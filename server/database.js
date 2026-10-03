@@ -463,6 +463,7 @@ db.run(`
   pickupNumber TEXT,
   returnNumber TEXT,
   reservationNumber TEXT,
+  appointmentNumber TEXT,
   driver TEXT,
   truck TEXT,
   pickup TEXT,
@@ -565,6 +566,12 @@ db.run(`ALTER TABLE loads ADD COLUMN returnNumber TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN reservationNumber TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding reservationNumber column:', err.message);
+  }
+});
+
+db.run(`ALTER TABLE loads ADD COLUMN appointmentNumber TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding appointmentNumber column:', err.message);
   }
 });
 

@@ -939,6 +939,7 @@ const getMissingDriverDocuments = (load) => {
     poNumber: '',
     pickupNumber: '',
     reservationNumber: '',
+    appointmentNumber: '',
     returnNumber: '',
     returnLocation: '',
     nextMoveType: '',
@@ -10913,6 +10914,10 @@ const renderDriverLoadCard = (load) => {
           <strong>{load.pickupNumber || '-'}</strong>
         </div>
         <div className="driver-info-item">
+          <span>Appointment #</span>
+          <strong>{load.appointmentNumber || '-'}</strong>
+        </div>
+        <div className="driver-info-item">
           <span>Reservation</span>
           <strong>{load.reservationNumber || '-'}</strong>
         </div>
@@ -11612,6 +11617,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     fontSize: '14px',
   }}
 >
+  <p>🔢 <strong>Appointment #:</strong> {load.appointmentNumber || '-'}</p>
   <p>🔢 <strong>Reservation #:</strong> {load.reservationNumber || '-'}</p>
   <p>
     📦 <strong>Delivery Location:</strong><br />
@@ -12483,6 +12489,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   value={newLoad.reservationNumber || ''}
   onChange={handleInputChange}
 />
+<input
+  type="text"
+  name="appointmentNumber"
+  placeholder="Appointment #"
+  value={newLoad.appointmentNumber || ''}
+  onChange={handleInputChange}
+/>
 </div>
 
 <div
@@ -13309,6 +13322,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   {shortLocation(load.returnLocation)}
 </div>
  
+ <p>🔢<strong>Appointment #:</strong> {load.appointmentNumber || '-'}</p>
  <p>🔢<strong>Return #:</strong> {load.returnNumber || '-'}</p>
 {load.status === 'Dropped' && (
   <p>
@@ -13557,6 +13571,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <input type="text" name="poNumber" placeholder="PO #" value={editingLoad?.poNumber || ''} onChange={handleEditInputChange} />
                           <input type="text" name="pickupNumber" placeholder="Pick Up #" value={editingLoad?.pickupNumber || ''} onChange={handleEditInputChange} />
                           <input type="text" name="reservationNumber" placeholder="Reservation #" value={editingLoad.reservationNumber || ''} onChange={handleEditInputChange} />
+                          <input type="text" name="appointmentNumber" placeholder="Appointment #" value={editingLoad.appointmentNumber || ''} onChange={handleEditInputChange} />
                           <input type="text" name="sealNumber" placeholder="Seal #" value={editingLoad.sealNumber} onChange={handleEditInputChange} />
                           <input type="text" name="returnNumber" placeholder="Return #" value={editingLoad.returnNumber || ''} onChange={handleEditInputChange} />
                           <input type="text" name="bookingNumber" placeholder="Booking Number" value={editingLoad.bookingNumber || ''} onChange={handleEditInputChange} />
@@ -14182,6 +14197,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 <div className="detail-box">
   <span>Reservation #</span>
   <strong>{selectedLoad.reservationNumber || '—'}</strong>
+</div>
+<div className="detail-box">
+  <span>Appointment #</span>
+  <strong>{selectedLoad.appointmentNumber || '—'}</strong>
 </div>
                         <div className="detail-box"><span>Container Number</span><strong>{selectedLoad.containerNumber || '—'}</strong></div>
                         <div className="detail-box"><span>Container Size</span><strong>{selectedLoad.containerSize || '—'}</strong></div>
@@ -16375,6 +16394,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       <input name="poNumber" placeholder="PO #" value={editingLoad.poNumber || ''} onChange={handleEditInputChange} />
                       <input name="pickupNumber" placeholder="Pick Up #" value={editingLoad.pickupNumber || ''} onChange={handleEditInputChange} />
                       <input name="reservationNumber" placeholder="Reservation #" value={editingLoad.reservationNumber || ''} onChange={handleEditInputChange} />
+                      <input name="appointmentNumber" placeholder="Appointment #" value={editingLoad.appointmentNumber || ''} onChange={handleEditInputChange} />
                       <input name="sealNumber" placeholder="Seal #" value={editingLoad.sealNumber || ''} onChange={handleEditInputChange} />
                       <input name="returnNumber" placeholder="Return #" value={editingLoad.returnNumber || ''} onChange={handleEditInputChange} />
                       <input name="bookingNumber" placeholder="Booking Number" value={editingLoad.bookingNumber || ''} onChange={handleEditInputChange} />
