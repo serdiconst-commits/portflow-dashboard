@@ -19,6 +19,24 @@ test('receiving dates use Houston time in summer and winter, preserving wall tim
   assert.equal(normalizeBookings([{nbr:'123',subType:'BOOK'}],'123')[0].exportCutoff,'');
 });
 
+test('real EVP millisecond dates for booking 276944584 populate receiving and cutoff', () => {
+  const [record] = normalizeBookings([{
+    nbr: '276944584', subType: 'BOOK',
+    timeBeginReceive: 1791349200000,
+    timeCargoCutoff: 1791846000000,
+    visit: { facilityId: 'BPT' },
+  }], '276944584');
+  assert.equal(record.beginReceiving, '2026-10-07T00:00');
+  assert.equal(record.exportCutoff, '2026-10-12T18:00');
+  assert.equal(formatPortDateTime(record.beginReceiving), '10/7/2026 12:00 AM');
+  assert.equal(formatPortDateTime(record.exportCutoff), '10/12/2026 6:00 PM');
+  assert.equal(normalizePortDateTime('1791349200000'), record.beginReceiving);
+  assert.equal(normalizePortDateTime(Date.parse('2026-12-05T13:00:00Z')), '2026-12-05T07:00');
+  for (const value of [null, undefined, '', 0, NaN, Infinity, -1, 1.5, 9999999999999999]) {
+    assert.equal(normalizePortDateTime(value), '');
+  }
+});
+
 test('export dates migrate, persist on creation, survive legacy edits and can be cleared without replacing LFD', async t => {
   const source = await readFile(new URL('../server.js', import.meta.url), 'utf8');
   const schema = await readFile(new URL('../database.js', import.meta.url), 'utf8');
