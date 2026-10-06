@@ -1,3 +1,4 @@
+import ExportBookingLookup from './components/ExportBookingLookup.jsx';
 import { formatDocumentDate } from '../shared/documentDates.js';
 import DispatchLfdAlerts from './components/DispatchLfdAlerts.jsx';
 import { hasAssignedDriver } from './utils/lfdAlerts.js';
@@ -12520,6 +12521,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     value={newLoad.containerNumber}
     onChange={handleInputChange}
   />
+  {selectedPresetName !== 'Export Load' && (
   <div className="smart-port-lookup">
     <button
       type="button"
@@ -12542,6 +12544,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       </p>
     )}
   </div>
+  )}
   {selectedPresetName === 'Export Load' && (
     <label className="checkbox-row">
       <input
@@ -12566,6 +12569,35 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     value={newLoad.bookingNumber || ''}
     onChange={handleInputChange}
   />
+  {selectedPresetName === 'Export Load' && (
+    <ExportBookingLookup
+      key={newLoad.bookingNumber || ''}
+      bookingNumber={newLoad.bookingNumber || ''}
+      apiBase={API_BASE}
+      authToken={authToken}
+      onApply={(booking) => {
+        const savedTerminals = returnLocations.filter(location => {
+          const name = `${location.name || ''} ${formatLocationAddress(location)}`.toLowerCase();
+          return booking.terminal === 'BPT' ? name.includes('bayport') : booking.terminal === 'BCT' && name.includes('barbour');
+        });
+        const returnLocation = savedTerminals.length === 1
+          ? formatLocationAddress(savedTerminals[0])
+          : booking.terminalName;
+        setNewLoad(prev => String(prev.bookingNumber || '').trim() !== booking.bookingNumber ? prev : ({
+          ...prev,
+          shipLine: fillEmptyPortField(prev.shipLine, normalizePortShipLineForForm(booking.shipLine)),
+          containerSize: fillEmptyPortField(prev.containerSize, booking.containerSize),
+          returnLocation: fillEmptyPortField(prev.returnLocation, returnLocation),
+        }));
+        const existingReturn = String(newLoad.returnLocation || '').trim();
+        const returnMatches = !existingReturn || existingReturn === returnLocation || existingReturn === booking.terminalName;
+        return !returnMatches && booking.terminalName
+          ? `Booking details filled empty fields. Return Location was kept as “${existingReturn}”; this booking requires ${booking.terminalName}. Review it before saving.`
+          : 'Booking details filled empty fields. Existing values were kept.';
+      }}
+    />
+  )}
+
 
   <input
     type="text"
@@ -12581,6 +12613,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     onChange={handleInputChange}
   >
     <option value="">🚢 Select Ship Line</option>
+    {newLoad.shipLine && !shipLineOptions.includes(newLoad.shipLine) && <option value={newLoad.shipLine}>{newLoad.shipLine}</option>}
     {shipLineOptions.map((line) => (
       <option key={line} value={line}>
         {line}

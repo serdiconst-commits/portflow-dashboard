@@ -1,0 +1,11 @@
+.export-booking-lookup {
+  padding: 12px;
+  border: 1px solid var(--pf-border, #cbd5e1);
+  border-radius: 10px;
+  background: var(--pf-surface-soft, #f1f5f9);
+  color: var(--pf-text, #172233);
+  overflow-wrap: anywhere;
+}
+.export-booking-lookup p { margin: 6px 0; }
+.export-booking-lookup label { width: 100%; }
+.export-booking-lookup select { max-width: 100%; }

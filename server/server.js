@@ -1,3 +1,4 @@
+import { validateBookingNumber } from './portHoustonBookings.js';
 import { formatDocumentDate, formatDocumentAppointment } from '../shared/documentDates.js';
 import createDriverAppRoutes from './routes/driverApp.js';
 import { startDriverNotifications } from './services/driverNotifications.js';
@@ -204,6 +205,7 @@ import {
   downloadGateTransactionDocument,
   extractGateTransactionNumbersFromHistory,
   getBolAvailability,
+  getBookingInquiry,
   getContainerAvailability,
   getGateHistory,
   getGateTransactionsByContainer,
@@ -3075,6 +3077,24 @@ app.get('/api/port-houston/gate/:containerNumber', authenticate, async (req, res
       checkedByUserId: req.user?.id || '',
     }).catch((logErr) => console.error('Port Houston log error:', logErr.message));
     res.status(status).json({ error: error.message, code: error.code || 'PORT_HOUSTON_ERROR', diagnostics: error.diagnostics });
+  }
+});
+
+app.get('/api/port-houston/booking-lookup', authenticate, async (req, res) => {
+  const bookingNumber = String(req.query.bookingNumber || '').trim();
+  if (!validateBookingNumber(bookingNumber)) {
+    return res.status(400).json({ error: 'Enter a valid Booking # (up to 64 letters, numbers, dots, dashes or slashes).' });
+  }
+  try {
+    const credentials = await getCompanyPortHoustonCredentials(req.company.companyId);
+    const result = await getBookingInquiry(bookingNumber, credentials);
+    res.json(result);
+  } catch (error) {
+    // Never forward upstream bodies or credential diagnostics to the form.
+    const denied = [401, 403].includes(error.status);
+    res.status(502).json({ error: denied
+      ? 'Port Houston did not authorize the booking lookup. Check the Orders service access in your integration settings.'
+      : 'Unable to check this booking with Port Houston. Try again or enter the load details manually.' });
   }
 });
 
