@@ -1,3 +1,4 @@
+import { normalizeBookings, validateBookingNumber } from '../portHoustonBookings.js';
 import { requirePortHoustonScac, matchesPortHoustonScope } from '../portHoustonScope.js';
 const DEFAULT_FIELDS = [
   'extras.dwellDays',
@@ -742,6 +743,21 @@ export const getEquipmentOwnership = async (containerNumber, credentials = {}, f
     equipmentOwner: getFirstValue(record, ['eqOwnerId', 'lineId', 'line']),
     raw: response,
   };
+};
+
+export const getBookingInquiry = async (bookingNumber, credentials = {}) => {
+  if (!validateBookingNumber(bookingNumber)) {
+    const error = new Error('Enter a valid booking number (up to 64 letters, numbers, dots, dashes or slashes).');
+    error.status = 400;
+    throw error;
+  }
+  const response = await portHoustonFetch('/orders/bookings', {
+    operator: 'POHA',
+    predicate: `subType = BOOK and nbr = ${bookingNumber}`,
+    size: 100,
+  }, credentials);
+  if (!response || typeof response !== 'object') throw new Error('Unexpected booking response');
+  return { bookings: normalizeBookings(unwrapRecords(response), bookingNumber) };
 };
 
 export const getAssociatedEquipment = async (bookingNumber, credentials = {}, facility = '') => {

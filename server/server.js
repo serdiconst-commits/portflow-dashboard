@@ -1,3 +1,4 @@
+import { validateBookingNumber } from './portHoustonBookings.js';
 import { formatDocumentDate, formatDocumentAppointment } from '../shared/documentDates.js';
 import createDriverAppRoutes from './routes/driverApp.js';
 import { startDriverNotifications } from './services/driverNotifications.js';
@@ -204,6 +205,7 @@ import {
   downloadGateTransactionDocument,
   extractGateTransactionNumbersFromHistory,
   getBolAvailability,
+  getBookingInquiry,
   getContainerAvailability,
   getGateHistory,
   getGateTransactionsByContainer,
@@ -3078,6 +3080,24 @@ app.get('/api/port-houston/gate/:containerNumber', authenticate, async (req, res
   }
 });
 
+app.get('/api/port-houston/booking-lookup', authenticate, async (req, res) => {
+  const bookingNumber = String(req.query.bookingNumber || '').trim();
+  if (!validateBookingNumber(bookingNumber)) {
+    return res.status(400).json({ error: 'Enter a valid Booking # (up to 64 letters, numbers, dots, dashes or slashes).' });
+  }
+  try {
+    const credentials = await getCompanyPortHoustonCredentials(req.company.companyId);
+    const result = await getBookingInquiry(bookingNumber, credentials);
+    res.json(result);
+  } catch (error) {
+    // Never forward upstream bodies or credential diagnostics to the form.
+    const denied = [401, 403].includes(error.status);
+    res.status(502).json({ error: denied
+      ? 'Port Houston did not authorize the booking lookup. Check the Orders service access in your integration settings.'
+      : 'Unable to check this booking with Port Houston. Try again or enter the load details manually.' });
+  }
+});
+
 app.get('/api/port-houston/load-lookup', authenticate, async (req, res) => {
   const companyId = req.company.companyId;
   const containerNumber = String(req.query.containerNumber || '').trim().toUpperCase();
@@ -4433,6 +4453,9 @@ app.put('/api/loads/:id', authenticate, requireRoles(movePayRoles), (req, res) =
           containerNumber = ?,
           streetTurn = ?,
           bookingNumber = ?,
+          loadType = ?,
+          beginReceiving = ?,
+          exportCutoff = ?,
           shipLine = ?,
           chassisNumber = ?,
           sealNumber = ?,
@@ -4481,6 +4504,9 @@ app.put('/api/loads/:id', authenticate, requireRoles(movePayRoles), (req, res) =
           l.containerNumber || '',
           isTruthy(l.streetTurn) ? '1' : '',
           l.bookingNumber || '',
+          l.loadType === undefined ? (existingLoad.loadType || '') : (l.loadType === 'EXPORT' ? 'EXPORT' : ''),
+          l.beginReceiving === undefined ? (existingLoad.beginReceiving || '') : String(l.beginReceiving || '').trim(),
+          l.exportCutoff === undefined ? (existingLoad.exportCutoff || '') : String(l.exportCutoff || '').trim(),
           l.shipLine || '',
           l.chassisNumber || '',
           l.sealNumber || '',
@@ -5597,6 +5623,9 @@ dropDateTime,
               containerNumber,
               streetTurn,
               bookingNumber,
+              loadType,
+              beginReceiving,
+              exportCutoff,
               shipLine,
               chassisNumber,
               sealNumber,
@@ -5619,7 +5648,7 @@ dropDateTime,
               billingStatus,
               isDriverReleased,
               driverReleasedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               generatedLoadId,
               l.loadDate || new Date().toISOString().slice(0, 10),
@@ -5647,6 +5676,9 @@ dropDateTime,
               l.containerNumber || '',
               isTruthy(l.streetTurn) ? '1' : '',
               l.bookingNumber || '',
+              l.loadType === 'EXPORT' ? 'EXPORT' : '',
+              String(l.beginReceiving || '').trim(),
+              String(l.exportCutoff || '').trim(),
               l.shipLine || '',
               l.chassisNumber || '',
               l.sealNumber || '',

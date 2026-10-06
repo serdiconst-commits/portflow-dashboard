@@ -481,6 +481,9 @@ droppedBy TEXT,
   containerNumber TEXT,
   streetTurn TEXT,
   bookingNumber TEXT,
+  loadType TEXT,
+  beginReceiving TEXT,
+  exportCutoff TEXT,
   shipLine TEXT,
   chassisNumber TEXT,
   sealNumber TEXT,
@@ -572,6 +575,24 @@ db.run(`ALTER TABLE loads ADD COLUMN reservationNumber TEXT`, (err) => {
 db.run(`ALTER TABLE loads ADD COLUMN appointmentNumber TEXT`, (err) => {
   if (err && !err.message.includes('duplicate column name')) {
     console.error('Error adding appointmentNumber column:', err.message);
+  }
+});
+
+db.run(`ALTER TABLE loads ADD COLUMN loadType TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding loadType column:', err.message);
+  }
+});
+
+db.run(`ALTER TABLE loads ADD COLUMN beginReceiving TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding beginReceiving column:', err.message);
+  }
+});
+
+db.run(`ALTER TABLE loads ADD COLUMN exportCutoff TEXT`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) {
+    console.error('Error adding exportCutoff column:', err.message);
   }
 });
 

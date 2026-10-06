@@ -1,3 +1,5 @@
+import { normalizePortDateTime, formatPortDateTime } from '../shared/exportReceiving.js';
+import ExportBookingLookup from './components/ExportBookingLookup.jsx';
 import { formatDocumentDate } from '../shared/documentDates.js';
 import DispatchLfdAlerts from './components/DispatchLfdAlerts.jsx';
 import { hasAssignedDriver } from './utils/lfdAlerts.js';
@@ -945,6 +947,9 @@ const getMissingDriverDocuments = (load) => {
     returnLocation: '',
     nextMoveType: '',
     lastFreeDay: '',
+    loadType: '',
+    beginReceiving: '',
+    exportCutoff: '',
     containerNumber: '',
     bookingNumber: '',
     appointmentTime: '',
@@ -5583,6 +5588,7 @@ const handleAddLoad = async (e) => {
 
     const loadToAdd = {
       ...newLoad,
+      loadType: isExportLoad ? 'EXPORT' : '',
       id: newLoad.id || '',
       loadDate: newLoad.loadDate || getTodayDate(),
       truck: newLoad.truck || getDriverTruck(newLoad.driver),
@@ -10337,8 +10343,10 @@ const dispatchLoadColumnsByKey = {
     render: (load) => formatAppointmentTime(load.appointmentTime),
   },
   lastFreeDay: {
-    label: 'LFD',
-    render: (load) => load.lastFreeDay || load.lfd || '-',
+    label: 'LFD / Cutoff',
+    render: (load) => load.loadType === 'EXPORT'
+      ? `Cutoff: ${formatPortDateTime(load.exportCutoff)}`
+      : load.lastFreeDay || load.lfd || '-',
   },
   driver: {
     label: 'Driver',
@@ -12314,6 +12322,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     setNewLoad((prev) => ({
       ...prev,
       ...selectedPreset,
+      loadType: presetName === 'Export Load' ? 'EXPORT' : '',
     }));
   }}
 >
@@ -12520,6 +12529,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     value={newLoad.containerNumber}
     onChange={handleInputChange}
   />
+  {selectedPresetName !== 'Export Load' && (
   <div className="smart-port-lookup">
     <button
       type="button"
@@ -12542,6 +12552,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       </p>
     )}
   </div>
+  )}
   {selectedPresetName === 'Export Load' && (
     <label className="checkbox-row">
       <input
@@ -12566,6 +12577,38 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     value={newLoad.bookingNumber || ''}
     onChange={handleInputChange}
   />
+  {selectedPresetName === 'Export Load' && (
+    <ExportBookingLookup
+      key={newLoad.bookingNumber || ''}
+      bookingNumber={newLoad.bookingNumber || ''}
+      apiBase={API_BASE}
+      authToken={authToken}
+      onApply={(booking) => {
+        const savedTerminals = returnLocations.filter(location => {
+          const name = `${location.name || ''} ${formatLocationAddress(location)}`.toLowerCase();
+          return booking.terminal === 'BPT' ? name.includes('bayport') : booking.terminal === 'BCT' && name.includes('barbour');
+        });
+        const returnLocation = savedTerminals.length === 1
+          ? formatLocationAddress(savedTerminals[0])
+          : booking.terminalName;
+        setNewLoad(prev => String(prev.bookingNumber || '').trim() !== booking.bookingNumber ? prev : ({
+          ...prev,
+          shipLine: fillEmptyPortField(prev.shipLine, normalizePortShipLineForForm(booking.shipLine)),
+          containerSize: fillEmptyPortField(prev.containerSize, booking.containerSize),
+          returnLocation: fillEmptyPortField(prev.returnLocation, returnLocation),
+          pickup: fillEmptyPortField(prev.pickup, returnLocation),
+          beginReceiving: fillEmptyPortField(prev.beginReceiving, booking.beginReceiving),
+          exportCutoff: fillEmptyPortField(prev.exportCutoff, booking.exportCutoff),
+        }));
+        const existingReturn = String(newLoad.returnLocation || '').trim();
+        const returnMatches = !existingReturn || existingReturn === returnLocation || existingReturn === booking.terminalName;
+        return !returnMatches && booking.terminalName
+          ? `Booking details filled empty fields. Return Location was kept as “${existingReturn}”; this booking requires ${booking.terminalName}. Review it before saving.`
+          : 'Booking details filled empty fields. Existing values were kept.';
+      }}
+    />
+  )}
+
 
   <input
     type="text"
@@ -12581,6 +12624,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     onChange={handleInputChange}
   >
     <option value="">🚢 Select Ship Line</option>
+    {newLoad.shipLine && !shipLineOptions.includes(newLoad.shipLine) && <option value={newLoad.shipLine}>{newLoad.shipLine}</option>}
     {shipLineOptions.map((line) => (
       <option key={line} value={line}>
         {line}
@@ -12987,6 +13031,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   )}
 </div>
 
+{selectedPresetName === 'Export Load' ? (
+  <div className="export-booking-dates">
+    <label>Beginning Receiving (Houston time)</label>
+    <input type="datetime-local" aria-label="Beginning Receiving (Houston time)" name="beginReceiving" value={normalizePortDateTime(newLoad.beginReceiving)} onChange={handleInputChange} />
+    <label>Cutoff — Full Return (Houston time)</label>
+    <input type="datetime-local" aria-label="Cutoff — Full Return (Houston time)" name="exportCutoff" value={normalizePortDateTime(newLoad.exportCutoff)} onChange={handleInputChange} />
+  </div>
+) : <>
 <label>LFD</label>
 <input
   type="date"
@@ -12994,6 +13046,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   value={newLoad.lastFreeDay || ''}
   onChange={handleInputChange}
 />
+</>}
 </div>
 <div
   style={{
@@ -13672,10 +13725,13 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <span>Appointment Time</span>
                             <input type="datetime-local" name="appointmentTime" value={normalizeDateTimeInputValue(editingLoad?.appointmentTime)} onChange={handleEditInputChange} />
                           </label>
-                          <label className="edit-load-field">
+                          {editingLoad.loadType === 'EXPORT' ? <>
+                            <label className="edit-load-field"><span>Beginning Receiving (Houston)</span><input type="datetime-local" name="beginReceiving" value={normalizePortDateTime(editingLoad.beginReceiving)} onChange={handleEditInputChange} /></label>
+                            <label className="edit-load-field"><span>Cutoff — Full Return (Houston)</span><input type="datetime-local" name="exportCutoff" value={normalizePortDateTime(editingLoad.exportCutoff)} onChange={handleEditInputChange} /></label>
+                          </> : <label className="edit-load-field">
                             <span>LFD</span>
                             <input type="date" name="lastFreeDay" value={editingLoad.lastFreeDay || ''} onChange={handleEditInputChange} />
-                          </label>
+                          </label>}
                           <label className="edit-load-field">
                             <span>ETA</span>
                             <input type="datetime-local" name="eta" value={normalizeDateTimeInputValue(editingLoad?.eta)} onChange={handleEditInputChange} />
@@ -14220,7 +14276,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         <div className="detail-box"><span>Pick Up Location</span><strong>{selectedLoad.pickup}</strong></div>
                         <div className="detail-box"><span>Delivery Location</span><strong>{getDeliveryDisplay(selectedLoad.delivery) || '—'}</strong></div>
                         <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedLoad.appointmentTime)}</strong></div>
-                        <div className="detail-box"><span>LFD</span><strong>{selectedLoad.lastFreeDay || selectedLoad.lfd || ''}</strong></div>
+                        {selectedLoad.loadType === 'EXPORT' ? <>
+                          <div className="detail-box"><span>Beginning Receiving (Houston)</span><strong>{formatPortDateTime(selectedLoad.beginReceiving)}</strong></div>
+                          <div className="detail-box"><span>Cutoff — Full Return (Houston)</span><strong>{formatPortDateTime(selectedLoad.exportCutoff)}</strong></div>
+                        </> : <div className="detail-box"><span>LFD</span><strong>{selectedLoad.lastFreeDay || selectedLoad.lfd || ''}</strong></div>}
                         <div className="detail-box"><span>ETA</span><strong>{selectedLoad.eta ? formatAppointmentTime(selectedLoad.eta) : ''}</strong></div>
                         <div className="detail-box"><span>Return Location</span><strong>{selectedLoad.returnLocation}</strong></div>
                         <div className="detail-box"><span>Route Miles</span><strong>{formatMiles(selectedLoad.miles)}</strong></div>
@@ -16434,7 +16493,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     <div className="edit-load-grid">
                       <label className="edit-load-field"><span>Load Date</span><input type="date" name="loadDate" value={editingLoad.loadDate || ''} onChange={handleEditInputChange} /></label>
                       <label className="edit-load-field"><span>Appointment</span><input type="datetime-local" name="appointmentTime" value={normalizeDateTimeInputValue(editingLoad.appointmentTime)} onChange={handleEditInputChange} /></label>
-                      <label className="edit-load-field"><span>LFD</span><input type="date" name="lastFreeDay" value={editingLoad.lastFreeDay || ''} onChange={handleEditInputChange} /></label>
+                      {editingLoad.loadType === 'EXPORT' ? <>
+                        <label className="edit-load-field"><span>Beginning Receiving (Houston)</span><input type="datetime-local" name="beginReceiving" value={normalizePortDateTime(editingLoad.beginReceiving)} onChange={handleEditInputChange} /></label>
+                        <label className="edit-load-field"><span>Cutoff — Full Return (Houston)</span><input type="datetime-local" name="exportCutoff" value={normalizePortDateTime(editingLoad.exportCutoff)} onChange={handleEditInputChange} /></label>
+                      </> : <label className="edit-load-field"><span>LFD</span><input type="date" name="lastFreeDay" value={editingLoad.lastFreeDay || ''} onChange={handleEditInputChange} /></label>}
                       <label className="edit-load-field"><span>ETA</span><input type="datetime-local" name="eta" value={normalizeDateTimeInputValue(editingLoad.eta)} onChange={handleEditInputChange} /></label>
                       <select name="driver" value={editingLoad.driver || ''} onChange={handleEditInputChange}>
                         <option value="">Select Driver</option>
