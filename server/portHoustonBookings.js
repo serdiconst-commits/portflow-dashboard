@@ -1,3 +1,4 @@
+import { normalizePortDateTime } from '../shared/exportReceiving.js';
 const text = value => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
 export const validateBookingNumber = value => /^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/.test(text(value));
 
@@ -27,6 +28,8 @@ export function normalizeBookings(records, bookingNumber) {
       lineScac: text(record.lineScac), terminal,
       terminalName: { BPT: 'Bayport Container Terminal', BCT: 'Barbours Cut Terminal' }[terminal] || '',
       vesselName: text(record.visit?.carrierName), equipment,
+      beginReceiving: normalizePortDateTime(record.timeBeginReceive),
+      exportCutoff: normalizePortDateTime(record.timeCargoCutoff),
     };
   }).filter(record => {
     const key = JSON.stringify(record);

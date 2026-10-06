@@ -11,6 +11,7 @@ const labels = {
   rate: 'Customer rate', driverRate: 'Driver pay', status: 'Status', availabilityStatus: 'Availability',
   paperwork: 'Paperwork', detention: 'Detention', lumper: 'Lumper', fuelAdvance: 'Fuel advance',
   settlement: 'Settlement', notes: 'Notes', customerExtraChargesJson: 'Customer extra charges',
+  loadType: 'Load type', beginReceiving: 'Beginning receiving', exportCutoff: 'Export cutoff',
   lastFreeDay: 'Last free day', miles: 'Miles', billingStatus: 'Billing status',
 };
 const moneyFields = new Set(['rate', 'driverRate', 'detention', 'lumper', 'fuelAdvance', 'settlement']);

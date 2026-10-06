@@ -1,3 +1,4 @@
+import { formatPortDateTime } from '../../shared/exportReceiving.js';
 import './ExportBookingLookup.css';
 import { useEffect, useRef, useState } from 'react';
 
@@ -76,6 +77,8 @@ export default function ExportBookingLookup({ bookingNumber, apiBase, authToken,
       {selected && <div style={{ width: '100%' }}>
         <p><strong>Ship line:</strong> {selected.shipLine || 'Not returned'}{selected.lineScac && ` (${selected.lineScac})`}</p>
         <p><strong>Outbound terminal:</strong> {selected.terminalName || 'Not returned'}</p>
+        <p><strong>Beginning Receiving (Houston):</strong> {selected.beginReceiving ? formatPortDateTime(selected.beginReceiving) : 'Not returned'}</p>
+        <p><strong>Cutoff — Full Return (Houston):</strong> {selected.exportCutoff ? formatPortDateTime(selected.exportCutoff) : 'Not returned'}</p>
         <p><strong>Vessel:</strong> {selected.vesselName || 'Not returned'}</p>
         {selected.equipment.length > 1 ? <label>Equipment size
           <select value={equipmentIndex} onChange={event => setEquipmentIndex(event.target.value)}>
