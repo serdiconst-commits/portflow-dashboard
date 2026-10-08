@@ -1,3 +1,4 @@
+import { driverCompletedDisplay } from '../shared/driverCompletedDisplay.js';
 import { validateBookingNumber } from './portHoustonBookings.js';
 import { formatDocumentDate, formatDocumentAppointment } from '../shared/documentDates.js';
 import createDriverAppRoutes from './routes/driverApp.js';
@@ -4729,9 +4730,11 @@ app.get('/api/loads', authenticate, (req, res) => {
             if (movesErr) return res.status(500).json({ error: movesErr.message });
             // Installed Driver versions already recognize Delivered as terminal.
             // Keep the stored dispatcher status intact while supporting those clients.
-            res.json(loadsWithMoves.map((load) =>
-              String(load.status || '').trim().toLowerCase() === 'completed'
-                ? { ...load, status: 'Delivered' } : load));
+            res.json(loadsWithMoves.map((load) => {
+              const display = driverCompletedDisplay(load, driverId);
+              return String(display.status || '').trim().toLowerCase() === 'completed'
+                ? { ...display, status: 'Delivered' } : display;
+            }));
           });
         });
       }

@@ -1,3 +1,4 @@
+import { driverCompletedDisplay } from '../shared/driverCompletedDisplay.js';
 import { normalizePortDateTime, formatPortDateTime } from '../shared/exportReceiving.js';
 import ExportBookingLookup from './components/ExportBookingLookup.jsx';
 import { formatDocumentDate } from '../shared/documentDates.js';
@@ -10823,14 +10824,17 @@ const NotificationStack = () =>
     </div>
   ) : null;
 
-const renderDriverLoadCard = (load) => {
+const renderDriverLoadCard = (sourceLoad) => {
+  const load = driverMobileTab === 'completed'
+    ? driverCompletedDisplay(sourceLoad, currentUser?.driverId) : sourceLoad;
   const completion = driverMobileTab === 'completed'
     ? getDriverCompletion(load, currentUser?.driverId, company?.companyTimezone || APP_TIME_ZONE) : null;
   const currentMove = load.currentMove || null;
   const moveOrigin = currentMove?.origin || load.pickup;
   const moveDestination = currentMove?.destination || load.delivery;
   const requiresDropAction = ['PRE_PULL', 'DROP'].includes(currentMove?.moveType);
-  const isPickupReturnMove = currentMove?.moveType === 'PICKUP_RETURN';
+  const isPickupReturnMove = currentMove?.moveType === 'PICKUP_RETURN' ||
+    (Boolean(completion) && currentMove?.moveType === 'RETURN');
   const pickupLabel = 'Pick Up Location';
   const destinationLabel = isPickupReturnMove
     ? 'Return Location'
@@ -10907,7 +10911,9 @@ const renderDriverLoadCard = (load) => {
         </div>
         <div className="driver-info-item">
           <span>{currentMove?.moveType === 'DROP' ? 'Drop Pay' : isPickupReturnMove ? 'Pickup / Return Pay' : 'Driver Pay'}</span>
-          <strong>{isDropHookLoad(load)
+          <strong>{completion && currentMove
+            ? (String(currentMove.driverRate ?? '').trim() ? formatMoney(parseMoney(currentMove.driverRate)) : '-')
+            : isDropHookLoad(load)
             ? formatMoney(Number(isHookMoveActive(load) ? load.pickupPay || 0 : load.dropPay || 0))
             : currentMove ? formatMoney(parseMoney(currentMove.driverRate)) : load.driverRate ? formatMoney(getDriverPayWithDetention(load)) : '-'}</strong>
         </div>
