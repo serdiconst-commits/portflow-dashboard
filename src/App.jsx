@@ -5768,6 +5768,8 @@ const handleUpdateLoad = async (e) => {
 
   const updatedLoad = {
     ...editingLoad,
+    dropDateTime: normalizeDateTimeInputValue(originalLoad.dropDateTime) === normalizeDateTimeInputValue(editingLoad.dropDateTime)
+      ? originalLoad.dropDateTime || '' : editingLoad.dropDateTime || '',
     lastFreeDay: editingLoad.lastFreeDay || '',
     referenceNumber: editingLoad.referenceNumber || '',
     pod: editingLoad.pod || '',
@@ -13782,10 +13784,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           </select>
                           <label className="edit-load-field">
                             <span>Drop Date/Time</span>
-                            <input type="datetime-local" name="dropDateTime" value={editingLoad.dropDateTime || ''} onChange={handleEditInputChange} />
+                            <input type="datetime-local" name="dropDateTime" value={normalizeDateTimeInputValue(editingLoad.dropDateTime)} onChange={handleEditInputChange} />
                           </label>
                           </> : (
                             <div className="edit-load-field edit-load-wide">
+                              <label>Drop Date/Time
+                                <input type="datetime-local" name="dropDateTime" value={normalizeDateTimeInputValue(editingLoad.dropDateTime)} onChange={handleEditInputChange} />
+                              </label>
+                              <small>Updates the completed drop movement date and its payroll period.</small>
                               <span>Automatic movement history</span>
                               <strong>
                                 {editingLoad.dropLocation
