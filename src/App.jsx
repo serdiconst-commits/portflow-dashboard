@@ -4223,21 +4223,16 @@ useEffect(() => {
   }));
 }, [currentUser?.driverId, currentUser?.role, driversList]);
 
+// One load poller per session. Keep the existing driver and dispatch refresh behavior.
 useEffect(() => {
-  if (!authToken || isDemoMode || activeView === 'driver') return;
+  if (!authToken || isDemoMode || (activeView === 'driver' && isEditing)) return;
 
   const interval = setInterval(() => {
-    fetchLoads();
-  }, 5000);
-
-  return () => clearInterval(interval);
-}, [authToken, isDemoMode, activeView]);
-
-useEffect(() => {
-  if (!authToken || isDemoMode || isEditing) return;
-
-  const interval = setInterval(() => {
-    refreshLoadsData();
+    if (activeView === 'driver') {
+      refreshLoadsData();
+    } else {
+      fetchLoads();
+    }
   }, 5000);
 
   return () => clearInterval(interval);
