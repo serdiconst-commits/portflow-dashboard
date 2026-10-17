@@ -12295,7 +12295,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
         </section>
       )}
 
-      {['payroll', 'settlements'].includes(activeView) && <DriverPayroll apiBase={API_BASE} token={authToken} drivers={driversList} loads={loadsData} locations={locations} />}
+      {['payroll', 'settlements'].includes(activeView) && <DriverPayroll apiBase={API_BASE} token={authToken} drivers={driversList} loads={loadsData} locations={locations} timeZone={company?.companyTimezone || APP_TIME_ZONE} />}
 
       {activeView === 'dispatch' && (
         <>
