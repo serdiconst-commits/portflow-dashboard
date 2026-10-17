@@ -1,3 +1,4 @@
+import { createLoadExtraChargesHandler } from './services/loadExtraCharges.js';
 import { saveLoadWithDropDate } from './services/dropDateEdit.js';
 import { driverCompletedDisplay } from '../shared/driverCompletedDisplay.js';
 import { validateBookingNumber } from './portHoustonBookings.js';
@@ -4361,6 +4362,7 @@ console.log('POST /api/customers body:', req.body);
     }
   );
 });
+app.put('/api/loads/:id/extra-charges', authenticate, requireRoles(movePayRoles), createLoadExtraChargesHandler(db, writeAuditLog));
 app.put('/api/loads/:id', authenticate, requireRoles(movePayRoles), (req, res) => {
   const body = req.body || {};
   const l = body;
