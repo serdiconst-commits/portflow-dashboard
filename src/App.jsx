@@ -1205,6 +1205,8 @@ const [driverScannerUploading, setDriverScannerUploading] = useState(false);
 const driverCameraVideoRef = useRef(null);
 const driverCameraStreamRef = useRef(null);
 const [dashboardFilter, setDashboardFilter] = useState('all');
+const [dispatchedDateFilter, setDispatchedDateFilter] = useState('all');
+const [dispatchedCustomDate, setDispatchedCustomDate] = useState(getTodayDate());
 const [appointmentDateFilter, setAppointmentDateFilter] = useState('today');
 const [appointmentDeliveryTypeFilter, setAppointmentDeliveryTypeFilter] = useState('all');
 const [customAppointmentDate, setCustomAppointmentDate] = useState(getTodayDate());
@@ -5320,6 +5322,13 @@ const getAvailableAppointmentFilterDate = () => {
   if (availableAppointmentDateFilter === 'tomorrow') return getRelativeDateString(1);
   if (availableAppointmentDateFilter === 'custom') return availableCustomAppointmentDate;
   return getRelativeDateString(0);
+};
+const matchesDispatchedDateFilter = (load) => {
+  if (dispatchedDateFilter === 'all') return true;
+  const targetDate = dispatchedDateFilter === 'custom'
+    ? dispatchedCustomDate
+    : getRelativeDateString(dispatchedDateFilter === 'tomorrow' ? 1 : 0);
+  return Boolean(targetDate) && getLocalDatePortion(load.loadDate) === targetDate;
 };
 const getLfdFilterDate = () => {
   if (lfdDateFilter === 'all') return '';
@@ -10194,7 +10203,7 @@ const baseFilteredLoadsData =
       )
     : dashboardFilter === 'dispatched'
     ? activeOperationsLoads.filter(
-        (load) => isDriverAssignedDispatchLoad(load)
+        (load) => isDriverAssignedDispatchLoad(load) && matchesDispatchedDateFilter(load)
       )
     : dashboardFilter === 'in-transit'
     ? activeOperationsLoads.filter(
@@ -13151,6 +13160,35 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     </div>
   ))}
 </section>
+
+          {dashboardFilter === 'dispatched' && (
+            <section className="appointment-filter-panel">
+              <div>
+                <span>Dispatched · Load Date</span>
+                <strong>{filteredLoadsData.length} loads</strong>
+              </div>
+              <select
+                aria-label="Dispatched load date"
+                value={dispatchedDateFilter}
+                onChange={(e) => setDispatchedDateFilter(e.target.value)}
+                className="filter-select"
+              >
+                <option value="all">All Dates</option>
+                <option value="today">Today</option>
+                <option value="tomorrow">Tomorrow</option>
+                <option value="custom">Custom</option>
+              </select>
+              {dispatchedDateFilter === 'custom' && (
+                <input
+                  type="date"
+                  aria-label="Custom dispatched load date"
+                  value={dispatchedCustomDate}
+                  onChange={(e) => setDispatchedCustomDate(e.target.value)}
+                  className="filter-select"
+                />
+              )}
+            </section>
+          )}
 
           {dashboardFilter === 'appointments' && (
             <section className="appointment-filter-panel">
