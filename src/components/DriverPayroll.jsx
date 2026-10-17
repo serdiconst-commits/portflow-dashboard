@@ -1,3 +1,4 @@
+import { previousPayrollPeriod } from "../utils/payrollPeriod.js";
 import PayrollRouteFields from "./PayrollRouteFields.jsx";
 import { useEffect, useRef, useState } from "react";
 import "./DriverPayroll.css";
@@ -9,14 +10,8 @@ const statusOf = (value) =>
   /^(complete|completed|finalized)$/i.test(value || "")
     ? "Finalized"
     : value || "Draft";
-const today = new Date();
 const date = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const initialStart = new Date(
-  today.getFullYear(),
-  today.getMonth(),
-  today.getDate() - ((today.getDay() + 6) % 7),
-);
 
 export default function DriverPayroll({
   apiBase,
@@ -24,17 +19,11 @@ export default function DriverPayroll({
   drivers = [],
   loads = [],
   locations = [],
+  timeZone = "America/Chicago",
 }) {
-  const [start, setStart] = useState(date(initialStart)),
-    [end, setEnd] = useState(
-      date(
-        new Date(
-          initialStart.getFullYear(),
-          initialStart.getMonth(),
-          initialStart.getDate() + 6,
-        ),
-      ),
-    );
+  const [initialPeriod] = useState(() => previousPayrollPeriod(new Date(), timeZone));
+  const [start, setStart] = useState(initialPeriod.start),
+    [end, setEnd] = useState(initialPeriod.end);
   const [rows, setRows] = useState([]),
     [active, setActive] = useState(null),
     [filter, setFilter] = useState("All"),
