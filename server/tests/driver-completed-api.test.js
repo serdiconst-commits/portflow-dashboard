@@ -1,3 +1,4 @@
+import { driverCompletedDisplay } from '../../shared/driverCompletedDisplay.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -18,14 +19,29 @@ test('installed Driver receives Completed without POD as terminal while stored s
   await dbRun(db, "UPDATE loads SET appointmentNumber = '001-APT' WHERE id = 'ACTIVE'");
   let handler;
   vm.runInNewContext(route, {
+    driverCompletedDisplay,
     app: { get: (_path,...handlers) => { handler=handlers.at(-1); } }, db, authenticate() {}, console,
     attachDocumentsToLoads: (rows,cb) => cb(null,rows.map(row => ({...row,documents:[]}))),
-    attachMovesToLoads: (rows,cb) => cb(null,rows),
+    attachMovesToLoads: (rows,cb) => cb(null,rows.map(row => ({...row,
+      driverRate:'275', pickup:'Bayport', delivery:'Carmine', returnLocation:'Bayport',
+      currentMove:{moveType:'RETURN',status:'Planned',origin:'Carmine',destination:'Bayport',driverRate:''},
+      moves:[{moveType:'LIVE_DELIVERY',status:'Completed',driverId:'DRV-A',completedBy:'DRV-A',origin:'Bayport',destination:'Carmine',driverRate:'275'}],
+    }))),
   });
   const loads = await new Promise(resolve => handler({ user: {role:'driver',driverId:'DRV-A'},company:{companyId:'COMP-A'},query:{} }, { json: resolve }));
   assert.deepEqual(loads.map(load=>load.id).sort(), ['ACTIVE','OWN']);
   assert.equal(loads.find(load=>load.id==='OWN').status,'Delivered');
   assert.equal(loads.find(load=>load.id==='ACTIVE').status,'Dispatched');
   assert.equal(loads.find(load=>load.id==='ACTIVE').appointmentNumber,'001-APT');
+  const completed = loads.find(load=>load.id==='OWN');
+  assert.equal(completed.currentMove.origin,'Bayport');
+  assert.equal(completed.currentMove.destination,'Carmine');
+  assert.equal(completed.currentMove.driverRate,'275');
+  assert.equal(loads.find(load=>load.id==='ACTIVE').currentMove.moveType,'RETURN');
+  const dispatchLoads = await new Promise(resolve => handler({ user: {role:'dispatcher'},company:{companyId:'COMP-A'},query:{} }, { json: resolve }));
+  const dispatchCompleted = dispatchLoads.find(load=>load.id==='OWN');
+  assert.equal(dispatchCompleted.status,'Completed');
+  assert.equal(dispatchCompleted.currentMove.moveType,'RETURN');
+  assert.equal(dispatchCompleted.currentMove.driverRate,'');
   assert.equal((await dbGet(db,"SELECT status FROM loads WHERE id='OWN'")).status,'Completed');
 });

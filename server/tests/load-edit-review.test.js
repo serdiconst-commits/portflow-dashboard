@@ -54,7 +54,8 @@ for (const confirm of [false, true]) {
     let review;
     let sent;
     const noop = () => {};
-    const context = { editingLoad: draft, editLoadBaseline: { current: before }, loadEditSaving: { current: false },
+    const context = {
+      normalizeDateTimeInputValue: value => value || '', editingLoad: draft, editLoadBaseline: { current: before }, loadEditSaving: { current: false },
       getLoadEditChanges, getDriverLabel: (value) => value, loadsData: [before],
       alert: noop, console, setIsEditing: noop, getTodayDate: () => '2026-09-12', getDriverTruck: () => '',
       calculateLoadSettlement: () => 0, getPaperworkStatusFromDocuments: () => 'Pending',

@@ -1,3 +1,5 @@
+import { saveLoadWithDropDate } from './services/dropDateEdit.js';
+import { driverCompletedDisplay } from '../shared/driverCompletedDisplay.js';
 import { validateBookingNumber } from './portHoustonBookings.js';
 import { formatDocumentDate, formatDocumentAppointment } from '../shared/documentDates.js';
 import createDriverAppRoutes from './routes/driverApp.js';
@@ -4425,7 +4427,7 @@ app.put('/api/loads/:id', authenticate, requireRoles(movePayRoles), (req, res) =
         ? 'Dispatched'
         : getStatusAfterDriverAssignment(normalizedDriver, l.status, existingLoad.status || 'Pending');
 
-      db.run(
+      saveLoadWithDropDate(db, existingLoad, l,
         `UPDATE loads SET
           loadDate = ?,
           customer = ?,
@@ -4500,7 +4502,7 @@ app.put('/api/loads/:id', authenticate, requireRoles(movePayRoles), (req, res) =
           l.dropType || '',
           l.dropLocation || '',
           normalizedDroppedBy,
-          l.dropDateTime || '',
+          l.dropDateTime === undefined ? (existingLoad.dropDateTime || '') : l.dropDateTime || '',
           l.containerNumber || '',
           isTruthy(l.streetTurn) ? '1' : '',
           l.bookingNumber || '',
@@ -4537,7 +4539,10 @@ app.put('/api/loads/:id', authenticate, requireRoles(movePayRoles), (req, res) =
         function (err) {
           if (err) {
             console.error('Error updating load:', err.message);
-            return res.status(500).json({ error: err.message });
+            return res.status(err.status || 500).json({ error: err.message });
+          }
+          if (this.dropDateChange) {
+            writeAuditLog(req, { action: 'DROP_DATE_CHANGED', entityType: 'LOAD_MOVE', entityId: this.dropDateChange.moveId, entityLabel: loadId, oldValue: {completedAt:this.dropDateChange.oldDate}, newValue: {completedAt:this.dropDateChange.newDate} });
           }
 
           console.log('UPDATE changes =', this.changes);
@@ -4581,6 +4586,13 @@ console.log('LOAD AFTER UPDATE =', updatedLoad);
                   if (attachErr) return res.status(500).json({ error: 'Load updated, but its movement plan could not be read.' });
                   res.json(rows[0]);
                 });
+                if (nextStatus === 'Dropped' && existingLoad.status !== 'Dropped') {
+                  return updateCurrentMoveForLoadStatus(req, loadId, 'Dropped', (dropErr) => {
+                    if (dropErr) return res.status(500).json({ error: 'Load updated, but the drop movement could not be completed.' });
+                    db.get('SELECT * FROM loads WHERE id = ? AND companyId = ?', [loadId, companyId],
+                      (reloadErr, load) => reloadErr ? res.status(500).json({ error: 'Could not reload dropped load.' }) : respondWithMoves(load));
+                  });
+                }
                 if (nextWorkflowType === 'PRE_PULL_LIVE' &&
                     ['Delivered', 'Completed'].includes(nextStatus) &&
                     !['Delivered', 'Completed'].includes(existingLoad.status)) {
@@ -4729,9 +4741,11 @@ app.get('/api/loads', authenticate, (req, res) => {
             if (movesErr) return res.status(500).json({ error: movesErr.message });
             // Installed Driver versions already recognize Delivered as terminal.
             // Keep the stored dispatcher status intact while supporting those clients.
-            res.json(loadsWithMoves.map((load) =>
-              String(load.status || '').trim().toLowerCase() === 'completed'
-                ? { ...load, status: 'Delivered' } : load));
+            res.json(loadsWithMoves.map((load) => {
+              const display = driverCompletedDisplay(load, driverId);
+              return String(display.status || '').trim().toLowerCase() === 'completed'
+                ? { ...display, status: 'Delivered' } : display;
+            }));
           });
         });
       }

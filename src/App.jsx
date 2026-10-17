@@ -1,3 +1,4 @@
+import { driverCompletedDisplay } from '../shared/driverCompletedDisplay.js';
 import { normalizePortDateTime, formatPortDateTime } from '../shared/exportReceiving.js';
 import ExportBookingLookup from './components/ExportBookingLookup.jsx';
 import { formatDocumentDate } from '../shared/documentDates.js';
@@ -1204,6 +1205,8 @@ const [driverScannerUploading, setDriverScannerUploading] = useState(false);
 const driverCameraVideoRef = useRef(null);
 const driverCameraStreamRef = useRef(null);
 const [dashboardFilter, setDashboardFilter] = useState('all');
+const [dispatchedDateFilter, setDispatchedDateFilter] = useState('all');
+const [dispatchedCustomDate, setDispatchedCustomDate] = useState(getTodayDate());
 const [appointmentDateFilter, setAppointmentDateFilter] = useState('today');
 const [appointmentDeliveryTypeFilter, setAppointmentDeliveryTypeFilter] = useState('all');
 const [customAppointmentDate, setCustomAppointmentDate] = useState(getTodayDate());
@@ -5320,6 +5323,13 @@ const getAvailableAppointmentFilterDate = () => {
   if (availableAppointmentDateFilter === 'custom') return availableCustomAppointmentDate;
   return getRelativeDateString(0);
 };
+const matchesDispatchedDateFilter = (load) => {
+  if (dispatchedDateFilter === 'all') return true;
+  const targetDate = dispatchedDateFilter === 'custom'
+    ? dispatchedCustomDate
+    : getRelativeDateString(dispatchedDateFilter === 'tomorrow' ? 1 : 0);
+  return Boolean(targetDate) && getLocalDatePortion(load.loadDate) === targetDate;
+};
 const getLfdFilterDate = () => {
   if (lfdDateFilter === 'all') return '';
   if (lfdDateFilter === 'tomorrow') return getRelativeDateString(1);
@@ -5767,6 +5777,8 @@ const handleUpdateLoad = async (e) => {
 
   const updatedLoad = {
     ...editingLoad,
+    dropDateTime: normalizeDateTimeInputValue(originalLoad.dropDateTime) === normalizeDateTimeInputValue(editingLoad.dropDateTime)
+      ? originalLoad.dropDateTime || '' : editingLoad.dropDateTime || '',
     lastFreeDay: editingLoad.lastFreeDay || '',
     referenceNumber: editingLoad.referenceNumber || '',
     pod: editingLoad.pod || '',
@@ -10191,7 +10203,7 @@ const baseFilteredLoadsData =
       )
     : dashboardFilter === 'dispatched'
     ? activeOperationsLoads.filter(
-        (load) => isDriverAssignedDispatchLoad(load)
+        (load) => isDriverAssignedDispatchLoad(load) && matchesDispatchedDateFilter(load)
       )
     : dashboardFilter === 'in-transit'
     ? activeOperationsLoads.filter(
@@ -10823,14 +10835,17 @@ const NotificationStack = () =>
     </div>
   ) : null;
 
-const renderDriverLoadCard = (load) => {
+const renderDriverLoadCard = (sourceLoad) => {
+  const load = driverMobileTab === 'completed'
+    ? driverCompletedDisplay(sourceLoad, currentUser?.driverId) : sourceLoad;
   const completion = driverMobileTab === 'completed'
     ? getDriverCompletion(load, currentUser?.driverId, company?.companyTimezone || APP_TIME_ZONE) : null;
   const currentMove = load.currentMove || null;
   const moveOrigin = currentMove?.origin || load.pickup;
   const moveDestination = currentMove?.destination || load.delivery;
   const requiresDropAction = ['PRE_PULL', 'DROP'].includes(currentMove?.moveType);
-  const isPickupReturnMove = currentMove?.moveType === 'PICKUP_RETURN';
+  const isPickupReturnMove = currentMove?.moveType === 'PICKUP_RETURN' ||
+    (Boolean(completion) && currentMove?.moveType === 'RETURN');
   const pickupLabel = 'Pick Up Location';
   const destinationLabel = isPickupReturnMove
     ? 'Return Location'
@@ -10907,7 +10922,9 @@ const renderDriverLoadCard = (load) => {
         </div>
         <div className="driver-info-item">
           <span>{currentMove?.moveType === 'DROP' ? 'Drop Pay' : isPickupReturnMove ? 'Pickup / Return Pay' : 'Driver Pay'}</span>
-          <strong>{isDropHookLoad(load)
+          <strong>{completion && currentMove
+            ? (String(currentMove.driverRate ?? '').trim() ? formatMoney(parseMoney(currentMove.driverRate)) : '-')
+            : isDropHookLoad(load)
             ? formatMoney(Number(isHookMoveActive(load) ? load.pickupPay || 0 : load.dropPay || 0))
             : currentMove ? formatMoney(parseMoney(currentMove.driverRate)) : load.driverRate ? formatMoney(getDriverPayWithDetention(load)) : '-'}</strong>
         </div>
@@ -13144,6 +13161,35 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   ))}
 </section>
 
+          {dashboardFilter === 'dispatched' && (
+            <section className="appointment-filter-panel">
+              <div>
+                <span>Dispatched · Load Date</span>
+                <strong>{filteredLoadsData.length} loads</strong>
+              </div>
+              <select
+                aria-label="Dispatched load date"
+                value={dispatchedDateFilter}
+                onChange={(e) => setDispatchedDateFilter(e.target.value)}
+                className="filter-select"
+              >
+                <option value="all">All Dates</option>
+                <option value="today">Today</option>
+                <option value="tomorrow">Tomorrow</option>
+                <option value="custom">Custom</option>
+              </select>
+              {dispatchedDateFilter === 'custom' && (
+                <input
+                  type="date"
+                  aria-label="Custom dispatched load date"
+                  value={dispatchedCustomDate}
+                  onChange={(e) => setDispatchedCustomDate(e.target.value)}
+                  className="filter-select"
+                />
+              )}
+            </section>
+          )}
+
           {dashboardFilter === 'appointments' && (
             <section className="appointment-filter-panel">
               <div>
@@ -13776,10 +13822,14 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           </select>
                           <label className="edit-load-field">
                             <span>Drop Date/Time</span>
-                            <input type="datetime-local" name="dropDateTime" value={editingLoad.dropDateTime || ''} onChange={handleEditInputChange} />
+                            <input type="datetime-local" name="dropDateTime" value={normalizeDateTimeInputValue(editingLoad.dropDateTime)} onChange={handleEditInputChange} />
                           </label>
                           </> : (
                             <div className="edit-load-field edit-load-wide">
+                              <label>Drop Date/Time
+                                <input type="datetime-local" name="dropDateTime" value={normalizeDateTimeInputValue(editingLoad.dropDateTime)} onChange={handleEditInputChange} />
+                              </label>
+                              <small>Updates the completed drop movement date and its payroll period.</small>
                               <span>Automatic movement history</span>
                               <strong>
                                 {editingLoad.dropLocation

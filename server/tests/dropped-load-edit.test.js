@@ -20,6 +20,7 @@ function editDroppedLoad(existingDriver, requestedDriver, overrides = {}) {
   let synced = false;
   const completions = [];
   const context = {
+    saveLoadWithDropDate: (db, previous, requested, sql, args, cb) => db.run(sql, args, cb),
     app: { put: (_path, ...handlers) => { handler = handlers.at(-1); } },
     authenticate: () => {}, requireRoles: () => () => {}, movePayRoles: new Set(), console: { log() {}, error() {} },
     findDuplicateContainerLoad: (_company, _container, _id, cb) => cb(null, null),
@@ -107,4 +108,13 @@ test('pre-pull at yard requires assigning the delivery movement', () => {
   });
   assert.equal(code, 409);
   assert.equal(updated, undefined);
+});
+
+test('Edit Load marks an undropped load Dropped through the existing movement completion flow', () => {
+ const {code,completions} = editDroppedLoad('DRV-001','DRV-001',{
+   existing:{status:'In Transit',workflowType:'PRE_PULL_LIVE'},
+   request:{status:'Dropped',dropDateTime:'2026-10-09T10:00'},
+ });
+ assert.equal(code,200);
+ assert.deepEqual(completions,[{id:'LD-DROP',status:'Dropped'}]);
 });
