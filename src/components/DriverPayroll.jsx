@@ -1,3 +1,4 @@
+import { payrollRoster } from "../utils/payrollRoster.js";
 import { previousPayrollPeriod } from "../utils/payrollPeriod.js";
 import PayrollRouteFields from "./PayrollRouteFields.jsx";
 import { useEffect, useRef, useState } from "react";
@@ -24,6 +25,7 @@ export default function DriverPayroll({
   const [initialPeriod] = useState(() => previousPayrollPeriod(new Date(), timeZone));
   const [start, setStart] = useState(initialPeriod.start),
     [end, setEnd] = useState(initialPeriod.end);
+  const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState([]),
     [active, setActive] = useState(null),
     [filter, setFilter] = useState("All"),
@@ -67,16 +69,22 @@ export default function DriverPayroll({
   }
   async function reload() {
     const id = ++requestId.current;
-    const result = await request(
-      `?${new URLSearchParams({ periodStart: start, periodEnd: end })}`,
-    );
-    if (id === requestId.current) setRows(result);
+    setLoading(true);
+    try {
+      const result = await request(
+        `?${new URLSearchParams({ periodStart: start, periodEnd: end })}`,
+      );
+      if (id === requestId.current) setRows(result);
+    } finally {
+      if (id === requestId.current) setLoading(false);
+    }
   }
   useEffect(() => {
     setActive(null);
     setRows([]);
     setError("");
     if (!start || !end || start > end) {
+      setLoading(false);
       setError("Choose a valid pay period.");
       return;
     }
@@ -134,6 +142,34 @@ export default function DriverPayroll({
       setRules(await request(`/rules/${encodeURIComponent(result.driverId)}`));
     });
   }
+  async function prepare(selectedDriverId) {
+    if (loading || !start || !end || start > end) return;
+    await run(async () => {
+      const result = await request("", {
+        method: "POST",
+        body: JSON.stringify({
+          driverId: selectedDriverId,
+          periodStart: start,
+          periodEnd: end,
+        }),
+      });
+      setActive(result);
+      setNote(result.notes || "");
+      setTab("Movements");
+      setEditingLine(null);
+      setMoveCandidates([]);
+      setPaymentOpen(false);
+      setCorrectionOpen(false);
+      setEditingRule(null);
+      setEditingAdjustment(null);
+      setRules(
+        await request(
+          `/rules/${encodeURIComponent(result.driverId)}`,
+        ),
+      );
+      await reload();
+    });
+  }
   async function mutate(suffix, method, body) {
     const result = await request(`/${encodeURIComponent(active.id)}${suffix}`, {
       method,
@@ -173,10 +209,11 @@ export default function DriverPayroll({
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
   }
-  const visible = rows.filter(
+  const roster = payrollRoster(drivers, rows, start, end);
+  const visible = roster.filter(
     (r) =>
       (filter === "All" || statusOf(r.status) === filter) &&
-      `${r.driverName} ${r.id}`.toLowerCase().includes(search.toLowerCase()),
+      `${r.driverName} ${r.driverId} ${r.unprepared ? "" : r.id}`.toLowerCase().includes(search.toLowerCase()),
   );
   return (
     <section className="payroll-workspace">
@@ -194,6 +231,7 @@ export default function DriverPayroll({
       )}
       <div className="payroll-stats">
         {[
+          ["Drivers", new Set(roster.map(row => row.driverId)).size],
           ["Settlements", rows.length],
           ["Movement pay", money(totals.gross)],
           ["Net adjustments", money(totals.net - totals.gross)],
@@ -242,34 +280,8 @@ export default function DriverPayroll({
           </label>
           <button
             className="primary-btn"
-            disabled={busy || !driverId || !start || !end || start > end}
-            onClick={() =>
-              run(async () => {
-                const result = await request("", {
-                  method: "POST",
-                  body: JSON.stringify({
-                    driverId,
-                    periodStart: start,
-                    periodEnd: end,
-                  }),
-                });
-                setActive(result);
-                setNote(result.notes || "");
-                setTab("Movements");
-                setEditingLine(null);
-                setMoveCandidates([]);
-                setPaymentOpen(false);
-                setCorrectionOpen(false);
-                setEditingRule(null);
-                setEditingAdjustment(null);
-                setRules(
-                  await request(
-                    `/rules/${encodeURIComponent(result.driverId)}`,
-                  ),
-                );
-                await reload();
-              })
-            }
+            disabled={busy || loading || !driverId || !start || !end || start > end}
+            onClick={() => prepare(driverId)}
           >
             Prepare payroll
           </button>
@@ -282,7 +294,7 @@ export default function DriverPayroll({
           />
         </div>
         <div className="payroll-tabs">
-          {["All", "Draft", "Reviewed", "Finalized", "Paid"].map((s) => (
+          {["All", "Not prepared", "Draft", "Reviewed", "Finalized", "Paid"].map((s) => (
             <button
               key={s}
               className={filter === s ? "active" : ""}
@@ -291,7 +303,7 @@ export default function DriverPayroll({
               {s}{" "}
               <small>
                 {
-                  rows.filter((r) => s === "All" || statusOf(r.status) === s)
+                  roster.filter((r) => s === "All" || statusOf(r.status) === s)
                     .length
                 }
               </small>
@@ -313,14 +325,15 @@ export default function DriverPayroll({
               </tr>
             </thead>
             <tbody>
-              {visible.map((row) => (
+              {loading && <tr><td colSpan="8">Loading payroll for this period…</td></tr>}
+              {!loading && visible.map((row) => (
                 <tr key={row.id}>
                   <td>
                     <strong>{row.driverName || row.driverId}</strong>
                   </td>
                   <td>
                     <span title={row.id}>
-                      #{row.id.slice(0, 8).toUpperCase()}
+                      {row.unprepared ? "Not prepared" : `#${row.id.slice(0, 8).toUpperCase()}`}
                     </span>
                     {row.correctionOf && (
                       <small>
@@ -332,11 +345,11 @@ export default function DriverPayroll({
                       {row.periodStart} — {row.periodEnd}
                     </small>
                   </td>
-                  <td>{row.loadCount}</td>
-                  <td>{money(row.grossPay)}</td>
-                  <td>{money(Number(row.netPay) - Number(row.grossPay))}</td>
+                  <td>{row.unprepared ? "—" : row.loadCount}</td>
+                  <td>{row.unprepared ? "—" : money(row.grossPay)}</td>
+                  <td>{row.unprepared ? "—" : money(Number(row.netPay) - Number(row.grossPay))}</td>
                   <td>
-                    <strong>{money(row.netPay)}</strong>
+                    <strong>{row.unprepared ? "—" : money(row.netPay)}</strong>
                   </td>
                   <td>
                     <span className="payroll-status">
@@ -346,19 +359,18 @@ export default function DriverPayroll({
                   <td>
                     <button
                       className="secondary-btn"
-                      disabled={busy}
-                      onClick={() => open(row.id)}
+                      disabled={busy || loading || !start || !end || start > end}
+                      onClick={() => row.unprepared ? prepare(row.driverId) : open(row.id)}
                     >
-                      Open →
+                      {row.unprepared ? "Prepare payroll" : "Open →"}
                     </button>
                   </td>
                 </tr>
               ))}
-              {!visible.length && (
+              {!loading && !visible.length && (
                 <tr>
                   <td colSpan="8">
-                    No settlements in this period. Choose a driver to prepare a
-                    draft from completed movements.
+                    No drivers or settlements match this period and filter.
                   </td>
                 </tr>
               )}
