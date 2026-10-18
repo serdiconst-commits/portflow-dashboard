@@ -4957,7 +4957,6 @@ useEffect(() => {
       fuelAdvance: getSettlementPayValue(load, 'fuelAdvance'),
     });
 
-const paperworkAlerts = loadsData.filter((load) => load.paperwork);
 
 const activeOperationsLoads = (loadsData || []).filter((load) => !isCompletedLoad(load));
 const isLoadReadyForAccounting = (load) =>
@@ -14679,6 +14678,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       })()}
 
                       <div className="documents-box">
+                        <p className="load-paperwork-notice" role="status">
+                          <strong>Paperwork:</strong>{' '}
+                          {getMissingDriverDocuments(selectedLoad).length
+                            ? `Missing ${getMissingDriverDocuments(selectedLoad).join(', ')}`
+                            : (selectedLoad.paperwork || 'Submitted')}
+                        </p>
                         <div className="documents-header">
                           <h4>Documents / Paperwork</h4>
                           <div className="documents-toolbar">
@@ -14832,7 +14837,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             </section>
           </main>
 
-          <section className="bottom-grid">
+          <section className="bottom-grid dispatch-driver-status">
             <section className="panel">
               <div className="panel-header"><h3>Driver Status</h3></div>
               <div className="table-wrap">
@@ -14859,21 +14864,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               </div>
             </section>
 
-            <section className="panel paperwork-alerts-panel">
-              <div className="panel-header"><h3>Paperwork Alerts</h3></div>
-              <div className="alerts-list paperwork-alerts-list">
-                {paperworkAlerts.map((load) => (
-                  <div key={load.id} className="alert-card paperwork-alert-card">
-                    <strong>{load.id}</strong>
-                    <p>
-  Driver:{' '}
-  {getDriverLabel(load.driver)}
-</p>
-                    {load.paperwork && <p>Paperwork Status: {load.paperwork}</p>}
-                  </div>
-                ))}
-              </div>
-            </section>
+
           </section>
         </>
       )}
