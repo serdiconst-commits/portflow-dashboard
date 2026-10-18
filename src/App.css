@@ -2813,35 +2813,21 @@ td {
   font-size: 14px;
 }
 
-.paperwork-alerts-panel {
-  padding: 10px;
+.dispatch-driver-status {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.paperwork-alerts-panel .panel-header {
-  margin-bottom: 6px;
-}
-
-.paperwork-alerts-panel .panel-header h3 {
-  font-size: 13px;
-}
-
-.paperwork-alerts-list {
-  gap: 4px;
-}
-
-.paperwork-alert-card {
-  padding: 6px 8px;
-  border-radius: 7px;
-}
-
-.paperwork-alert-card strong {
-  font-size: 10px;
-}
-
-.paperwork-alert-card p {
-  margin: 1px 0 0;
-  font-size: 9px;
-  line-height: 1.2;
+.load-paperwork-notice {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 8px;
+  padding: 5px 8px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 1000px) {
