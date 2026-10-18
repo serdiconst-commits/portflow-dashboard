@@ -10,3 +10,18 @@ export function previousPayrollPeriod(now = new Date(), timeZone = 'America/Chic
   day.setUTCDate(day.getUTCDate() + 4);
   return { start, end: day.toISOString().slice(0, 10) };
 }
+
+// Shift calendar dates, avoiding timezone/DST changes and preserving custom ranges.
+export function shiftPayrollPeriod(start, end, weeks) {
+  if (![-1, 1].includes(weeks) || !start || !end || start > end) return null;
+  const shift = value => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const date = new Date(`${value}T12:00:00Z`);
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return null;
+    date.setUTCDate(date.getUTCDate() + weeks * 7);
+    const result = date.toISOString().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(result) ? result : null;
+  };
+  const nextStart = shift(start), nextEnd = shift(end);
+  return nextStart && nextEnd ? {start:nextStart, end:nextEnd} : null;
+}

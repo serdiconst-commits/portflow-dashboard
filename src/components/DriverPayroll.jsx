@@ -1,5 +1,6 @@
+import { formatDocumentDate } from "../../shared/documentDates.js";
 import { payrollRoster } from "../utils/payrollRoster.js";
-import { previousPayrollPeriod } from "../utils/payrollPeriod.js";
+import { previousPayrollPeriod, shiftPayrollPeriod } from "../utils/payrollPeriod.js";
 import PayrollRouteFields from "./PayrollRouteFields.jsx";
 import { useEffect, useRef, useState } from "react";
 import "./DriverPayroll.css";
@@ -188,6 +189,13 @@ export default function DriverPayroll({
     setNote(result.notes || "");
     await reload();
   }
+  function changePeriod(weeks) {
+    const next = shiftPayrollPeriod(start, end, weeks);
+    if (!next) return;
+    setChoosingPeriod(false);
+    setStart(next.start);
+    setEnd(next.end);
+  }
   async function transition(action) {
     let reason = "";
     if (action === "unreview" || action === "reopen") {
@@ -197,7 +205,7 @@ export default function DriverPayroll({
       if (!reason) return;
     } else if (
       !window.confirm(
-        `${action === "review" ? "Review" : "Finalize and lock"} ${statement.driver.name}?\n${statement.totals.loadCount} movements · Net ${money(statement.totals.netPay)}\nThis does not send money or email.`,
+        `${action === "review" ? "Review settlement" : "Finalize and lock settlement"}?\n\nDriver: ${statement.driver.name}\nPay period: ${formatDocumentDate(active.periodStart)} – ${formatDocumentDate(active.periodEnd)}\nMovements: ${statement.totals.loadCount}\nNet pay: ${money(statement.totals.netPay)}\n\n${action === "review" ? "Confirm that you have checked the movements and adjustments." : "Please verify all movements, charges, and deductions. Finalizing locks this settlement; further edits require reopening it with a reason."}\n\nThis does not send money or email.\nSelect Cancel to return and make changes.`,
       )
     )
       return;
@@ -254,6 +262,9 @@ export default function DriverPayroll({
       </div>
       <div className="payroll-card">
         <div className="payroll-toolbar">
+          <button type="button" className="secondary-btn"
+            disabled={busy || (loading && !choosingPeriod) || !shiftPayrollPeriod(start, end, -1)}
+            onClick={() => changePeriod(-1)}>← Previous period</button>
           <div className="payroll-period-fields"
             onFocusCapture={() => setChoosingPeriod(true)}
             onBlurCapture={(event) => {
@@ -278,6 +289,9 @@ export default function DriverPayroll({
             />
           </label>
           </div>
+          <button type="button" className="secondary-btn"
+            disabled={busy || (loading && !choosingPeriod) || !shiftPayrollPeriod(start, end, 1)}
+            onClick={() => changePeriod(1)}>Next period →</button>
           <input
             type="search"
             aria-label="Search payroll"
