@@ -1,3 +1,4 @@
+import { preparePayrollPeriod } from '../services/preparePayrollPeriod.js';
 import { candidates, recordPayment, createCorrection, get as lifecycleGet, ensureLifecycle } from '../services/payrollLifecycle.js';
 import { listRules, changeRule } from '../services/payrollAdjustments.js';
 import express from 'express';
@@ -97,6 +98,11 @@ export default function createDriverSettlementRoutes(db) {
     } catch (error) {
       sendError(res, error);
     }
+  });
+
+  router.post('/prepare-period', async (req, res) => {
+    try { res.json(await preparePayrollPeriod(db, req.company.companyId, req.body || {}, getActor(req))); }
+    catch (error) { sendError(res, error); }
   });
 
   router.post('/', async (req, res) => {

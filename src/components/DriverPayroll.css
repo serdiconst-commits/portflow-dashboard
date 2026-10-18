@@ -246,3 +246,5 @@
 .payroll-route-fields label, .payroll-route-form > label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .payroll-route-fields input { width: 100%; box-sizing: border-box; }
 @media (max-width: 700px) { .payroll-route-fields { grid-template-columns: 1fr; } }
+
+.payroll-period-fields { display: flex; flex-wrap: wrap; gap: 12px; }

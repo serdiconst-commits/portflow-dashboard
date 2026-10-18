@@ -26,6 +26,7 @@ export default function DriverPayroll({
   const [start, setStart] = useState(initialPeriod.start),
     [end, setEnd] = useState(initialPeriod.end);
   const [loading, setLoading] = useState(true);
+  const [choosingPeriod, setChoosingPeriod] = useState(false);
   const [rows, setRows] = useState([]),
     [active, setActive] = useState(null),
     [filter, setFilter] = useState("All"),
@@ -33,8 +34,7 @@ export default function DriverPayroll({
     [tab, setTab] = useState("Movements");
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [note, setNote] = useState(""),
-    [driverId, setDriverId] = useState("");
+    [note, setNote] = useState("");
   const [editingAdjustment, setEditingAdjustment] = useState(null),
     [rules, setRules] = useState([]);
   const [moveQuery, setMoveQuery] = useState(""),
@@ -67,13 +67,15 @@ export default function DriverPayroll({
     if (!response.ok) throw new Error(data.error || "Payroll request failed.");
     return data;
   }
-  async function reload() {
+  async function reload(preparePeriod = false) {
     const id = ++requestId.current;
     setLoading(true);
     try {
-      const result = await request(
-        `?${new URLSearchParams({ periodStart: start, periodEnd: end })}`,
-      );
+      const result = preparePeriod
+        ? await request('/prepare-period', {
+            method: 'POST', body: JSON.stringify({ periodStart: start, periodEnd: end }),
+          })
+        : await request(`?${new URLSearchParams({ periodStart: start, periodEnd: end })}`);
       if (id === requestId.current) setRows(result);
     } finally {
       if (id === requestId.current) setLoading(false);
@@ -88,11 +90,18 @@ export default function DriverPayroll({
       setError("Choose a valid pay period.");
       return;
     }
-    reload().catch((e) => setError(e.message));
+    setLoading(true);
+    if (choosingPeriod) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      reload(true).catch((e) => { if (!cancelled) setError(e.message); });
+    }, 350);
     return () => {
+      cancelled = true;
+      clearTimeout(timer);
       requestId.current++;
     };
-  }, [start, end, token]);
+  }, [start, end, token, choosingPeriod]);
   useEffect(() => {
     if (active && !dialog.current?.open) dialog.current?.showModal();
     if (!active && dialog.current?.open) dialog.current.close();
@@ -221,7 +230,7 @@ export default function DriverPayroll({
         <div>
           <small>ACCOUNTS PAYABLE</small>
           <h2>Driver Payroll</h2>
-          <p>Every movement. One settlement. One source for your totals.</p>
+          <p>Choose the pay period to prepare all drivers’ settlements, then open each one to review.</p>
         </div>
       </div>
       {error && (
@@ -245,6 +254,11 @@ export default function DriverPayroll({
       </div>
       <div className="payroll-card">
         <div className="payroll-toolbar">
+          <div className="payroll-period-fields"
+            onFocusCapture={() => setChoosingPeriod(true)}
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setChoosingPeriod(false);
+            }}>
           <label>
             From
             <input
@@ -263,28 +277,7 @@ export default function DriverPayroll({
               disabled={busy}
             />
           </label>
-          <label>
-            Prepare for driver
-            <select
-              value={driverId}
-              onChange={(e) => setDriverId(e.target.value)}
-              disabled={busy}
-            >
-              <option value="">Choose driver</option>
-              {drivers.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name || d.id}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="primary-btn"
-            disabled={busy || loading || !driverId || !start || !end || start > end}
-            onClick={() => prepare(driverId)}
-          >
-            Prepare payroll
-          </button>
+          </div>
           <input
             type="search"
             aria-label="Search payroll"
@@ -325,7 +318,7 @@ export default function DriverPayroll({
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan="8">Loading payroll for this period…</td></tr>}
+              {loading && <tr><td colSpan="8">Preparing settlements for all drivers…</td></tr>}
               {!loading && visible.map((row) => (
                 <tr key={row.id}>
                   <td>
