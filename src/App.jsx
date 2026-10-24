@@ -1,3 +1,5 @@
+import PortWelcomeScene from './components/PortWelcomeScene.jsx';
+import { getUnpaidCustomerGroups } from './utils/accountingUnpaidCustomers.js';
 import { driverCompletedDisplay } from '../shared/driverCompletedDisplay.js';
 import { normalizePortDateTime, formatPortDateTime } from '../shared/exportReceiving.js';
 import ExportBookingLookup from './components/ExportBookingLookup.jsx';
@@ -2786,6 +2788,7 @@ const [settlementCalculatorInputs, setSettlementCalculatorInputs] = useState({
   detentionHourlyRate: '',
 });
 const [accountingSearchTerm, setAccountingSearchTerm] = useState('');
+const [accountingUnpaidCustomer, setAccountingUnpaidCustomer] = useState(null);
 const [accountingRevenueView, setAccountingRevenueView] = useState('weekly');
 const [accountingDeliveryDateFilter, setAccountingDeliveryDateFilter] = useState('all');
 const [accountingDeliveryCustomDate, setAccountingDeliveryCustomDate] = useState(getTodayDate());
@@ -5269,7 +5272,10 @@ const saveMoveDriverRate = async (moveId, currentRate = '') => {
   }
 };
 
+const unpaidCustomerGroups = getUnpaidCustomerGroups(completedAccountingLoads, savedInvoices, getCustomerBillAmount, parseMoney);
+const selectedUnpaidCustomer = unpaidCustomerGroups.find((group) => group.key === accountingUnpaidCustomer);
 const filteredAccountingLoads = completedAccountingLoads.filter((load) => {
+  if (accountingUnpaidCustomer !== null && !selectedUnpaidCustomer?.loadIds.has(String(load.id))) return false;
   const targetDeliveryDate = getAccountingDeliveryFilterDate();
   const matchesDeliveryDate = targetDeliveryDate ? getAccountingDeliveryDate(load) === targetDeliveryDate : true;
   if (!matchesDeliveryDate) return false;
@@ -10033,6 +10039,8 @@ return (
             </div>
           </div>
 
+          <div className="public-hero-visual">
+          <PortWelcomeScene />
           <div className="public-product-preview" aria-label="PortFlow dashboard preview">
             <div className="public-preview-top">
               <span>Today's Loads</span>
@@ -10057,6 +10065,7 @@ return (
                 </div>
               ))}
             </div>
+          </div>
           </div>
         </section>
 
@@ -10164,8 +10173,10 @@ return (
 
 if (!authToken) {
 return (
-    <div className={isDriverApp ? 'driver-mobile-login' : 'auth-shell'}>
+    <div className={isDriverApp ? 'driver-mobile-login' : 'auth-shell auth-shell--port'}>
+      {!isDriverApp && <PortWelcomeScene />}
       <div className={isDriverApp ? '' : 'auth-card'}>
+        {isDriverApp && <PortWelcomeScene compact />}
         {!isDriverApp && (
           <div className="auth-brand">
             <img src="/portflow-icon-192.png" alt="PortFlow" />
@@ -17007,6 +17018,37 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               <span>Saved Invoices</span>
               <strong>{savedInvoices.length}</strong>
             </div>
+          </div>
+
+          <div className="accounting-unpaid-bar" aria-label="Customers with unpaid loads">
+            <div className="accounting-unpaid-heading">
+              <strong>Outstanding by customer</strong>
+              <button type="button" className="secondary-btn compact-btn"
+                aria-pressed={accountingUnpaidCustomer === null}
+                onClick={() => setAccountingUnpaidCustomer(null)}>All loads</button>
+            </div>
+            <div className="accounting-unpaid-customers">
+              {unpaidCustomerGroups.map((group) => (
+                <button type="button" key={group.key} className="accounting-unpaid-customer"
+                  aria-pressed={accountingUnpaidCustomer === group.key}
+                  onClick={() => {
+                    setAccountingUnpaidCustomer(group.key);
+                    setAccountingSearchTerm('');
+                    setAccountingDeliveryDateFilter('all');
+                    setSelectedAccountingLoadId(null);
+                  }}>
+                  <strong>{group.name}</strong>
+                  <span>{group.count} {group.count === 1 ? 'load' : 'loads'} · {formatMoney(group.balance)} due</span>
+                </button>
+              ))}
+              {unpaidCustomerGroups.length === 0 && <span>No unpaid loads.</span>}
+            </div>
+            {accountingUnpaidCustomer !== null && (
+              <div className="accounting-unpaid-selection" role="status">
+                <strong>{selectedUnpaidCustomer?.name || 'Selected customer'}</strong>
+                <span>{selectedUnpaidCustomer?.count || 0} unpaid loads · {formatMoney(selectedUnpaidCustomer?.balance || 0)} outstanding</span>
+              </div>
+            )}
           </div>
 
           <div className="accounting-search-bar">

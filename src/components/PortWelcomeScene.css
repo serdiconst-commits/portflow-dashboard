@@ -1,0 +1,47 @@
+.port-welcome {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-width: 0;
+  border-radius: 22px;
+  background: #102c53;
+  color: #f1f8ff;
+  border: 1px solid #365774;
+  box-shadow: 0 24px 65px #071a3026;
+}
+.port-welcome-copy { position: relative; z-index: 1; padding: 30px 30px 0; }
+.port-welcome-eyebrow { color: #7cdbdb; font-size: 10px; font-weight: 800; letter-spacing: 2px; }
+.port-welcome .port-welcome-copy h2 { color: #f1f8ff; font-size: clamp(25px, 3vw, 40px); line-height: 1.1; margin: 14px 0 10px; letter-spacing: -1px; }
+.port-welcome .port-welcome-copy p { color: #bad0e4; font-size: 14px; line-height: 1.6; margin: 0; }
+.port-welcome-art { width: 100%; display: block; height: auto; }
+.port-welcome-caption { display: flex; align-items: center; gap: 9px; padding: 0 30px 22px; color: #a9c6dd; font-size: 11px; letter-spacing: 1px; }
+.port-welcome-dot { width: 6px; height: 6px; border-radius: 50%; background: #70dfcd; box-shadow: 0 0 14px #70dfcd; }
+.port-welcome-truck { animation: port-truck-drive 16s ease-in-out infinite; }
+.port-welcome-cargo { animation: port-cargo-lift 9s ease-in-out infinite; }
+.port-welcome-road { animation: port-road-pass 2s linear infinite; }
+@keyframes port-truck-drive { 0%, 100% { transform: translateX(-100px); } 50% { transform: translateX(115px); } }
+@keyframes port-cargo-lift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-30px); } }
+@keyframes port-road-pass { to { stroke-dashoffset: -62; } }
+.public-hero-visual { min-width: 0; display: grid; gap: 18px; }
+.auth-shell.auth-shell--port { grid-template-columns: minmax(0, 600px) minmax(0, 430px); justify-content: center; align-content: center; gap: 40px; }
+.auth-shell--port .auth-card { box-sizing: border-box; }
+.driver-mobile-login .port-welcome--compact { margin-bottom: 20px; }
+.port-welcome--compact .port-welcome-copy { padding: 18px 20px 0; }
+.port-welcome--compact .port-welcome-copy h2 { font-size: 23px; margin: 9px 0 0; }
+.port-welcome--compact .port-welcome-art { margin-top: 0; }
+.port-welcome--compact .port-welcome-caption { padding: 0 20px 15px; font-size: 10px; }
+.driver-mobile-login:has(.port-welcome) { box-sizing: border-box; max-width: 440px; min-height: 100svh; }
+@media (max-width: 800px) {
+  .auth-shell.auth-shell--port { grid-template-columns: minmax(0, 430px); gap: 20px; }
+  .auth-shell--port > .port-welcome { max-height: 260px; }
+  .auth-shell--port > .port-welcome .port-welcome-art { max-height: 170px; object-fit: cover; object-position: bottom; }
+  .auth-shell--port > .port-welcome .port-welcome-copy { padding: 20px 24px 0; }
+  .auth-shell--port > .port-welcome .port-welcome-copy p, .auth-shell--port > .port-welcome .port-welcome-caption { display: none; }
+}
+@media (max-height: 720px) and (max-width: 600px) {
+  .driver-mobile-login .port-welcome--compact .port-welcome-art { max-height: 105px; object-fit: cover; object-position: bottom; }
+  .driver-mobile-login:has(.port-welcome) { justify-content: flex-start; padding-top: 16px !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .port-welcome-truck, .port-welcome-cargo, .port-welcome-road { animation: none; }
+}

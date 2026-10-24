@@ -6417,3 +6417,47 @@ button:disabled {
 .driver-mobile-shell .notice-driver strong { font-size: 16px; }
 .driver-mobile-shell .notice-driver p { font-size: 14px; }
 .driver-mobile-shell .notice-driver button { min-width: 44px; min-height: 44px; }
+
+.accounting-unpaid-bar {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--pf-border, #dbe4f0);
+  border-radius: 8px;
+  background: var(--pf-surface, #fff);
+  color: var(--pf-text, #111827);
+}
+.accounting-unpaid-heading, .accounting-unpaid-selection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.accounting-unpaid-heading { margin-bottom: 10px; }
+.accounting-unpaid-customers {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+}
+.accounting-unpaid-customer {
+  flex: 0 0 auto;
+  max-width: 280px;
+  display: grid;
+  gap: 5px;
+  padding: 10px 14px;
+  border: 1px solid var(--pf-border, #dbe4f0);
+  border-radius: 8px;
+  background: var(--pf-surface, #fff);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.accounting-unpaid-customer strong { overflow-wrap: anywhere; }
+.accounting-unpaid-customer span { font-size: 12px; color: var(--pf-muted, #64748b); }
+.accounting-unpaid-customer[aria-pressed="true"] {
+  border-color: var(--pf-blue-text, #1d4ed8);
+  background: var(--pf-blue-bg, #eff6ff);
+}
+.accounting-unpaid-customer:focus-visible { outline: 2px solid var(--pf-blue-text, #1d4ed8); outline-offset: 2px; }
+.accounting-unpaid-selection { margin-top: 8px; font-size: 14px; }
