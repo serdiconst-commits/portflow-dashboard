@@ -1,4 +1,4 @@
-import { dbAll, dbGet } from './dbUtils.js';
+import { dbAll } from './dbUtils.js';
 import { ensureLifecycle, validPayrollDate } from './payrollLifecycle.js';
 import { createSettlement, listSettlements } from './driverSettlements.js';
 
@@ -11,12 +11,9 @@ export async function preparePayrollPeriod(db, companyId, input, actor) {
   await ensureLifecycle(db);
   const drivers = await dbAll(db, 'SELECT id FROM drivers WHERE companyId=? ORDER BY id', [companyId]);
   for (const driver of drivers) {
-    const existing = await dbGet(db, `SELECT s.id FROM settlements s WHERE s.companyId=? AND s.driverId=?
-      AND s.periodStart=? AND s.periodEnd=?
-      AND NOT EXISTS (SELECT 1 FROM settlement_corrections c WHERE c.settlementId=s.id) LIMIT 1`,
-      [companyId, driver.id, periodStart, periodEnd]);
-    // Opening a period must not overwrite manual edits or finalized statements.
-    if (!existing) await createSettlement(db, companyId, {driverId:driver.id,periodStart,periodEnd}, actor);
+    // Reuse the existing settlement path: append newly completed movements to
+    // Drafts, preserving edited lines/exclusions and leaving locked records alone.
+    await createSettlement(db, companyId, {driverId:driver.id,periodStart,periodEnd}, actor);
   }
   return listSettlements(db, companyId, {periodStart,periodEnd});
 }
