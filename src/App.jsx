@@ -1,3 +1,4 @@
+import { unassignDuplicate, createLoadCopies } from '../shared/duplicateLoads.js';
 import AccountingRestoreMenu from './components/AccountingRestoreMenu.jsx';
 import { isReadyForAccounting } from '../shared/accountingReview.js';
 import { SavedLocationInput, AppointmentInput } from './components/EditLoadInputs.jsx';
@@ -278,7 +279,7 @@ const loadPresets = [
     name: 'Pre-Pull Live Load',
     workflowType: 'PRE_PULL_LIVE',
     dropType: 'Yard',
-    status: 'Dispatched',
+    status: 'Pending',
     availabilityStatus: 'Not Available',
   },
   {
@@ -1433,6 +1434,9 @@ const [loadLocationEditor, setLoadLocationEditor] = useState({
 const sigCanvas = useRef(null);
 const [signatures, setSignatures] = useState({});
 const [newLoad, setNewLoad] = useState(emptyLoad);
+const [duplicateCount, setDuplicateCount] = useState(1);
+const [loadCreating, setLoadCreating] = useState(false);
+const loadCreatePending = useRef(false);
 const [editingLoad, setEditingLoad] = useState(emptyLoad);
 const editLoadBaseline = useRef(null);
 const loadEditSaving = useRef(false);
@@ -5563,10 +5567,17 @@ if (name === 'driver' && prev.status === 'Dropped') {
 
 const handleAddLoad = async (e) => {
   e.preventDefault();
+  if (loadCreatePending.current) return;
+  const isDuplicate = Boolean(newLoad.duplicatedFromLoadId);
+  const copies = isDuplicate ? Number(duplicateCount) : 1;
+  if (!Number.isInteger(copies) || copies < 1 || copies > 100) {
+    alert('Enter a whole number of copies from 1 to 100.');
+    return;
+  }
   const isExportLoad = selectedPresetName === 'Export Load';
   const duplicateContainerLoad = findDuplicateContainerLoad(newLoad.containerNumber);
   if (
-    duplicateContainerLoad &&
+    !isDuplicate && duplicateContainerLoad &&
     !canReuseContainerAsStreetTurn(newLoad, isExportLoad)
   ) {
     alert(
@@ -5578,7 +5589,7 @@ const handleAddLoad = async (e) => {
   if (
     !String(newLoad.customer || '').trim() ||
     !String(newLoad.referenceNumber || '').trim() ||
-    (!isExportLoad && !String(newLoad.containerNumber || '').trim()) ||
+    (!isDuplicate && !isExportLoad && !String(newLoad.containerNumber || '').trim()) ||
     !String(newLoad.pickup || '').trim() ||
     !String(newLoad.delivery || '').trim()
   ) {
@@ -5593,6 +5604,8 @@ const handleAddLoad = async (e) => {
     alert('Choose the main yard / pre-pull drop location.');
     return;
   }
+  loadCreatePending.current = true;
+  setLoadCreating(true);
   try {
     Promise.allSettled([
       saveLocationIfNotExists(newLoad.pickup, 'pickup'),
@@ -5647,29 +5660,28 @@ const payload = {
   status: getStatusAfterDriverAssignment(newLoad.driver, loadToAdd.status),
 };
 
-const res = await fetch(`${API_BASE}/api/loads`, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${authToken}`,
-  },
-  body: JSON.stringify(payload),
-});
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.details || data.error || 'Failed to create load');
+const result = await createLoadCopies(payload, copies, async (copy) => {
+  const res = await fetch(`${API_BASE}/api/loads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+    body: JSON.stringify(copy),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.details || data.error || 'Failed to create load');
+  return data;
+}, (data) => setLoadsData((prev) => [data, ...prev.filter((load) => load.id !== data.id)]));
+    if (result.error) {
+      if (!isDuplicate) throw result.error;
+      if (handleAuthError(result.error.message)) return;
+      if (isDuplicate) setDuplicateCount(result.remaining);
+      alert(`${result.created.length} of ${copies} loads created. Stopped: ${result.error.message}. ${result.remaining} not confirmed; check the load list before retrying.`);
+      return;
     }
-
-    setLoadsData((prev) => {
-      const withoutCurrent = prev.filter((load) => load.id !== data.id);
-      return [data, ...withoutCurrent];
-    });
-
+    const data = result.created[result.created.length - 1];
     setInvoiceLoadId(data.id);
     setShowForm(false);
     setNewLoad(emptyLoad);
+    setDuplicateCount(1);
     setSelectedPresetName('');
 
     await fetchLoads();
@@ -5679,6 +5691,9 @@ const res = await fetch(`${API_BASE}/api/loads`, {
     console.error('Failed to create load:', error);
     if (handleAuthError(error.message)) return;
     alert(`Failed to create load: ${error.message}`);
+  } finally {
+    loadCreatePending.current = false;
+    setLoadCreating(false);
   }
 };
 const handleEditClick = (event) => {
@@ -5726,16 +5741,14 @@ const openCompletedLoadEditor = (load) => {
 const handleDuplicateLoad = (load) => {
   if (!load) return;
 
-  const driver = normalizeDriverForStorage(load.driver);
   const existingNotes = String(load.notes || '').trim();
 
-  setNewLoad({
+  setDuplicateCount(1);
+  setNewLoad(unassignDuplicate({
     ...emptyLoad,
     ...load,
     id: '',
     containerNumber: '',
-    driver,
-    truck: driver ? getDriverTruck(driver) : '',
     loadDate: getTodayDate(),
     status: 'Dispatched',
     availabilityStatus: 'Not Available',
@@ -5760,9 +5773,9 @@ const handleDuplicateLoad = (load) => {
     droppedBy: '',
     dropDateTime: '',
     nextMoveType: '',
-  });
+  }));
 
-  setSelectedPresetName('');
+  setSelectedPresetName(load.loadType === 'EXPORT' ? 'Export Load' : '');
   setSelectedLoad(null);
   setIsEditing(false);
   setShowForm(true);
@@ -12486,6 +12499,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               </div>
 
               <form className="load-form" onSubmit={handleAddLoad}>
+                {newLoad.duplicatedFromLoadId && <div className="detail-box">
+                  <label htmlFor="duplicate-load-count">Number of copies</label>
+                  <input id="duplicate-load-count" type="number" min="1" max="100" step="1" required value={duplicateCount} disabled={loadCreating} onChange={(event) => setDuplicateCount(event.target.value)} />
+                  <p>Copying {newLoad.duplicatedFromLoadId}. Each new load gets its own Load #, with no driver, truck or container. Assign them after saving.</p>
+                </div>}
 
 <div style={{
   marginTop: '16px',
@@ -12502,6 +12520,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     name="id"
     placeholder="Load ID (example: LD-1004)"
     value={newLoad.id}
+    disabled={Boolean(newLoad.duplicatedFromLoadId)}
     onChange={handleInputChange}
   />
 <select
@@ -12724,6 +12743,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     name="containerNumber"
     placeholder={selectedPresetName === 'Export Load' ? 'Container Number (optional for export)' : 'Container Number'}
     value={newLoad.containerNumber}
+    disabled={Boolean(newLoad.duplicatedFromLoadId)}
     onChange={handleInputChange}
   />
   {selectedPresetName !== 'Export Load' && (
@@ -12733,7 +12753,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       className="primary-btn smart-port-lookup-btn"
       onClick={handleSmartPortLookup}
       disabled={
-        smartPortLookupLoading ||
+        Boolean(newLoad.duplicatedFromLoadId) || smartPortLookupLoading ||
         (!newLoad.containerNumber && !newLoad.referenceNumber && !newLoad.poNumber && !newLoad.bookingNumber)
       }
     >
@@ -12891,6 +12911,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 <select
   name="driver"
   value={newLoad.driver}
+  disabled={Boolean(newLoad.duplicatedFromLoadId)}
   onChange={handleInputChange}
 >
   <option value="">Assign Later</option>
@@ -13318,8 +13339,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 </div>
 
   <div style={{ marginTop: '16px', textAlign: 'right' }}>
-  <button type="submit" className="primary-btn" style={{ width: 'auto' }}>
-    Save Load
+  <button type="submit" className="primary-btn" disabled={loadCreating} style={{ width: 'auto' }}>
+    {loadCreating ? 'Saving...' : newLoad.duplicatedFromLoadId ? `Create ${duplicateCount || 0} copies` : 'Save Load'}
   </button>
 </div>
               </form>
