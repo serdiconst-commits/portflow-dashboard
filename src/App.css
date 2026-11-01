@@ -6474,3 +6474,6 @@ button:disabled {
 
 .completed-bulk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }
 .completed-send-status { padding: 10px 12px; border: 1px solid var(--pf-border, #cbd5e1); border-radius: 8px; overflow-wrap: anywhere; }
+
+.accounting-restore-control { position: relative; }
+.accounting-restore-options { position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; width: 280px; max-width: 80vw; display: grid; gap: 8px; padding: 12px; border: 1px solid var(--pf-border, #cbd5e1); border-radius: 10px; background: var(--pf-surface, #fff); color: var(--pf-text, #111827); box-shadow: 0 12px 24px rgba(0,0,0,.2); }
