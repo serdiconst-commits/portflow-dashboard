@@ -1,3 +1,4 @@
+import { unassignDuplicate } from '../shared/duplicateLoads.js';
 import { createLoadExtraChargesHandler } from './services/loadExtraCharges.js';
 import { saveLoadWithDropDate } from './services/dropDateEdit.js';
 import { driverCompletedDisplay } from '../shared/driverCompletedDisplay.js';
@@ -5561,7 +5562,8 @@ app.put('/api/drivers/:id', authenticate, protectOwnerEmail, requireRoles(dispat
 });
 
 app.post('/api/loads', authenticate, requireRoles(dispatchLocationRoles), (req, res) => {
-  const l = req.body || {};
+  const body = req.body || {};
+  const l = body.duplicatedFromLoadId ? unassignDuplicate(body) : body;
   const companyId = req.company.companyId;
 
   db.get(
