@@ -1,3 +1,5 @@
+import AccountingRestoreMenu from './components/AccountingRestoreMenu.jsx';
+import { isReadyForAccounting } from '../shared/accountingReview.js';
 import { SavedLocationInput, AppointmentInput } from './components/EditLoadInputs.jsx';
 import PortWelcomeScene from './components/PortWelcomeScene.jsx';
 import { getUnpaidCustomerGroups } from './utils/accountingUnpaidCustomers.js';
@@ -2799,6 +2801,8 @@ const [completedLoadSearchTerm, setCompletedLoadSearchTerm] = useState('');
 const [selectedCompletedReviewLoadId, setSelectedCompletedReviewLoadId] = useState('');
 const [completedSelectedIds, setCompletedSelectedIds] = useState([]);
 const [completedSending, setCompletedSending] = useState(false);
+const [accountingRestoreSaving, setAccountingRestoreSaving] = useState(false);
+const accountingRestorePending = useRef(false);
 const [completedSendStatus, setCompletedSendStatus] = useState('');
 const completedSendPending = useRef(false);
 const [selectedCompletedDocumentType, setSelectedCompletedDocumentType] = useState('POD');
@@ -4967,9 +4971,7 @@ useEffect(() => {
 
 
 const activeOperationsLoads = (loadsData || []).filter((load) => !isCompletedLoad(load));
-const isLoadReadyForAccounting = (load) =>
-  String(load?.billingStatus || '').trim().toLowerCase() === 'ready to bill' ||
-  savedInvoices.some((invoice) => invoice.loadId === load?.id);
+const isLoadReadyForAccounting = (load) => isReadyForAccounting(load, savedInvoices);
 const getRelativeDateString = (offsetDays = 0) => getDateStringWithOffsetInAppTimeZone(offsetDays);
 const getLoadAppointmentDate = (load) => {
   const rawAppointment = String(load?.appointmentTime || '').trim();
@@ -7165,6 +7167,36 @@ const handleGenerateCustomerPdf = async (loadForPacket) => {
   } catch (error) {
     console.error('Customer PDF error:', error);
     alert(`Failed to generate PDF: ${error.message}`);
+  }
+};
+
+const handleReturnAccountingLoadToCompleted = async (load) => {
+  if (!load?.id || accountingRestorePending.current) return;
+  if (!window.confirm(`⚠️ Return load ${load.containerNumber || load.id} to Completed Loads for review?\n\nThe load will remain completed and leave the Accounting load list until it is sent again. Existing invoices, documents and driver pay will not change.`)) return;
+  accountingRestorePending.current = true;
+  setAccountingRestoreSaving(true);
+  try {
+    const res = await fetch(`${API_BASE}/api/loads/${encodeURIComponent(load.id)}/billing-status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ billingStatus: 'Needs Review' }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.id !== load.id) throw new Error(data.error || 'Failed to return load to Completed.');
+    setLoadsData((rows) => rows.map((row) => row.id === data.id ? { ...row, ...data } : row));
+    setSelectedLoad((previous) => previous?.id === data.id ? { ...previous, ...data } : previous);
+    setSelectedAccountingLoadId('');
+    setSelectedCompletedReviewLoadId(data.id);
+    setCompletedEditingLoadId('');
+    setCompletedLoadDateFilter('all');
+    setCompletedLoadSearchTerm('');
+    setCompletedSendStatus('Load returned from Accounting to Completed for review.');
+    setActiveView('completed');
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    accountingRestorePending.current = false;
+    setAccountingRestoreSaving(false);
   }
 };
 
@@ -17398,13 +17430,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   >
                     Invoice
                   </button>
-                  <button
-                    type="button"
-                    className="danger-btn compact-btn"
-                    onClick={() => handleRestoreCompletedLoad(selectedAccountingLoad)}
-                  >
-                    ⚠ Restore to Dispatch
-                  </button>
+                  <AccountingRestoreMenu key={selectedAccountingLoad.id} disabled={accountingRestoreSaving}
+                    onCompleted={() => handleReturnAccountingLoadToCompleted(selectedAccountingLoad)}
+                    onDispatch={() => handleRestoreCompletedLoad(selectedAccountingLoad)} />
                   <button
                     type="button"
                     className="secondary-btn compact-btn"

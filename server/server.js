@@ -6492,13 +6492,13 @@ app.put('/api/loads/:id/billing-status', authenticate, (req, res) => {
     return res.status(403).json({ error: 'Drivers cannot change billing status.' });
   }
 
-  const allowedStatuses = ['', 'Ready To Bill'];
+  const allowedStatuses = ['', 'Ready To Bill', 'Needs Review'];
   if (!allowedStatuses.includes(billingStatus)) {
     return res.status(400).json({ error: 'Invalid billing status.' });
   }
 
   db.get(
-    `SELECT id, containerNumber, billingStatus FROM loads WHERE id = ? AND companyId = ?`,
+    `SELECT id, containerNumber, billingStatus, status, deletedAt FROM loads WHERE id = ? AND companyId = ?`,
     [loadId, companyId],
     (findErr, oldLoad) => {
       if (findErr) {
@@ -6508,6 +6508,11 @@ app.put('/api/loads/:id/billing-status', authenticate, (req, res) => {
 
       if (!oldLoad) {
         return res.status(404).json({ error: 'Load not found.' });
+      }
+
+      if (billingStatus === 'Needs Review' &&
+          (String(oldLoad.deletedAt || '').trim() || !['completed', 'delivered'].includes(String(oldLoad.status || '').trim().toLowerCase()))) {
+        return res.status(409).json({ error: 'Only completed loads can be returned for review.' });
       }
 
       db.run(
