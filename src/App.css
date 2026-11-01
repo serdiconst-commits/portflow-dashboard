@@ -6471,3 +6471,6 @@ button:disabled {
 .edit-appointment input { width: 100%; min-width: 0; box-sizing: border-box; }
 .edit-appointment-clock { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; margin-top: 8px; }
 .edit-appointment small { display: block; margin-top: 6px; color: var(--pf-muted, #64748b); }
+
+.completed-bulk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }
+.completed-send-status { padding: 10px 12px; border: 1px solid var(--pf-border, #cbd5e1); border-radius: 8px; overflow-wrap: anywhere; }
