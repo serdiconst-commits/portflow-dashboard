@@ -16524,6 +16524,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <thead>
                   <tr>
                     <th><input type="checkbox" aria-label="Select all visible completed loads" checked={allVisibleCompletedSelected} disabled={completedSending} onChange={toggleVisibleCompletedSelection} /></th>
+                    <th>Load #</th>
                     <th>Appointment</th>
                     <th>Customer</th>
                     <th>Container</th>
@@ -16541,6 +16542,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     <tr key={load.id}>
                       <td><input type="checkbox" aria-label={`Select load ${load.containerNumber || load.id}`} checked={completedSelectedIds.includes(load.id)} disabled={completedSending}
                         onChange={(event) => setCompletedSelectedIds((ids) => event.target.checked ? [...new Set([...ids, load.id])] : ids.filter((id) => id !== load.id))} /></td>
+                      <td>{load.id}</td>
                       <td>{load.appointmentTime ? formatAppointmentTime(load.appointmentTime) : load.loadDate || '-'}</td>
                       <td>{load.customer || '-'}</td>
                       <td>{load.containerNumber || '-'}</td>
@@ -16675,6 +16677,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="detail-box"><span>Customer</span><strong>{selectedCompletedReviewLoad.customer || '-'}</strong></div>
                 <div className="detail-box"><span>Container</span><strong>{selectedCompletedReviewLoad.containerNumber || '-'}</strong></div>
                 <div className="detail-box"><span>Reference #</span><strong>{selectedCompletedReviewLoad.referenceNumber || '-'}</strong></div>
+                {selectedCompletedReviewLoad.loadType === 'EXPORT' && <div className="detail-box"><span>Booking Number</span><strong>{selectedCompletedReviewLoad.bookingNumber || '—'}</strong></div>}
                 <div className="detail-box"><span>Driver</span><strong>{selectedCompletedReviewLoad.driver ? getDriverLabel(selectedCompletedReviewLoad.driver) : 'Not Assigned'}</strong></div>
                 <div className="detail-box"><span>Driver Pay</span><strong>{formatMoney(getDriverPayWithDetention(selectedCompletedReviewLoad))}</strong></div>
                 <div className="detail-box"><span>Pickup</span><strong>{selectedCompletedReviewLoad.pickup || '-'}</strong></div>
@@ -17464,6 +17467,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="detail-box"><span>Customer</span><strong>{selectedAccountingLoad.customer || '—'}</strong></div>
                 <div className="detail-box"><span>Broker</span><strong>{selectedAccountingLoad.brokerName || selectedAccountingLoad.broker || '—'}</strong></div>
                 <div className="detail-box"><span>Reference #</span><strong>{selectedAccountingLoad.referenceNumber || '—'}</strong></div>
+                {selectedAccountingLoad.loadType === 'EXPORT' && <div className="detail-box"><span>Booking Number</span><strong>{selectedAccountingLoad.bookingNumber || '—'}</strong></div>}
                 <div className="detail-box"><span>PO #</span><strong>{selectedAccountingLoad.poNumber || '—'}</strong></div>
                 <div className="detail-box"><span>Container</span><strong>{selectedAccountingLoad.containerNumber || '—'}</strong></div>
                 <div className="detail-box"><span>Container Size</span><strong>{selectedAccountingLoad.containerSize || '—'}</strong></div>
