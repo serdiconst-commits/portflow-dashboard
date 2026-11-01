@@ -1,3 +1,4 @@
+import { SavedLocationInput, AppointmentInput } from './components/EditLoadInputs.jsx';
 import PortWelcomeScene from './components/PortWelcomeScene.jsx';
 import { getUnpaidCustomerGroups } from './utils/accountingUnpaidCustomers.js';
 import { driverCompletedDisplay } from '../shared/driverCompletedDisplay.js';
@@ -13850,9 +13851,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <span>Pickup, delivery, return, and route miles</span>
                         </div>
                         <div className="edit-load-grid">
-                          <input type="text" name="pickup" placeholder="Pickup" value={editingLoad.pickup} onChange={handleEditInputChange} />
+                          <SavedLocationInput label="Pick Up Location" name="pickup" value={editingLoad.pickup || ''} options={pickupLocations} onChange={handleEditInputChange} formatAddress={formatLocationAddress} />
                           <input type="text" name="delivery" placeholder="Delivery" value={editingLoad.delivery} onChange={handleEditInputChange} />
-                          <input type="text" name="returnLocation" placeholder="Return Location" value={editingLoad.returnLocation} onChange={handleEditInputChange} />
+                          <SavedLocationInput label="Return Location" name="returnLocation" value={editingLoad.returnLocation || ''} options={returnLocations} onChange={handleEditInputChange} formatAddress={formatLocationAddress} />
                           <select name="deliveryType" value={editingLoad?.deliveryType || ''} onChange={handleEditInputChange}>
                             <option value="">Select Delivery Type</option>
                             <option value="local">Local Delivery</option>
@@ -13896,10 +13897,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                             <span>Load Date</span>
                             <input type="date" name="loadDate" value={editingLoad?.loadDate || ''} onChange={handleEditInputChange} />
                           </label>
-                          <label className="edit-load-field">
-                            <span>Appointment Time</span>
-                            <input type="datetime-local" name="appointmentTime" value={normalizeDateTimeInputValue(editingLoad?.appointmentTime)} onChange={handleEditInputChange} />
-                          </label>
+                          <AppointmentInput value={normalizeDateTimeInputValue(editingLoad?.appointmentTime)} onChange={handleEditInputChange} />
                           {editingLoad.loadType === 'EXPORT' ? <>
                             <label className="edit-load-field"><span>Beginning Receiving (Houston)</span><input type="datetime-local" name="beginReceiving" value={normalizePortDateTime(editingLoad.beginReceiving)} onChange={handleEditInputChange} /></label>
                             <label className="edit-load-field"><span>Cutoff — Full Return (Houston)</span><input type="datetime-local" name="exportCutoff" value={normalizePortDateTime(editingLoad.exportCutoff)} onChange={handleEditInputChange} /></label>
@@ -16668,9 +16666,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         {shipLineOptions.map((line) => <option key={line} value={line}>{line}</option>)}
                       </select>
                       <input name="chassisNumber" placeholder="Chassis Number" value={editingLoad.chassisNumber || ''} onChange={handleEditInputChange} />
-                      <input name="pickup" placeholder="Pickup Location" value={editingLoad.pickup || ''} onChange={handleEditInputChange} />
+                      <SavedLocationInput label="Pick Up Location" name="pickup" value={editingLoad.pickup || ''} options={pickupLocations} onChange={handleEditInputChange} formatAddress={formatLocationAddress} />
                       <input name="delivery" placeholder="Delivery Location" value={editingLoad.delivery || ''} onChange={handleEditInputChange} />
-                      <input name="returnLocation" placeholder="Return Location" value={editingLoad.returnLocation || ''} onChange={handleEditInputChange} />
+                      <SavedLocationInput label="Return Location" name="returnLocation" value={editingLoad.returnLocation || ''} options={returnLocations} onChange={handleEditInputChange} formatAddress={formatLocationAddress} />
                       <select name="deliveryType" value={editingLoad.deliveryType || ''} onChange={handleEditInputChange}>
                         <option value="">Select Delivery Type</option><option value="local">Local Delivery</option><option value="highway">Highway Delivery</option>
                       </select>
@@ -16686,7 +16684,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     <div className="edit-load-group-header"><h4>Schedule, Driver & Status</h4></div>
                     <div className="edit-load-grid">
                       <label className="edit-load-field"><span>Load Date</span><input type="date" name="loadDate" value={editingLoad.loadDate || ''} onChange={handleEditInputChange} /></label>
-                      <label className="edit-load-field"><span>Appointment</span><input type="datetime-local" name="appointmentTime" value={normalizeDateTimeInputValue(editingLoad.appointmentTime)} onChange={handleEditInputChange} /></label>
+                      <AppointmentInput value={normalizeDateTimeInputValue(editingLoad?.appointmentTime)} onChange={handleEditInputChange} />
                       {editingLoad.loadType === 'EXPORT' ? <>
                         <label className="edit-load-field"><span>Beginning Receiving (Houston)</span><input type="datetime-local" name="beginReceiving" value={normalizePortDateTime(editingLoad.beginReceiving)} onChange={handleEditInputChange} /></label>
                         <label className="edit-load-field"><span>Cutoff — Full Return (Houston)</span><input type="datetime-local" name="exportCutoff" value={normalizePortDateTime(editingLoad.exportCutoff)} onChange={handleEditInputChange} /></label>

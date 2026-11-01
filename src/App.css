@@ -6461,3 +6461,13 @@ button:disabled {
 }
 .accounting-unpaid-customer:focus-visible { outline: 2px solid var(--pf-blue-text, #1d4ed8); outline-offset: 2px; }
 .accounting-unpaid-selection { margin-top: 8px; font-size: 14px; }
+
+.edit-saved-location { min-width: 0; }
+.edit-saved-location .location-search-menu { max-height: 260px; }
+.edit-saved-location .location-search-option.is-active { background: var(--pf-blue-bg, #eef6ff); }
+.edit-appointment { margin: 0; padding: 0; border: 0; min-width: 0; }
+.edit-appointment legend { margin-bottom: 6px; font-size: 13px; font-weight: 800; }
+.edit-appointment label { display: grid; gap: 5px; min-width: 0; font-size: 12px; }
+.edit-appointment input { width: 100%; min-width: 0; box-sizing: border-box; }
+.edit-appointment-clock { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; margin-top: 8px; }
+.edit-appointment small { display: block; margin-top: 6px; color: var(--pf-muted, #64748b); }
