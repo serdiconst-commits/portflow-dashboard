@@ -2797,6 +2797,10 @@ const [completedLoadDateFilter, setCompletedLoadDateFilter] = useState('today');
 const [completedLoadCustomDate, setCompletedLoadCustomDate] = useState(getTodayDate());
 const [completedLoadSearchTerm, setCompletedLoadSearchTerm] = useState('');
 const [selectedCompletedReviewLoadId, setSelectedCompletedReviewLoadId] = useState('');
+const [completedSelectedIds, setCompletedSelectedIds] = useState([]);
+const [completedSending, setCompletedSending] = useState(false);
+const [completedSendStatus, setCompletedSendStatus] = useState('');
+const completedSendPending = useRef(false);
 const [selectedCompletedDocumentType, setSelectedCompletedDocumentType] = useState('POD');
 const [completedEditingLoadId, setCompletedEditingLoadId] = useState('');
 const [mileageReportYear, setMileageReportYear] = useState(() => getTodayDate().slice(0, 4));
@@ -5005,6 +5009,12 @@ const filteredCompletedReviewLoads = completedReviewLoads.filter((load) => {
     reference.includes(normalizedCompletedLoadSearchTerm)
   );
 });
+const completedSelectedLoads = completedReviewLoads.filter((load) => completedSelectedIds.includes(load.id));
+const allVisibleCompletedSelected = filteredCompletedReviewLoads.length > 0 && filteredCompletedReviewLoads.every((load) => completedSelectedIds.includes(load.id));
+const toggleVisibleCompletedSelection = () => {
+  const visible = new Set(filteredCompletedReviewLoads.map((load) => load.id));
+  setCompletedSelectedIds((ids) => allVisibleCompletedSelected ? ids.filter((id) => !visible.has(id)) : [...new Set([...ids, ...visible])]);
+};
 const selectedCompletedReviewLoad = selectedCompletedReviewLoadId
   ? completedReviewLoads.find((load) => load.id === selectedCompletedReviewLoadId) || null
   : null;
@@ -7162,18 +7172,18 @@ const handleRestoreCompletedLoad = async (loadToRestore) => {
   if (!loadToRestore?.id) return;
 
   const confirmRestore = window.confirm(
-    `Restore load ${loadToRestore.containerNumber || loadToRestore.id} back to Dispatch?`
+    `⚠️ Restore load ${loadToRestore.containerNumber || loadToRestore.id} to Dispatch?\n\nThis removes it from Completed Loads and makes it active again. Existing documents, invoices and payroll records will be kept; they are not reversed. Review driver assignment and payroll before completing it again.`
   );
   if (!confirmRestore) return;
 
   const restoredLoad = {
     ...loadToRestore,
-    status: 'Dispatched',
+    status: normalizeDriverForStorage(loadToRestore.driver) ? 'Dispatched' : 'Pending',
     availabilityStatus: '',
   };
 
   try {
-    const res = await fetch(`${API_BASE}/api/loads/${restoredLoad.id}`, {
+    const res = await fetch(`${API_BASE}/api/loads/${encodeURIComponent(restoredLoad.id)}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -7192,6 +7202,8 @@ const handleRestoreCompletedLoad = async (loadToRestore) => {
       prevLoads.map((load) => (load.id === data.id ? data : load))
     );
     setSelectedAccountingLoadId('');
+    setSelectedCompletedReviewLoadId('');
+    setCompletedSelectedIds((ids) => ids.filter((id) => id !== loadToRestore.id));
     setSelectedLoad(data);
     setEditingLoad(data);
     await fetchLoads();
@@ -7202,42 +7214,48 @@ const handleRestoreCompletedLoad = async (loadToRestore) => {
   }
 };
 
-const handleSendCompletedLoadToAccounting = async (loadToBill) => {
-  if (!loadToBill?.id) return;
-  if (accountingExtraChargesOpenLoadId === loadToBill.id) {
-    alert('Please save or close customer extra charges before sending this load to Accounting.');
+const handleSendCompletedLoadsToAccounting = async (loadsToBill) => {
+  if (completedSendPending.current) return;
+  const eligibleIds = new Set(completedReviewLoads.map((load) => load.id));
+  const candidates = [...new Map(loadsToBill.filter((load) => load?.id && eligibleIds.has(load.id)).map((load) => [load.id, load])).values()];
+  if (!candidates.length) return;
+  if (candidates.some((load) => accountingExtraChargesOpenLoadId === load.id)) {
+    alert('Please save or close customer extra charges before sending these loads to Accounting.');
     return;
   }
-
+  if (candidates.length > 1 && !window.confirm(`Send ${candidates.length} selected completed loads to Accounting?\n\nThey will be marked Ready To Bill. You will stay in Completed Loads.`)) return;
+  completedSendPending.current = true;
+  setCompletedSending(true);
+  setCompletedSendStatus('Sending selected loads to Accounting...');
+  const succeeded = [];
+  const failed = [];
   try {
-    const res = await fetch(`${API_BASE}/api/loads/${encodeURIComponent(loadToBill.id)}/billing-status`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify({ billingStatus: 'Ready To Bill' }),
-    });
-
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to send load to accounting');
+    for (const load of candidates) {
+      try {
+        const res = await fetch(`${API_BASE}/api/loads/${encodeURIComponent(load.id)}/billing-status`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+          body: JSON.stringify({ billingStatus: 'Ready To Bill' }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.id !== load.id) throw new Error(data.error || 'Failed to send load to Accounting. Refresh before retrying.');
+        succeeded.push(load.id);
+        setLoadsData((previous) => previous.map((row) => row.id === data.id ? { ...row, ...data } : row));
+        setSelectedLoad((previous) => previous?.id === data.id ? { ...previous, ...data } : previous);
+        setSelectedCompletedReviewLoadId((previous) => previous === data.id ? '' : previous);
+      } catch (error) {
+        failed.push(`${load.containerNumber || load.id}: ${error.message}`);
+      }
     }
-
-    setLoadsData((prevLoads) =>
-      prevLoads.map((load) => (load.id === data.id ? { ...load, ...data } : load))
-    );
-    setSelectedLoad((prev) => (prev?.id === data.id ? { ...prev, ...data } : prev));
-    setSelectedCompletedReviewLoadId((prev) => (prev === data.id ? '' : prev));
-    setAccountingSearchTerm('');
-    setSelectedAccountingLoadId(data.id);
-    setActiveView('accounting');
-  } catch (error) {
-    console.error('Failed to send completed load to accounting:', error);
-    alert(`Failed to send to accounting: ${error.message}`);
+    setCompletedSelectedIds((ids) => ids.filter((id) => !succeeded.includes(id)));
+    setCompletedSendStatus(`${succeeded.length} load${succeeded.length === 1 ? '' : 's'} sent to Accounting.${failed.length ? ` ${failed.length} failed: ${failed.join('; ')}` : ''}`);
+  } finally {
+    completedSendPending.current = false;
+    setCompletedSending(false);
   }
 };
+
+const handleSendCompletedLoadToAccounting = (load) => handleSendCompletedLoadsToAccounting([load]);
 
 const uploadDocumentsForLoad = async (loadId, files, category) => {
   if (!loadId || !files.length) return null;
@@ -16458,11 +16476,22 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
             <span>Appointment date: {getCompletedLoadFilterDate() || 'Any'}</span>
           </div>
 
+          <div className="completed-bulk-actions">
+            <span>{completedSelectedLoads.length} selected</span>
+            <button type="button" className="primary-btn compact-btn" disabled={completedSending || !completedSelectedLoads.length}
+              onClick={() => handleSendCompletedLoadsToAccounting(completedSelectedLoads)}>
+              {completedSending ? 'Sending...' : `Send Selected to Accounting (${completedSelectedLoads.length})`}
+            </button>
+            <button type="button" className="secondary-btn compact-btn" disabled={completedSending || !completedSelectedLoads.length} onClick={() => setCompletedSelectedIds([])}>Clear Selection</button>
+          </div>
+          {completedSendStatus && <p role="status" className="completed-send-status">{completedSendStatus}</p>}
+
           {filteredCompletedReviewLoads.length > 0 ? (
             <div className="table-wrap accounting-table-wrap">
               <table>
                 <thead>
                   <tr>
+                    <th><input type="checkbox" aria-label="Select all visible completed loads" checked={allVisibleCompletedSelected} disabled={completedSending} onChange={toggleVisibleCompletedSelection} /></th>
                     <th>Appointment</th>
                     <th>Customer</th>
                     <th>Container</th>
@@ -16478,6 +16507,8 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <tbody>
                   {filteredCompletedReviewLoads.map((load) => (
                     <tr key={load.id}>
+                      <td><input type="checkbox" aria-label={`Select load ${load.containerNumber || load.id}`} checked={completedSelectedIds.includes(load.id)} disabled={completedSending}
+                        onChange={(event) => setCompletedSelectedIds((ids) => event.target.checked ? [...new Set([...ids, load.id])] : ids.filter((id) => id !== load.id))} /></td>
                       <td>{load.appointmentTime ? formatAppointmentTime(load.appointmentTime) : load.loadDate || '-'}</td>
                       <td>{load.customer || '-'}</td>
                       <td>{load.containerNumber || '-'}</td>
@@ -16528,10 +16559,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <button
                             type="button"
                             className="primary-btn compact-btn"
-                            onClick={() => handleSendCompletedLoadToAccounting(load)}
+                            disabled={completedSending} onClick={() => handleSendCompletedLoadToAccounting(load)}
                           >
                             Send to Accounting
                           </button>
+                          <button type="button" className="secondary-btn compact-btn danger-btn" disabled={completedSending} onClick={() => handleRestoreCompletedLoad(load)}>⚠ Restore to Dispatch</button>
                         </div>
                       </td>
                     </tr>
@@ -16591,10 +16623,11 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   <button
                     type="button"
                     className="primary-btn compact-btn"
-                    onClick={() => handleSendCompletedLoadToAccounting(selectedCompletedReviewLoad)}
+                    disabled={completedSending} onClick={() => handleSendCompletedLoadToAccounting(selectedCompletedReviewLoad)}
                   >
                     Send to Accounting
                   </button>
+                  <button type="button" className="secondary-btn compact-btn danger-btn" disabled={completedSending} onClick={() => handleRestoreCompletedLoad(selectedCompletedReviewLoad)}>⚠ Restore to Dispatch</button>
                   <button
                     type="button"
                     className="secondary-btn compact-btn"
@@ -16611,6 +16644,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="detail-box"><span>Container</span><strong>{selectedCompletedReviewLoad.containerNumber || '-'}</strong></div>
                 <div className="detail-box"><span>Reference #</span><strong>{selectedCompletedReviewLoad.referenceNumber || '-'}</strong></div>
                 <div className="detail-box"><span>Driver</span><strong>{selectedCompletedReviewLoad.driver ? getDriverLabel(selectedCompletedReviewLoad.driver) : 'Not Assigned'}</strong></div>
+                <div className="detail-box"><span>Driver Pay</span><strong>{formatMoney(getDriverPayWithDetention(selectedCompletedReviewLoad))}</strong></div>
                 <div className="detail-box"><span>Pickup</span><strong>{selectedCompletedReviewLoad.pickup || '-'}</strong></div>
                 <div className="detail-box"><span>Delivery</span><strong>{getDeliveryDisplay(selectedCompletedReviewLoad.delivery) || selectedCompletedReviewLoad.delivery || '-'}</strong></div>
                 <div className="detail-box"><span>Return</span><strong>{selectedCompletedReviewLoad.returnLocation || '-'}</strong></div>
@@ -17369,7 +17403,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                     className="danger-btn compact-btn"
                     onClick={() => handleRestoreCompletedLoad(selectedAccountingLoad)}
                   >
-                    Restore
+                    ⚠ Restore to Dispatch
                   </button>
                   <button
                     type="button"
