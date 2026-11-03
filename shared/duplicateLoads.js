@@ -1,3 +1,8 @@
+// Duplicate drafts keep the source type, independently of the new-load preset.
+export function isExportLoadDraft(load, presetName) {
+  return load.duplicatedFromLoadId ? load.loadType === 'EXPORT' : presetName === 'Export Load';
+}
+
 export function unassignDuplicate(load) {
   return { ...load, id: '', driver: '', truck: '', containerNumber: '', status: 'Pending', streetTurn: false, droppedBy: '' };
 }
