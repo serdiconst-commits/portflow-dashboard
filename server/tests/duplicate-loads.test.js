@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-import { unassignDuplicate, createLoadCopies } from '../../shared/duplicateLoads.js';
+import { unassignDuplicate, createLoadCopies, isExportLoadDraft } from '../../shared/duplicateLoads.js';
 const source = await readFile(new URL('../../src/App.jsx', import.meta.url), 'utf8');
 const original = {id:'LD-1',driver:'DR-1',truck:'T1',containerNumber:'CONT1',status:'Dispatched',customer:'Customer',referenceNumber:'REF',pickup:'Port',delivery:'Warehouse',bookingNumber:'BOOK',loadType:'EXPORT',driverRate:'200',rate:'500',notes:'Keep',duplicatedFromLoadId:'LD-1'};
 test('copies preserve business fields without mutating source or inheriting assignments', async () => {
@@ -32,9 +32,9 @@ test('Duplicate opens an unassigned export draft with no documents or billing hi
  vm.runInNewContext(code+'\nhandleDuplicateLoad',context)({...original,documents:[{id:'POD'}],billingStatus:'Ready To Bill'});
  assert.equal(count,1);assert.equal(preset,'Export Load');assert.equal(draft.driver,'');assert.equal(draft.containerNumber,'');assert.equal(draft.status,'Pending');assert.equal(draft.documents.length,0);assert.equal(draft.billingStatus,'');assert.equal(draft.bookingNumber,'BOOK');
 });
-function setupSave({count=3,pending=false,failAt=0,duplicate=true}={}){
+function setupSave({count=3,pending=false,failAt=0,duplicate=true,loadType='EXPORT',preset='Export Load'}={}){
  const state={requests:[],loads:[],alerts:[],count,closed:false};
- const ctx={newLoad:{...original,containerNumber:duplicate?'':'CONT1',duplicatedFromLoadId:duplicate?'LD-1':''},duplicateCount:count,selectedPresetName:'Export Load',loadCreatePending:{current:pending},setLoadCreating:v=>state.busy=v,findDuplicateContainerLoad:()=>null,canReuseContainerAsStreetTurn:()=>false,alert:m=>state.alerts.push(m),saveLocationIfNotExists:async()=>{},getLoadMilesForSave:async()=>10,getTodayDate:()=>'',getDriverTruck:()=> 'T1',calculateLoadSettlement:()=>200,getPaperworkStatusFromDocuments:()=> 'Pending',normalizeDriverForStorage:v=>v,getStatusAfterDriverAssignment:()=> 'Dispatched',createLoadCopies,API_BASE:'/test',authToken:'fake',fetch:async(url,options)=>{state.requests.push(JSON.parse(options.body));return{ok:state.requests.length!==failAt,json:async()=>state.requests.length===failAt?{error:'Rejected'}:{...JSON.parse(options.body),id:`LD-${state.requests.length+1}`}};},setLoadsData:f=>state.loads=f(state.loads),setDuplicateCount:v=>state.count=v,setInvoiceLoadId:()=>{},setShowForm:()=>state.closed=true,setNewLoad:()=>{},emptyLoad:{},setSelectedPresetName:()=>{},fetchLoads:async()=>{},fetchLocations:async()=>{},fetchSelectedLoadAuditLogs:async()=>{},handleAuthError:()=>false,console};
+ const ctx={isExportLoadDraft,newLoad:{...original,loadType,containerNumber:duplicate?'':'CONT1',duplicatedFromLoadId:duplicate?'LD-1':''},duplicateCount:count,selectedPresetName:preset,loadCreatePending:{current:pending},setLoadCreating:v=>state.busy=v,findDuplicateContainerLoad:()=>null,canReuseContainerAsStreetTurn:()=>false,alert:m=>state.alerts.push(m),saveLocationIfNotExists:async()=>{},getLoadMilesForSave:async()=>10,getTodayDate:()=>'',getDriverTruck:()=> 'T1',calculateLoadSettlement:()=>200,getPaperworkStatusFromDocuments:()=> 'Pending',normalizeDriverForStorage:v=>v,getStatusAfterDriverAssignment:()=> 'Dispatched',createLoadCopies,API_BASE:'/test',authToken:'fake',fetch:async(url,options)=>{state.requests.push(JSON.parse(options.body));return{ok:state.requests.length!==failAt,json:async()=>state.requests.length===failAt?{error:'Rejected'}:{...JSON.parse(options.body),id:`LD-${state.requests.length+1}`}};},setLoadsData:f=>state.loads=f(state.loads),setDuplicateCount:v=>state.count=v,setInvoiceLoadId:()=>{},setShowForm:()=>state.closed=true,setNewLoad:()=>{},emptyLoad:{},setSelectedPresetName:()=>{},fetchLoads:async()=>{},fetchLocations:async()=>{},fetchSelectedLoadAuditLogs:async()=>{},handleAuthError:()=>false,console};
  const code=source.slice(source.indexOf('const handleAddLoad ='),source.indexOf('const handleEditClick ='));
  return {state,send:vm.runInNewContext(code+'\nhandleAddLoad',ctx)};
 }
@@ -62,4 +62,25 @@ test('POST route strips assignments even when a client sends them in a duplicate
  vm.runInNewContext(server.slice(start,end),{app:{post:(_path,...args)=>handler=args.at(-1)},authenticate:()=>{},requireRoles:()=>()=>{},dispatchLocationRoles:[],unassignDuplicate,db,normalizeDriverAssignment:(_company,driver,callback)=>callback(null,driver),findDuplicateContainerLoad:(_company,container,_id,callback)=>{assert.equal(container,'');callback(null,null);},getStatusAfterDriverAssignment:(_driver,status)=>status,isTruthy:Boolean,parseNumericField:Number,console});
  handler({body:original,company:{companyId:'TEST'}},{});
  assert.equal(insert.id,'LD-0011');assert.equal(insert.companyId,'TEST');assert.equal(insert.driver,'');assert.equal(insert.truck,'');assert.equal(insert.containerNumber,'');assert.equal(insert.status,'Pending');assert.equal(insert.bookingNumber,'BOOK');assert.equal(insert.driverRate,'200');
+});
+
+for (const loadType of ['', 'EXPORT']) {
+  test(`duplicate preserves ${loadType || 'import'} type despite a conflicting preset`, async () => {
+    const {state,send}=setupSave({loadType,preset:loadType === 'EXPORT' ? '' : 'Export Load'});
+    await send({preventDefault(){}});
+    assert.equal(state.requests.length,3);
+    for (const body of state.requests) {
+      assert.equal(body.loadType,loadType);
+      assert.equal(body.driver,'');
+      assert.equal(body.containerNumber,'');
+      for (const field of ['customer','referenceNumber','bookingNumber','pickup','delivery','rate','driverRate','notes']) assert.equal(body[field],original[field]);
+    }
+  });
+}
+
+test('new-load preset behavior stays unchanged; duplicate fields follow source type', () => {
+  assert.equal(isExportLoadDraft({loadType:''},'Export Load'),true);
+  assert.equal(isExportLoadDraft({loadType:'EXPORT'},''),false);
+  assert.equal(isExportLoadDraft({duplicatedFromLoadId:'LD-1',loadType:''},'Export Load'),false);
+  assert.equal(isExportLoadDraft({duplicatedFromLoadId:'LD-1',loadType:'EXPORT'},''),true);
 });

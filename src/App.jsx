@@ -1,4 +1,4 @@
-import { unassignDuplicate, createLoadCopies } from '../shared/duplicateLoads.js';
+import { unassignDuplicate, createLoadCopies, isExportLoadDraft } from '../shared/duplicateLoads.js';
 import AccountingRestoreMenu from './components/AccountingRestoreMenu.jsx';
 import { isReadyForAccounting } from '../shared/accountingReview.js';
 import { SavedLocationInput, AppointmentInput } from './components/EditLoadInputs.jsx';
@@ -5574,7 +5574,7 @@ const handleAddLoad = async (e) => {
     alert('Enter a whole number of copies from 1 to 100.');
     return;
   }
-  const isExportLoad = selectedPresetName === 'Export Load';
+  const isExportLoad = isExportLoadDraft(newLoad, selectedPresetName);
   const duplicateContainerLoad = findDuplicateContainerLoad(newLoad.containerNumber);
   if (
     !isDuplicate && duplicateContainerLoad &&
@@ -12523,7 +12523,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     disabled={Boolean(newLoad.duplicatedFromLoadId)}
     onChange={handleInputChange}
   />
-<select
+{newLoad.duplicatedFromLoadId ? (
+  <p role="status">Load type: {newLoad.loadType === 'EXPORT' ? 'Export' : 'Import / Regular'} — preserved from the original load.</p>
+) : <select
   value={selectedPresetName}
   onChange={(e) => {
     const presetName = e.target.value;
@@ -12548,7 +12550,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       {preset.name}
     </option>
   ))}
-</select>
+</select>}
   <label className="edit-load-field">
     <span>Load Workflow</span>
     <select name="workflowType" value={newLoad.workflowType || 'LIVE_DELIVERY'} onChange={handleInputChange}>
@@ -12741,12 +12743,12 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   <input
     type="text"
     name="containerNumber"
-    placeholder={selectedPresetName === 'Export Load' ? 'Container Number (optional for export)' : 'Container Number'}
+    placeholder={isExportLoadDraft(newLoad, selectedPresetName) ? 'Container Number (optional for export)' : 'Container Number'}
     value={newLoad.containerNumber}
     disabled={Boolean(newLoad.duplicatedFromLoadId)}
     onChange={handleInputChange}
   />
-  {selectedPresetName !== 'Export Load' && (
+  {!isExportLoadDraft(newLoad, selectedPresetName) && (
   <div className="smart-port-lookup">
     <button
       type="button"
@@ -12770,7 +12772,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     )}
   </div>
   )}
-  {selectedPresetName === 'Export Load' && (
+  {isExportLoadDraft(newLoad, selectedPresetName) && (
     <label className="checkbox-row">
       <input
         type="checkbox"
@@ -12794,7 +12796,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     value={newLoad.bookingNumber || ''}
     onChange={handleInputChange}
   />
-  {selectedPresetName === 'Export Load' && (
+  {isExportLoadDraft(newLoad, selectedPresetName) && (
     <ExportBookingLookup
       key={newLoad.bookingNumber || ''}
       bookingNumber={newLoad.bookingNumber || ''}
@@ -13249,7 +13251,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   )}
 </div>
 
-{selectedPresetName === 'Export Load' ? (
+{isExportLoadDraft(newLoad, selectedPresetName) ? (
   <div className="export-booking-dates">
     <label>Beginning Receiving (Houston time)</label>
     <input type="datetime-local" aria-label="Beginning Receiving (Houston time)" name="beginReceiving" value={normalizePortDateTime(newLoad.beginReceiving)} onChange={handleInputChange} />
