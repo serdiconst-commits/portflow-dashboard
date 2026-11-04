@@ -1435,6 +1435,7 @@ const sigCanvas = useRef(null);
 const [signatures, setSignatures] = useState({});
 const [newLoad, setNewLoad] = useState(emptyLoad);
 const [duplicateCount, setDuplicateCount] = useState(1);
+const [duplicateContainers, setDuplicateContainers] = useState([]);
 const [loadCreating, setLoadCreating] = useState(false);
 const loadCreatePending = useRef(false);
 const [editingLoad, setEditingLoad] = useState(emptyLoad);
@@ -5574,6 +5575,20 @@ const handleAddLoad = async (e) => {
     alert('Enter a whole number of copies from 1 to 100.');
     return;
   }
+  const containers = isDuplicate ? Array.from({ length: copies }, (_, index) =>
+    String(index === 0 ? newLoad.containerNumber || '' : duplicateContainers[index] || '').trim().toUpperCase()) : [];
+  if (isDuplicate) {
+    const assigned = containers.filter(Boolean);
+    if (new Set(assigned).size !== assigned.length) {
+      alert('Use a different container number for each copy, or leave it blank to assign later.');
+      return;
+    }
+    const conflict = assigned.find((container) => findDuplicateContainerLoad(container));
+    if (conflict) {
+      alert(`Container ${conflict} is already assigned to another load. Enter a different container.`);
+      return;
+    }
+  }
   const isExportLoad = isExportLoadDraft(newLoad, selectedPresetName);
   const duplicateContainerLoad = findDuplicateContainerLoad(newLoad.containerNumber);
   if (
@@ -5669,11 +5684,16 @@ const result = await createLoadCopies(payload, copies, async (copy) => {
   const data = await res.json();
   if (!res.ok) throw new Error(data.details || data.error || 'Failed to create load');
   return data;
-}, (data) => setLoadsData((prev) => [data, ...prev.filter((load) => load.id !== data.id)]));
+}, (data) => setLoadsData((prev) => [data, ...prev.filter((load) => load.id !== data.id)]), containers);
     if (result.error) {
       if (!isDuplicate) throw result.error;
       if (handleAuthError(result.error.message)) return;
-      if (isDuplicate) setDuplicateCount(result.remaining);
+      if (isDuplicate) {
+        const remainingContainers = containers.slice(result.created.length);
+        setDuplicateCount(result.remaining);
+        setNewLoad((prev) => ({ ...prev, containerNumber: remainingContainers[0] || '' }));
+        setDuplicateContainers(remainingContainers);
+      }
       alert(`${result.created.length} of ${copies} loads created. Stopped: ${result.error.message}. ${result.remaining} not confirmed; check the load list before retrying.`);
       return;
     }
@@ -5744,6 +5764,7 @@ const handleDuplicateLoad = (load) => {
   const existingNotes = String(load.notes || '').trim();
 
   setDuplicateCount(1);
+  setDuplicateContainers([]);
   setNewLoad(unassignDuplicate({
     ...emptyLoad,
     ...load,
@@ -12502,7 +12523,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 {newLoad.duplicatedFromLoadId && <div className="detail-box">
                   <label htmlFor="duplicate-load-count">Number of copies</label>
                   <input id="duplicate-load-count" type="number" min="1" max="100" step="1" required value={duplicateCount} disabled={loadCreating} onChange={(event) => setDuplicateCount(event.target.value)} />
-                  <p>Copying {newLoad.duplicatedFromLoadId}. Each new load gets its own Load #, with no driver, truck or container. Assign them after saving.</p>
+                  <p>Copying {newLoad.duplicatedFromLoadId}. Each copy starts without a driver, container or documents. Enter a new container below, or assign it after saving.</p>
                 </div>}
 
 <div style={{
@@ -12745,9 +12766,18 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     name="containerNumber"
     placeholder={isExportLoadDraft(newLoad, selectedPresetName) ? 'Container Number (optional for export)' : 'Container Number'}
     value={newLoad.containerNumber}
-    disabled={Boolean(newLoad.duplicatedFromLoadId)}
+    aria-label={newLoad.duplicatedFromLoadId ? 'Container for copy 1' : 'Container Number'}
+    disabled={loadCreating}
     onChange={handleInputChange}
   />
+  {newLoad.duplicatedFromLoadId && Array.from({ length: Math.max(0, Math.min(100, Number(duplicateCount) || 1) - 1) }, (_, offset) => {
+    const index = offset + 1;
+    return <label key={index}>
+      Container for copy {index + 1} (optional)
+      <input type="text" aria-label={`Container for copy ${index + 1}`} value={duplicateContainers[index] || ''} disabled={loadCreating}
+        onChange={(event) => setDuplicateContainers((prev) => { const next = [...prev]; next[index] = event.target.value; return next; })} />
+    </label>;
+  })}
   {!isExportLoadDraft(newLoad, selectedPresetName) && (
   <div className="smart-port-lookup">
     <button
