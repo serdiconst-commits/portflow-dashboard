@@ -3116,8 +3116,10 @@ app.get('/api/port-houston/load-lookup', authenticate, async (req, res) => {
     const credentials = await getCompanyPortHoustonCredentials(companyId, terminal);
     const facility = getPortHoustonFacilityCode(terminal);
     credentials.containerNumber = containerNumber;
-    const availability = containerNumber ? await getContainerAvailability(containerNumber, credentials, facility) : null;
-    const bolAvailability = bolNumber ? await getBolAvailability(bolNumber, credentials, facility) : null;
+    const [availability, bolAvailability] = await Promise.all([
+      containerNumber ? getContainerAvailability(containerNumber, credentials, facility) : null,
+      bolNumber ? getBolAvailability(bolNumber, credentials, facility) : null,
+    ]);
     const primaryContainer =
       (availability?.found ? availability : null) ||
       bolAvailability?.containers?.find((item) => item?.containerNumber) ||

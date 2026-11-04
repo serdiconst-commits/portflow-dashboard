@@ -12785,7 +12785,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
       className="primary-btn smart-port-lookup-btn"
       onClick={handleSmartPortLookup}
       disabled={
-        Boolean(newLoad.duplicatedFromLoadId) || smartPortLookupLoading ||
+        loadCreating || smartPortLookupLoading ||
         (!newLoad.containerNumber && !newLoad.referenceNumber && !newLoad.poNumber && !newLoad.bookingNumber)
       }
     >
