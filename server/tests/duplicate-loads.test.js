@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-import { unassignDuplicate, createLoadCopies, isExportLoadDraft } from '../../shared/duplicateLoads.js';
+import { unassignDuplicate, createLoadCopies, isExportLoadDraft, prepareDuplicateForSave } from '../../shared/duplicateLoads.js';
 const source = await readFile(new URL('../../src/App.jsx', import.meta.url), 'utf8');
 const original = {id:'LD-1',driver:'DR-1',truck:'T1',containerNumber:'CONT1',status:'Dispatched',customer:'Customer',referenceNumber:'REF',pickup:'Port',delivery:'Warehouse',bookingNumber:'BOOK',loadType:'EXPORT',driverRate:'200',rate:'500',notes:'Keep',duplicatedFromLoadId:'LD-1'};
 test('copies preserve business fields without mutating source or inheriting assignments', async () => {
@@ -28,13 +28,13 @@ test('normal creation retains explicitly assigned driver and container',async()=
 test('Duplicate opens an unassigned export draft with no documents or billing history',()=>{
  let draft,preset,count;
  const code=source.slice(source.indexOf('const handleDuplicateLoad ='),source.indexOf('const handleUpdateLoad ='));
- const context={unassignDuplicate,emptyLoad:{},getTodayDate:()=> '2026-11-01',setDuplicateCount:v=>count=v,setNewLoad:v=>draft=v,setSelectedPresetName:v=>preset=v,setSelectedLoad:()=>{},setIsEditing:()=>{},setShowForm:()=>{},window:{setTimeout:()=>{}}};
+ const context={setDuplicateContainers:()=>{},unassignDuplicate,emptyLoad:{},getTodayDate:()=> '2026-11-01',setDuplicateCount:v=>count=v,setNewLoad:v=>draft=v,setSelectedPresetName:v=>preset=v,setSelectedLoad:()=>{},setIsEditing:()=>{},setShowForm:()=>{},window:{setTimeout:()=>{}}};
  vm.runInNewContext(code+'\nhandleDuplicateLoad',context)({...original,documents:[{id:'POD'}],billingStatus:'Ready To Bill'});
  assert.equal(count,1);assert.equal(preset,'Export Load');assert.equal(draft.driver,'');assert.equal(draft.containerNumber,'');assert.equal(draft.status,'Pending');assert.equal(draft.documents.length,0);assert.equal(draft.billingStatus,'');assert.equal(draft.bookingNumber,'BOOK');
 });
-function setupSave({count=3,pending=false,failAt=0,duplicate=true,loadType='EXPORT',preset='Export Load'}={}){
+function setupSave({count=3,pending=false,failAt=0,duplicate=true,loadType='EXPORT',preset='Export Load',containers=[],conflict=false}={}){
  const state={requests:[],loads:[],alerts:[],count,closed:false};
- const ctx={isExportLoadDraft,newLoad:{...original,loadType,containerNumber:duplicate?'':'CONT1',duplicatedFromLoadId:duplicate?'LD-1':''},duplicateCount:count,selectedPresetName:preset,loadCreatePending:{current:pending},setLoadCreating:v=>state.busy=v,findDuplicateContainerLoad:()=>null,canReuseContainerAsStreetTurn:()=>false,alert:m=>state.alerts.push(m),saveLocationIfNotExists:async()=>{},getLoadMilesForSave:async()=>10,getTodayDate:()=>'',getDriverTruck:()=> 'T1',calculateLoadSettlement:()=>200,getPaperworkStatusFromDocuments:()=> 'Pending',normalizeDriverForStorage:v=>v,getStatusAfterDriverAssignment:()=> 'Dispatched',createLoadCopies,API_BASE:'/test',authToken:'fake',fetch:async(url,options)=>{state.requests.push(JSON.parse(options.body));return{ok:state.requests.length!==failAt,json:async()=>state.requests.length===failAt?{error:'Rejected'}:{...JSON.parse(options.body),id:`LD-${state.requests.length+1}`}};},setLoadsData:f=>state.loads=f(state.loads),setDuplicateCount:v=>state.count=v,setInvoiceLoadId:()=>{},setShowForm:()=>state.closed=true,setNewLoad:()=>{},emptyLoad:{},setSelectedPresetName:()=>{},fetchLoads:async()=>{},fetchLocations:async()=>{},fetchSelectedLoadAuditLogs:async()=>{},handleAuthError:()=>false,console};
+ const ctx={duplicateContainers:containers,setDuplicateContainers:v=>state.containers=v,isExportLoadDraft,newLoad:{...original,loadType,containerNumber:duplicate?(containers[0] || ''):'CONT1',duplicatedFromLoadId:duplicate?'LD-1':''},duplicateCount:count,selectedPresetName:preset,loadCreatePending:{current:pending},setLoadCreating:v=>state.busy=v,findDuplicateContainerLoad:()=>conflict?{id:'LD-OLD'}:null,canReuseContainerAsStreetTurn:()=>false,alert:m=>state.alerts.push(m),saveLocationIfNotExists:async()=>{},getLoadMilesForSave:async()=>10,getTodayDate:()=>'',getDriverTruck:()=> 'T1',calculateLoadSettlement:()=>200,getPaperworkStatusFromDocuments:()=> 'Pending',normalizeDriverForStorage:v=>v,getStatusAfterDriverAssignment:()=> 'Dispatched',createLoadCopies,API_BASE:'/test',authToken:'fake',fetch:async(url,options)=>{state.requests.push(JSON.parse(options.body));return{ok:state.requests.length!==failAt,json:async()=>state.requests.length===failAt?{error:'Rejected'}:{...JSON.parse(options.body),id:`LD-${state.requests.length+1}`}};},setLoadsData:f=>state.loads=f(state.loads),setDuplicateCount:v=>state.count=v,setInvoiceLoadId:()=>{},setShowForm:()=>state.closed=true,setNewLoad:f=>{if(typeof f==='function')state.draft=f({});},emptyLoad:{},setSelectedPresetName:()=>{},fetchLoads:async()=>{},fetchLocations:async()=>{},fetchSelectedLoadAuditLogs:async()=>{},handleAuthError:()=>false,console};
  const code=source.slice(source.indexOf('const handleAddLoad ='),source.indexOf('const handleEditClick ='));
  return {state,send:vm.runInNewContext(code+'\nhandleAddLoad',ctx)};
 }
@@ -59,9 +59,9 @@ test('POST route strips assignments even when a client sends them in a duplicate
   if(sql.includes('UPDATE counters')) callback(null);
   else {const columns=sql.match(/INSERT INTO loads \(([\s\S]*?)\) VALUES/)[1].split(',').map(x=>x.trim());insert=Object.fromEntries(columns.map((column,i)=>[column,args[i]]));}
  }};
- vm.runInNewContext(server.slice(start,end),{app:{post:(_path,...args)=>handler=args.at(-1)},authenticate:()=>{},requireRoles:()=>()=>{},dispatchLocationRoles:[],unassignDuplicate,db,normalizeDriverAssignment:(_company,driver,callback)=>callback(null,driver),findDuplicateContainerLoad:(_company,container,_id,callback)=>{assert.equal(container,'');callback(null,null);},getStatusAfterDriverAssignment:(_driver,status)=>status,isTruthy:Boolean,parseNumericField:Number,console});
- handler({body:original,company:{companyId:'TEST'}},{});
- assert.equal(insert.id,'LD-0011');assert.equal(insert.companyId,'TEST');assert.equal(insert.driver,'');assert.equal(insert.truck,'');assert.equal(insert.containerNumber,'');assert.equal(insert.status,'Pending');assert.equal(insert.bookingNumber,'BOOK');assert.equal(insert.driverRate,'200');
+ vm.runInNewContext(server.slice(start,end),{app:{post:(_path,...args)=>handler=args.at(-1)},authenticate:()=>{},requireRoles:()=>()=>{},dispatchLocationRoles:[],prepareDuplicateForSave,db,normalizeDriverAssignment:(_company,driver,callback)=>callback(null,driver),findDuplicateContainerLoad:(_company,container,_id,callback)=>{assert.equal(container,'CONT1');callback(null,null);},getStatusAfterDriverAssignment:(_driver,status)=>status,isTruthy:Boolean,parseNumericField:Number,console});
+ handler({body:{...original,documents:[{id:'POD'}],pod:'old.pdf',paperwork:'Complete'},company:{companyId:'TEST'}},{});
+ assert.equal(insert.id,'LD-0011');assert.equal(insert.companyId,'TEST');assert.equal(insert.driver,'');assert.equal(insert.truck,'');assert.equal(insert.containerNumber,'CONT1');assert.equal(insert.status,'Pending');assert.equal(insert.bookingNumber,'BOOK');assert.equal(insert.driverRate,'200');assert.equal(insert.paperwork,'Pending');
 });
 
 for (const loadType of ['', 'EXPORT']) {
@@ -83,4 +83,24 @@ test('new-load preset behavior stays unchanged; duplicate fields follow source t
   assert.equal(isExportLoadDraft({loadType:'EXPORT'},''),false);
   assert.equal(isExportLoadDraft({duplicatedFromLoadId:'LD-1',loadType:''},'Export Load'),false);
   assert.equal(isExportLoadDraft({duplicatedFromLoadId:'LD-1',loadType:'EXPORT'},''),true);
+});
+
+test('manual containers save per copy while source documents and POD never transfer',async()=>{
+ const saved=[];
+ await createLoadCopies({...original,documents:[{id:'OLD'}],pod:'old.pdf',paperwork:'Complete'},2,async body=>body,body=>saved.push(body),['new1','new2']);
+ assert.deepEqual(saved.map(row=>row.containerNumber),['NEW1','NEW2']);
+ for(const row of saved){assert.equal(row.driver,'');assert.deepEqual(row.documents,[]);assert.equal(row.pod,'');assert.equal(row.paperwork,'Pending');}
+});
+test('actual form saves each manually entered container',async()=>{
+ const {state,send}=setupSave({containers:['NEW1','NEW2','NEW3']});
+ await send({preventDefault(){}});
+ assert.deepEqual(state.requests.map(row=>row.containerNumber),['NEW1','NEW2','NEW3']);
+});
+test('remaining copies retain their own containers after partial failure',async()=>{
+ const {state,send}=setupSave({containers:['NEW1','NEW2','NEW3'],failAt:2});
+ await send({preventDefault(){}});
+ assert.equal(state.count,2);assert.equal(state.draft.containerNumber,'NEW2');assert.deepEqual(Array.from(state.containers),['NEW2','NEW3']);
+});
+for(const options of [{containers:['SAME','same','']},{containers:['OLD','',''],conflict:true}]) test('container conflicts are rejected before any creation '+JSON.stringify(options),async()=>{
+ const {state,send}=setupSave(options);await send({preventDefault(){}});assert.equal(state.requests.length,0);assert.equal(state.alerts.length,1);
 });
