@@ -20,6 +20,8 @@ export function reconcileLoadMoves(load, existing, templates, previous) {
     }
     return templates.map((move, index) => ({ ...move, sequence: index + 1 }));
   }
+  // Added empty-yard legs are an explicit plan, independent of the original templates.
+  if (existing.some(move => ['EMPTY_YARD', 'YARD_RETURN'].includes(move.moveType))) return existing;
   if (!previous) return existing;
   const changed = (key) => text(load[key]) !== text(previous[key]);
   const workflowChanged = changed('workflowType');

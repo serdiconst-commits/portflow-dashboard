@@ -6477,3 +6477,11 @@ button:disabled {
 
 .accounting-restore-control { position: relative; }
 .accounting-restore-options { position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; width: 280px; max-width: 80vw; display: grid; gap: 8px; padding: 12px; border: 1px solid var(--pf-border, #cbd5e1); border-radius: 10px; background: var(--pf-surface, #fff); color: var(--pf-text, #111827); box-shadow: 0 12px 24px rgba(0,0,0,.2); }
+
+.empty-yard-panel { margin: 16px 0; padding: 16px; border: 1px solid var(--border-color, #cbd5e1); border-radius: 12px; }
+.empty-yard-panel h3, .empty-yard-panel h4 { margin: 0 0 8px; }
+.empty-yard-panel p { margin: 8px 0; overflow-wrap: anywhere; }
+.empty-yard-panel fieldset { border: 0; margin: 12px 0; padding: 0; display: grid; gap: 10px; min-width: 0; }
+.empty-yard-panel label { display: grid; gap: 6px; }
+.empty-yard-panel input, .empty-yard-panel select { width: 100%; box-sizing: border-box; }
+.empty-yard-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px; }
