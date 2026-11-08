@@ -1,3 +1,5 @@
+import { PerDiemPanel, PerDiemBadge, PerDiemFilters } from './components/PerDiem.jsx';
+import { perDiemTracking, matchesPerDiemFilter } from '../shared/perDiem.js';
 import DropPickPayInputs from './components/DropPickPayInputs.jsx';
 import { prepareDropPickCreationPay, dropPickDraftPay } from '../shared/dropPickPay.js';
 import EmptyYardReturn from './components/EmptyYardReturn.jsx';
@@ -1215,6 +1217,9 @@ const [driverScannerUploading, setDriverScannerUploading] = useState(false);
 const driverCameraVideoRef = useRef(null);
 const driverCameraStreamRef = useRef(null);
 const [dashboardFilter, setDashboardFilter] = useState('all');
+const [perDiemFilter, setPerDiemFilter] = useState('attention');
+const [perDiemCalendar, setPerDiemCalendar] = useState({});
+const [perDiemCalendarError, setPerDiemCalendarError] = useState('');
 const [dispatchedDateFilter, setDispatchedDateFilter] = useState('all');
 const [dispatchedCustomDate, setDispatchedCustomDate] = useState(getTodayDate());
 const [appointmentDateFilter, setAppointmentDateFilter] = useState('today');
@@ -3956,6 +3961,21 @@ useEffect(() => {
   }
 }, [currentUser?.id, currentUser?.driverId, currentUser?.role]);
 
+useEffect(() => {
+  if (!authToken || !['dispatch','completed','accounting'].includes(activeView) || currentUser?.role === 'driver') return;
+  let cancelled=false;
+  setPerDiemCalendar({});
+  fetch(`${API_BASE}/api/per-diem/calendar`, {headers:{Authorization:`Bearer ${authToken}`}})
+    .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error || 'Unable to load holiday calendar.');if(!cancelled){setPerDiemCalendar(data);setPerDiemCalendarError('');}})
+    .catch(error=>{if(!cancelled)setPerDiemCalendarError(error.message);});
+  return ()=>{cancelled=true;};
+}, [authToken, activeView, currentUser?.role, company?.id]);
+
+const savePerDiemLoad = updated => {
+  setLoadsData(prev=>prev.map(load=>load.id===updated.id?{...load,...updated}:load));
+  setSelectedLoad(prev=>prev?.id===updated.id?{...prev,...updated}:prev);
+};
+
 const fetchLoads = async () => {
   if (!authToken) return;
 
@@ -5429,7 +5449,11 @@ const appointmentLoads = loadsData.filter(
   (load) => hasAppointment(load) && !isCompletedLoad(load)
 );
 
+const perDiemToday = getTodayDate();
+const perDiemCount = loadsData.filter(load=>matchesPerDiemFilter(load,perDiemToday,'attention',perDiemCalendar)).length;
+
 const summaryCards = [
+  { title: 'Per Diem', value: perDiemCount, filter: 'per-diem' },
   { title: 'Dispatched', value: dispatchedLoads.length, filter: 'dispatched' },
   { title: 'In Transit', value: inTransitLoads.length, filter: 'in-transit' },
   { title: 'Dropped', value: droppedLoads.length, filter: 'dropped' },
@@ -10407,7 +10431,9 @@ return (
 
 
 const baseFilteredLoadsData =
-  dashboardFilter === 'lfd'
+  dashboardFilter === 'per-diem'
+    ? loadsData.filter(load=>matchesPerDiemFilter(load,perDiemToday,perDiemFilter,perDiemCalendar))
+    : dashboardFilter === 'lfd'
     ? activeOperationsLoads.filter((load) => hasLastFreeDay(load) && matchesLfdDateFilter(load))
     : dashboardFilter === 'appointments'
     ? activeOperationsLoads.filter(
@@ -10487,7 +10513,11 @@ const filteredLoadsData = viewFilteredLoadsData.filter((load) => {
     loadContainer.includes(normalizedSearchTerm) ||
     loadBooking.includes(normalizedSearchTerm)
   );
-}).sort(sortLoadsNewestFirst);
+}).sort(dashboardFilter === 'per-diem' ? (a,b)=>{
+  const left=perDiemTracking(a,perDiemToday,perDiemCalendar).deadline || '';
+  const right=perDiemTracking(b,perDiemToday,perDiemCalendar).deadline || '';
+  return left.localeCompare(right) || sortLoadsNewestFirst(a,b);
+} : sortLoadsNewestFirst);
 
 const getDispatchLoadPaperworkLabel = (load) => {
   const hasPod = load.documents?.some(
@@ -13401,6 +13431,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
   ))}
 </section>
 
+          {dashboardFilter === 'per-diem' && <>
+            <PerDiemFilters filter={perDiemFilter} setFilter={setPerDiemFilter} calendar={perDiemCalendar} setCalendar={setPerDiemCalendar} apiBase={API_BASE} token={authToken} />
+            {perDiemCalendarError && <p role="alert">{perDiemCalendarError}</p>}
+          </>}
           {dashboardFilter === 'dispatched' && (
             <section className="appointment-filter-panel">
               <div>
@@ -13561,7 +13595,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
               </div>
               <DispatchBoard
                 filteredLoadsData={filteredLoadsData}
-                orderedDispatchLoadColumns={orderedDispatchLoadColumns}
+                orderedDispatchLoadColumns={dashboardFilter === 'per-diem' ? [{key:'per-diem-deadline',label:'Last Return Day',render:load=><PerDiemBadge load={load} today={perDiemToday} calendar={perDiemCalendar}/>},...orderedDispatchLoadColumns] : orderedDispatchLoadColumns}
                 draggedDispatchColumn={draggedDispatchColumn}
                 handleDispatchColumnDragStart={handleDispatchColumnDragStart}
                 setDraggedDispatchColumn={setDraggedDispatchColumn}
@@ -14537,7 +14571,9 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         </p>
                       </div>
 
+                      <PerDiemPanel key={`${selectedLoad.id}:${selectedLoad.containerNumber}`} load={selectedLoad} today={perDiemToday} calendar={perDiemCalendar} apiBase={API_BASE} token={authToken} onSaved={savePerDiemLoad} canEdit={['dispatcher','manager','admin','owner','carrier'].includes(currentUser?.role)} />
                       <div className="details-grid">
+                        <div className="detail-box"><span>Customer Name</span><strong>{selectedLoad.customer || '—'}</strong></div>
                         <div className="detail-box"><span>Load Date</span><strong>{selectedLoad.loadDate}</strong></div>
                         <div className="detail-box"><span>Reference #</span><strong>{selectedLoad.referenceNumber || '—'}</strong></div>
                         <div className="detail-box"><span>PO #</span><strong>{selectedLoad.poNumber || '—'}</strong></div>
@@ -16741,6 +16777,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 formatAddress={formatLocationAddress} apiBase={API_BASE} token={authToken}
                 onRefresh={async () => { setSelectedLoad(selectedCompletedReviewLoad); await fetchLoads(); setSelectedCompletedReviewLoadId(''); setActiveView('dispatch'); }} />
 
+              <PerDiemPanel key={`${selectedCompletedReviewLoad.id}:${selectedCompletedReviewLoad.containerNumber}`} load={selectedCompletedReviewLoad} today={perDiemToday} calendar={perDiemCalendar} apiBase={API_BASE} token={authToken} onSaved={savePerDiemLoad} canEdit={['dispatcher','manager','admin','owner','carrier'].includes(currentUser?.role)} />
               <div className="details-grid accounting-details-grid">
                 <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedCompletedReviewLoad.appointmentTime) || selectedCompletedReviewLoad.loadDate || '-'}</strong></div>
                 <div className="detail-box"><span>Customer Name</span><strong>{selectedCompletedReviewLoad.customer || '-'}</strong></div>
@@ -17528,6 +17565,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 'Edit Billing Load Locations'
               )}
 
+              <PerDiemPanel key={`${selectedAccountingLoad.id}:${selectedAccountingLoad.containerNumber}`} load={selectedAccountingLoad} today={perDiemToday} calendar={perDiemCalendar} apiBase={API_BASE} token={authToken} onSaved={savePerDiemLoad} canEdit={['dispatcher','manager','admin','owner','carrier'].includes(currentUser?.role)} />
               <div className="details-grid accounting-details-grid">
                 <div className="detail-box"><span>Status</span><strong>{getLoadQuickStatus(selectedAccountingLoad) || 'Completed'}</strong></div>
                 <div className="detail-box"><span>Load Date</span><strong>{selectedAccountingLoad.loadDate || '—'}</strong></div>
