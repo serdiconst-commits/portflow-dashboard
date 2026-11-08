@@ -16743,7 +16743,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
 
               <div className="details-grid accounting-details-grid">
                 <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedCompletedReviewLoad.appointmentTime) || selectedCompletedReviewLoad.loadDate || '-'}</strong></div>
-                <div className="detail-box"><span>Customer</span><strong>{selectedCompletedReviewLoad.customer || '-'}</strong></div>
+                <div className="detail-box"><span>Customer Name</span><strong>{selectedCompletedReviewLoad.customer || '-'}</strong></div>
                 <div className="detail-box"><span>Container</span><strong>{selectedCompletedReviewLoad.containerNumber || '-'}</strong></div>
                 <div className="detail-box"><span>Reference #</span><strong>{selectedCompletedReviewLoad.referenceNumber || '-'}</strong></div>
                 {selectedCompletedReviewLoad.loadType === 'EXPORT' && <div className="detail-box"><span>Booking Number</span><strong>{selectedCompletedReviewLoad.bookingNumber || '—'}</strong></div>}
@@ -17533,7 +17533,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                 <div className="detail-box"><span>Load Date</span><strong>{selectedAccountingLoad.loadDate || '—'}</strong></div>
                 <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedAccountingLoad.appointmentTime)}</strong></div>
                 <div className="detail-box"><span>LFD</span><strong>{selectedAccountingLoad.lastFreeDay || selectedAccountingLoad.lfd || '—'}</strong></div>
-                <div className="detail-box"><span>Customer</span><strong>{selectedAccountingLoad.customer || '—'}</strong></div>
+                <div className="detail-box"><span>Customer Name</span><strong>{selectedAccountingLoad.customer || '—'}</strong></div>
                 <div className="detail-box"><span>Broker</span><strong>{selectedAccountingLoad.brokerName || selectedAccountingLoad.broker || '—'}</strong></div>
                 <div className="detail-box"><span>Reference #</span><strong>{selectedAccountingLoad.referenceNumber || '—'}</strong></div>
                 {selectedAccountingLoad.loadType === 'EXPORT' && <div className="detail-box"><span>Booking Number</span><strong>{selectedAccountingLoad.bookingNumber || '—'}</strong></div>}
