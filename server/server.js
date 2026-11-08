@@ -1,3 +1,4 @@
+import { prepareDropPickCreationPay } from '../shared/dropPickPay.js';
 import { mountEmptyYardRoutes } from './services/emptyYard.js';
 import { prepareDuplicateForSave } from '../shared/duplicateLoads.js';
 import { createLoadExtraChargesHandler } from './services/loadExtraCharges.js';
@@ -1208,7 +1209,7 @@ const getLoadMoveTemplates = (load = {}) => {
     const dropDestination = delivery || yard;
     return [
       { moveType: 'DROP', status: driverId ? 'Assigned' : 'Planned', origin: pickup, destination: dropDestination, driverId, driverRate, assignedAt },
-      { moveType: 'PICKUP_RETURN', status: 'Waiting Customer', origin: dropDestination, destination: returnLocation, driverId: '', driverRate: '', assignedAt: '' },
+      { moveType: 'PICKUP_RETURN', status: 'Waiting Customer', origin: dropDestination, destination: returnLocation, driverId: '', driverRate: load.upfrontDropPickPay || Number(load.pickupPay) > 0 ? String(load.pickupPay) : '', assignedAt: '' },
     ];
   }
 
@@ -5077,7 +5078,7 @@ app.put('/api/load-moves/:id/assign', authenticate, requireRoles(dispatchLocatio
   const companyId = req.company.companyId;
   const moveId = String(req.params.id || '').trim();
   const driverId = String(req.body?.driverId || '').trim();
-  const driverRate = String(req.body?.driverRate || '').trim();
+  const requestedDriverRate = req.body?.driverRate;
   const requestedReturnLocation = String(req.body?.returnLocation || '').trim();
   if (!driverId) return res.status(400).json({ error: 'Choose a driver.' });
   normalizeDriverAssignment(companyId, driverId, (driverErr, normalizedDriver) => {
@@ -5101,6 +5102,7 @@ app.put('/api/load-moves/:id/assign', authenticate, requireRoles(dispatchLocatio
         if (move.moveType === 'DELIVERY' && !move.recordedDropLocation) {
           return res.status(409).json({ error: 'Complete the pre-pull movement before assigning delivery.' });
         }
+        const driverRate = String(requestedDriverRate ?? (move.moveType === 'PICKUP_RETURN' ? move.driverRate : '') ?? '').trim();
         const effectiveReturnLocation = requestedReturnLocation || String(move.destination || move.returnLocation || '').trim();
         if (['PICKUP_RETURN', 'DELIVERY'].includes(move.moveType) && !effectiveReturnLocation) {
           return res.status(400).json({ error: 'Add the return location before assigning a driver.' });
@@ -5568,7 +5570,9 @@ app.put('/api/drivers/:id', authenticate, protectOwnerEmail, requireRoles(dispat
 
 app.post('/api/loads', authenticate, requireRoles(dispatchLocationRoles), (req, res) => {
   const body = req.body || {};
-  const l = body.duplicatedFromLoadId ? prepareDuplicateForSave(body) : body;
+  let l;
+  try { l = prepareDropPickCreationPay(body.duplicatedFromLoadId ? prepareDuplicateForSave(body) : body); }
+  catch(error) { return res.status(error.status || 400).json({error:error.message}); }
   const companyId = req.company.companyId;
 
   db.get(
@@ -5670,8 +5674,10 @@ dropDateTime,
               miles,
               billingStatus,
               isDriverReleased,
-              driverReleasedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              driverReleasedAt,
+              dropPay,
+              pickupPay
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               generatedLoadId,
               l.loadDate || new Date().toISOString().slice(0, 10),
@@ -5723,7 +5729,9 @@ dropDateTime,
               parseNumericField(l.miles),
               l.billingStatus || '',
               0,
-              ''
+              '',
+              l.workflowType === 'DROP_AND_PICK' ? l.dropPay ?? 0 : 0,
+              l.workflowType === 'DROP_AND_PICK' ? l.pickupPay ?? 0 : 0
             ],
             function (err) {
               if (err) {
@@ -5765,7 +5773,7 @@ dropDateTime,
                       : createdLoadFields,
                   });
 
-                  syncLoadMoves(row, (moveErr) => {
+                  syncLoadMoves({ ...row, upfrontDropPickPay: l.workflowType === 'DROP_AND_PICK' && l.pickupPay !== undefined }, (moveErr) => {
                     if (moveErr) {
                       console.error('Error creating load moves:', moveErr.message);
                       return res.status(500).json({ error: 'Load created, but its movement plan could not be saved.' });

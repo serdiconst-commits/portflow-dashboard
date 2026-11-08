@@ -23,6 +23,7 @@ test('Appointment # persists through create, edit and legacy updates without cha
   }
   await dbRun(db, 'ALTER TABLE loads ADD COLUMN miles REAL DEFAULT 0');
   await dbRun(db, 'ALTER TABLE loads ADD COLUMN pod TEXT');
+  for (const column of ['dropPay','pickupPay']) await dbRun(db, `ALTER TABLE loads ADD COLUMN ${column} REAL DEFAULT 0`);
   const context = {
     generatedLoadId: 'APPT-QA', loadId: 'APPT-QA', companyId: 'COMP-A',
     normalizedDriver: 'DRV-A', normalizedDroppedBy: '', nextStatus: 'Dispatched',

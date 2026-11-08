@@ -1,3 +1,5 @@
+import DropPickPayInputs from './components/DropPickPayInputs.jsx';
+import { prepareDropPickCreationPay, dropPickDraftPay } from '../shared/dropPickPay.js';
 import EmptyYardReturn from './components/EmptyYardReturn.jsx';
 import { hasOpenEmptyYard, isEmptyYardMove } from '../shared/emptyYard.js';
 import { unassignDuplicate, createLoadCopies, isExportLoadDraft } from '../shared/duplicateLoads.js';
@@ -5251,7 +5253,7 @@ const assignPickupMove = async (moveId) => {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
       body: JSON.stringify({
         driverId: draft.driverId,
-        driverRate: draft.driverRate || '',
+        driverRate: draft.driverRate ?? queueItem?.move?.driverRate ?? '',
         returnLocation,
       }),
     });
@@ -5473,6 +5475,7 @@ const filteredLoads = loadsData.filter((load) => {
       const updated = {
         ...prev,
         [name]: value,
+        driverRate: name === 'dropPay' && prev.workflowType === 'DROP_AND_PICK' ? value : name === 'driverRate' ? value : prev.driverRate,
         truck: name === 'driver' ? (value ? getDriverTruck(value) : '') : prev.truck,
         status:
           name === 'driver'
@@ -5591,6 +5594,11 @@ const handleAddLoad = async (e) => {
       return;
     }
   }
+  let creationPay;
+  try {
+    creationPay = prepareDropPickCreationPay(newLoad.workflowType === 'DROP_AND_PICK'
+      ? { ...newLoad, dropPay: newLoad.dropPay ?? newLoad.driverRate, pickupPay: newLoad.pickupPay ?? '' } : newLoad);
+  } catch (error) { alert(error.message); return; }
   const isExportLoad = isExportLoadDraft(newLoad, selectedPresetName);
   const duplicateContainerLoad = findDuplicateContainerLoad(newLoad.containerNumber);
   if (
@@ -5646,12 +5654,12 @@ const handleAddLoad = async (e) => {
       loadDate: newLoad.loadDate || getTodayDate(),
       truck: newLoad.truck || getDriverTruck(newLoad.driver),
       rate: newLoad.rate || '$0.00',
-      driverRate: newLoad.driverRate || '$0.00',
+      driverRate: creationPay.driverRate || '$0.00',
       detention: newLoad.detention || '$0.00',
       lumper: newLoad.lumper || '$0.00',
       fuelAdvance: newLoad.fuelAdvance || '$0.00',
       settlement: calculateLoadSettlement({
-        driverRate: newLoad.driverRate || '$0.00',
+        driverRate: creationPay.driverRate || '$0.00',
         detention: newLoad.detention || '$0.00',
         lumper: newLoad.lumper || '$0.00',
         fuelAdvance: newLoad.fuelAdvance || '$0.00',
@@ -5672,6 +5680,7 @@ const handleAddLoad = async (e) => {
 
 const payload = {
   ...loadToAdd,
+  ...(newLoad.workflowType === 'DROP_AND_PICK' ? {dropPay:creationPay.dropPay, pickupPay:creationPay.pickupPay, driverRate:creationPay.driverRate} : {}),
   driver: normalizeDriverForStorage(newLoad.driver),
   truck: newLoad.driver ? getDriverTruck(newLoad.driver) : '',
   status: getStatusAfterDriverAssignment(newLoad.driver, loadToAdd.status),
@@ -5770,6 +5779,7 @@ const handleDuplicateLoad = (load) => {
   setNewLoad(unassignDuplicate({
     ...emptyLoad,
     ...load,
+    ...dropPickDraftPay(load),
     id: '',
     containerNumber: '',
     loadDate: getTodayDate(),
@@ -11141,6 +11151,7 @@ const renderDriverLoadCard = (sourceLoad) => {
           <strong>{completion && currentMove
             ? (String(currentMove.driverRate ?? '').trim() ? formatMoney(parseMoney(currentMove.driverRate)) : '-')
             : isEmptyYardMove(currentMove) ? formatMoney(parseMoney(currentMove.driverRate))
+            : ['DROP', 'PICKUP_RETURN'].includes(currentMove?.moveType) ? formatMoney(parseMoney(currentMove.driverRate))
             : isDropHookLoad(load)
             ? formatMoney(Number(isHookMoveActive(load) ? load.pickupPay || 0 : load.dropPay || 0))
             : currentMove ? formatMoney(parseMoney(currentMove.driverRate)) : load.driverRate ? formatMoney(getDriverPayWithDetention(load)) : '-'}</strong>
@@ -13321,14 +13332,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
     required
   />
 
-  <input
-    type="text"
-    name="driverRate"
-    placeholder="Driver Rate"
-    value={newLoad.driverRate}
-    onChange={handleInputChange}
-    required
-  />
+  <DropPickPayInputs load={newLoad} onChange={handleInputChange} />
 
  <select name="status" value={newLoad.status} onChange={handleInputChange}>
   <option value="Dispatched">Dispatched</option>
@@ -14295,7 +14299,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                               </label>
 
                               <label>
-                                <span>Driver Rate</span>
+                                <span>{selectedPickupReturnMove.moveType === 'PICKUP_RETURN' ? 'Pickup / Return Pay' : 'Driver Rate'}</span>
                                 <input
                                   type="text"
                                   inputMode="decimal"

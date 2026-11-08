@@ -52,6 +52,7 @@ test('export dates migrate, persist on creation, survive legacy edits and can be
   }
   await dbRun(db,'ALTER TABLE loads ADD COLUMN miles REAL DEFAULT 0');
   await dbRun(db,'ALTER TABLE loads ADD COLUMN pod TEXT');
+  for (const column of ['dropPay','pickupPay']) await dbRun(db, `ALTER TABLE loads ADD COLUMN ${column} REAL DEFAULT 0`);
   const context = {
     generatedLoadId:'EXPORT-TEST',loadId:'EXPORT-TEST',companyId:'COMP-A',normalizedDriver:'',normalizedDroppedBy:'',nextStatus:'Pending',
     nextWorkflowType:'LIVE_DELIVERY',isTruthy:Boolean,parseNumericField:v=>Number(v)||0,
