@@ -1,3 +1,5 @@
+import EmptyYardReturn from './components/EmptyYardReturn.jsx';
+import { hasOpenEmptyYard, isEmptyYardMove } from '../shared/emptyYard.js';
 import { unassignDuplicate, createLoadCopies, isExportLoadDraft } from '../shared/duplicateLoads.js';
 import AccountingRestoreMenu from './components/AccountingRestoreMenu.jsx';
 import { isReadyForAccounting } from '../shared/accountingReview.js';
@@ -9664,7 +9666,7 @@ const handleDriverStatusUpdate = async (loadId, newStatus, confirmedDrop = false
         load.id === loadId
           ? {
               ...load,
-              status: newStatus,
+              status: data.status || newStatus,
               availabilityStatus: ['In Transit', 'Dropped', 'Delivered'].includes(newStatus)
                 ? ''
                 : load.availabilityStatus,
@@ -9682,7 +9684,7 @@ const handleDriverStatusUpdate = async (loadId, newStatus, confirmedDrop = false
     );
 
     await fetchLoads();
-    alert(newStatus === 'Delivered' ? 'Load completed' : `Status updated to ${newStatus}`);
+    alert(isEmptyYardMove(loadToUpdate.currentMove) ? `Movement updated: ${data.status || newStatus}` : newStatus === 'Delivered' ? 'Load completed' : `Status updated to ${newStatus}`);
   } catch (error) {
     console.error('STATUS UPDATE ERROR:', error);
     alert(`Failed to update status: ${error.message}`);
@@ -11057,8 +11059,8 @@ const renderDriverLoadCard = (sourceLoad) => {
   const currentMove = load.currentMove || null;
   const moveOrigin = currentMove?.origin || load.pickup;
   const moveDestination = currentMove?.destination || load.delivery;
-  const requiresDropAction = ['PRE_PULL', 'DROP'].includes(currentMove?.moveType);
-  const isPickupReturnMove = currentMove?.moveType === 'PICKUP_RETURN' ||
+  const requiresDropAction = ['PRE_PULL', 'DROP', 'EMPTY_YARD'].includes(currentMove?.moveType);
+  const isPickupReturnMove = ['PICKUP_RETURN', 'YARD_RETURN'].includes(currentMove?.moveType) ||
     (Boolean(completion) && currentMove?.moveType === 'RETURN');
   const pickupLabel = 'Pick Up Location';
   const destinationLabel = isPickupReturnMove
@@ -11138,6 +11140,7 @@ const renderDriverLoadCard = (sourceLoad) => {
           <span>{currentMove?.moveType === 'DROP' ? 'Drop Pay' : isPickupReturnMove ? 'Pickup / Return Pay' : 'Driver Pay'}</span>
           <strong>{completion && currentMove
             ? (String(currentMove.driverRate ?? '').trim() ? formatMoney(parseMoney(currentMove.driverRate)) : '-')
+            : isEmptyYardMove(currentMove) ? formatMoney(parseMoney(currentMove.driverRate))
             : isDropHookLoad(load)
             ? formatMoney(Number(isHookMoveActive(load) ? load.pickupPay || 0 : load.dropPay || 0))
             : currentMove ? formatMoney(parseMoney(currentMove.driverRate)) : load.driverRate ? formatMoney(getDriverPayWithDetention(load)) : '-'}</strong>
@@ -11195,8 +11198,8 @@ const renderDriverLoadCard = (sourceLoad) => {
         <button type="button" onClick={() => handleDriverStatusUpdate(load.id, 'In Transit')}>
           Start
         </button>
-        {(!isDropHookLoad(load) || !isHookMoveActive(load)) && (
-          <button type="button" onClick={() => handleDriverStatusUpdate(load.id, 'Dropped')}>{currentMove?.moveType === 'PRE_PULL' ? 'Pre-pull · At yard' : 'Dropped'}</button>
+        {currentMove?.moveType !== 'YARD_RETURN' && (!isDropHookLoad(load) || !isHookMoveActive(load)) && (
+          <button type="button" onClick={() => handleDriverStatusUpdate(load.id, 'Dropped')}>{currentMove?.moveType === 'EMPTY_YARD' ? 'Empty · At yard' : currentMove?.moveType === 'PRE_PULL' ? 'Pre-pull · At yard' : 'Dropped'}</button>
         )}
         <button
           type="button"
@@ -14128,6 +14131,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           ) : (
                           <select
   id="quick-driver-select"
+                            disabled={hasOpenEmptyYard(selectedLoad)}
   value={normalizeDriverForStorage(selectedLoad.driver)}
   onChange={handleQuickDriverChange}
   className="quick-driver-select"
@@ -14179,6 +14183,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                           <label htmlFor="quick-status-select">Quick Status Change</label>
                           <select
                             id="quick-status-select"
+                            disabled={hasOpenEmptyYard(selectedLoad)}
                             value={getLoadQuickStatus(selectedLoad)}
                             onChange={handleQuickStatusChange}
                             className="quick-driver-select"
@@ -14193,7 +14198,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                         </div>
                       </div>
 
-                      {['DROP_AND_PICK', 'PRE_PULL_LIVE'].includes(String(selectedLoad.workflowType || '').trim().toUpperCase()) &&
+                      <EmptyYardReturn key={selectedLoad.id} load={selectedLoad} drivers={driversList} locations={locations}
+                        formatAddress={formatLocationAddress} apiBase={API_BASE} token={authToken} onRefresh={fetchLoads} />
+
+                      {!hasOpenEmptyYard(selectedLoad) && ['DROP_AND_PICK', 'PRE_PULL_LIVE'].includes(String(selectedLoad.workflowType || '').trim().toUpperCase()) &&
                         getLoadQuickStatusKey(selectedLoad) === 'dropped' && (
                           <section className="ready-pickup-callout">
                             <div>
@@ -16724,6 +16732,10 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                   </button>
                 </div>
               </div>
+
+              <EmptyYardReturn key={selectedCompletedReviewLoad.id} load={selectedCompletedReviewLoad} drivers={driversList} locations={locations}
+                formatAddress={formatLocationAddress} apiBase={API_BASE} token={authToken}
+                onRefresh={async () => { setSelectedLoad(selectedCompletedReviewLoad); await fetchLoads(); setSelectedCompletedReviewLoadId(''); setActiveView('dispatch'); }} />
 
               <div className="details-grid accounting-details-grid">
                 <div className="detail-box"><span>Appointment</span><strong>{formatAppointmentTime(selectedCompletedReviewLoad.appointmentTime) || selectedCompletedReviewLoad.loadDate || '-'}</strong></div>

@@ -1,3 +1,4 @@
+import { mountEmptyYardRoutes } from './services/emptyYard.js';
 import { prepareDuplicateForSave } from '../shared/duplicateLoads.js';
 import { createLoadExtraChargesHandler } from './services/loadExtraCharges.js';
 import { saveLoadWithDropDate } from './services/dropDateEdit.js';
@@ -4365,6 +4366,8 @@ console.log('POST /api/customers body:', req.body);
     }
   );
 });
+mountEmptyYardRoutes(app, { db, authenticate, requireRoles, dispatchLocationRoles, writeAuditLog, hasRequiredCompletionDocuments });
+
 app.put('/api/loads/:id/extra-charges', authenticate, requireRoles(movePayRoles), createLoadExtraChargesHandler(db, writeAuditLog));
 app.put('/api/loads/:id', authenticate, requireRoles(movePayRoles), (req, res) => {
   const body = req.body || {};
@@ -6636,7 +6639,9 @@ const updateCurrentMoveForLoadStatus = (req, loadId, status, callback, allowInit
               if (nextErr) return callback(nextErr);
               const waitingForCustomer = nextMove?.status === 'Waiting Customer' ||
                 (move.moveType === 'PRE_PULL' && nextMove?.moveType === 'DELIVERY');
-              const nextLoadStatus = status === 'Delivered'
+              const nextLoadStatus = ['EMPTY_YARD', 'YARD_RETURN'].includes(nextMove?.moveType)
+                ? 'Pending'
+                : status === 'Delivered'
                 ? 'Delivered'
                 : waitingForCustomer
                   ? 'Dropped'
