@@ -649,6 +649,11 @@ db.run(`ALTER TABLE loads ADD COLUMN nextMoveType TEXT`, (err) => {
   ['movementMode', "TEXT DEFAULT 'Direct'"],
   ['originalPickup', 'TEXT'],
   ['originalDelivery', 'TEXT'],
+  ['perDiemPortOutDate', 'TEXT'],
+  ['perDiemDueDate', 'TEXT'],
+  ['perDiemReturnedDate', 'TEXT'],
+  ['perDiemOutSource', 'TEXT'],
+  ['perDiemContainerNumber', 'TEXT'],
   ['dropPay', 'REAL DEFAULT 0'],
   ['pickupPay', 'REAL DEFAULT 0'],
   ['dropMoveStatus', "TEXT DEFAULT 'Pending'"],
@@ -1256,3 +1261,8 @@ db.run(`ALTER TABLE invoices ADD COLUMN paymentNotes TEXT`, (err) => {
 }
 
 export { db, initDatabase };
+
+// Per-company operating-holiday overrides; default calendars live in shared/perDiem.js.
+db.run(`ALTER TABLE companies ADD COLUMN perDiemCalendarJson TEXT DEFAULT '{}'`, (err) => {
+  if (err && !err.message.includes('duplicate column name')) console.error('Error adding Per Diem calendar:', err.message);
+});

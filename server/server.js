@@ -1,3 +1,4 @@
+import { mountPerDiemRoutes, capturePortOutDay } from './services/perDiem.js';
 import { prepareDropPickCreationPay } from '../shared/dropPickPay.js';
 import { mountEmptyYardRoutes } from './services/emptyYard.js';
 import { prepareDuplicateForSave } from '../shared/duplicateLoads.js';
@@ -986,6 +987,7 @@ const updateLoadFromPortHoustonCheck = ({
         }
 
         try {
+          await capturePortOutDay(db, {...load, companyId}, availability);
           const syncedDocuments = [
             ...(eir?.downloadedDocuments || []),
             ...(eir?.generatedDocuments || []),
@@ -4367,6 +4369,8 @@ console.log('POST /api/customers body:', req.body);
     }
   );
 });
+mountPerDiemRoutes(app, { db, authenticate, requireRoles, dispatchLocationRoles, writeAuditLog });
+
 mountEmptyYardRoutes(app, { db, authenticate, requireRoles, dispatchLocationRoles, writeAuditLog, hasRequiredCompletionDocuments });
 
 app.put('/api/loads/:id/extra-charges', authenticate, requireRoles(movePayRoles), createLoadExtraChargesHandler(db, writeAuditLog));

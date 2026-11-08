@@ -6489,3 +6489,12 @@ button:disabled {
 .drop-pick-pay-inputs { border: 1px solid var(--border-color, #cbd5e1); border-radius: 10px; padding: 12px; display: grid; gap: 10px; min-width: 0; }
 .drop-pick-pay-inputs label { display: grid; gap: 6px; }
 .drop-pick-pay-inputs input { width: 100%; box-sizing: border-box; }
+
+.per-diem-panel { padding: 14px; margin: 14px 0; border: 1px solid var(--border-color, #cbd5e1); border-radius: 12px; }
+.per-diem-panel h3, .per-diem-panel h4 { margin: 0 0 8px; }
+.per-diem-panel fieldset { border: 0; padding: 8px 0; display: grid; gap: 12px; min-width: 0; }
+.per-diem-panel label { display: grid; gap: 6px; }
+.per-diem-panel input, .per-diem-panel textarea { width: 100%; box-sizing: border-box; }
+.per-diem-badge { display: flex; flex-direction: column; gap: 4px; white-space: nowrap; }
+.per-diem-badge.overdue { color: #b91c1c; }
+.per-diem-badge.today, .per-diem-badge.soon, .per-diem-badge.needs-calendar { color: #92400e; }
