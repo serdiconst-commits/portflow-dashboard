@@ -14538,6 +14538,7 @@ if ((isDriverApp || activeView === 'driver') && currentUser?.role === 'driver') 
                       </div>
 
                       <div className="details-grid">
+                        <div className="detail-box"><span>Customer Name</span><strong>{selectedLoad.customer || '—'}</strong></div>
                         <div className="detail-box"><span>Load Date</span><strong>{selectedLoad.loadDate}</strong></div>
                         <div className="detail-box"><span>Reference #</span><strong>{selectedLoad.referenceNumber || '—'}</strong></div>
                         <div className="detail-box"><span>PO #</span><strong>{selectedLoad.poNumber || '—'}</strong></div>
