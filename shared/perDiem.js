@@ -34,10 +34,14 @@ export function perDiemTracking(load, today, calendar=DEFAULT_PER_DIEM_CALENDAR)
   const matches = !load.perDiemContainerNumber || String(load.perDiemContainerNumber).trim().toUpperCase() === String(load.containerNumber).trim().toUpperCase();
   if(!matches || !validDay(load.perDiemPortOutDate))return {tracked:false};
   const calculation=perDiemDeadline(load.perDiemPortOutDate,calendar);
-  const finalReturn=(load.moves || []).some(move=>['RETURN','PICKUP_RETURN','YARD_RETURN'].includes(move.moveType) && move.status==='Completed');
-  const returned=validDay(load.perDiemReturnedDate) || finalReturn;
+  const completed=['completed','delivered'].includes(String(load.status || '').trim().toLowerCase());
+  const reopenedAt=Date.parse(load.perDiemReopenedAt || '');
+  const reopened=Number.isFinite(reopenedAt);
+  const finalReturn=(load.moves || []).some(move=>['RETURN','PICKUP_RETURN','YARD_RETURN'].includes(move.moveType) && move.status==='Completed' &&
+    (!reopened || Date.parse(move.completedAt || '')>reopenedAt));
+  const returned=completed || (!reopened && validDay(load.perDiemReturnedDate)) || finalReturn;
   const deadline=validDay(load.perDiemDueDate)?load.perDiemDueDate:calculation.date;
-  let status=returned?'returned':!deadline?'needs-calendar':deadline<today?'overdue':deadline===today?'today':deadline===nextPerDiemWorkday(today,calendar)?'soon':'upcoming';
+  let status=completed?'completed':returned?'returned':!deadline?'needs-calendar':deadline<today?'overdue':deadline===today?'today':deadline===nextPerDiemWorkday(today,calendar)?'soon':'upcoming';
   return {tracked:true,deadline,status,returned,error:deadline?'':calculation.error,source:load.perDiemOutSource || 'Manual'};
 }
 export function matchesPerDiemFilter(load,today,filter,calendar) {

@@ -649,6 +649,7 @@ db.run(`ALTER TABLE loads ADD COLUMN nextMoveType TEXT`, (err) => {
   ['movementMode', "TEXT DEFAULT 'Direct'"],
   ['originalPickup', 'TEXT'],
   ['originalDelivery', 'TEXT'],
+  ['perDiemReopenedAt', 'TEXT'],
   ['perDiemPortOutDate', 'TEXT'],
   ['perDiemDueDate', 'TEXT'],
   ['perDiemReturnedDate', 'TEXT'],

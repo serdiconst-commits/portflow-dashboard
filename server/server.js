@@ -1,4 +1,4 @@
-import { mountPerDiemRoutes, capturePortOutDay } from './services/perDiem.js';
+import { mountPerDiemRoutes, capturePortOutDay, markPerDiemRestored } from './services/perDiem.js';
 import { prepareDropPickCreationPay } from '../shared/dropPickPay.js';
 import { mountEmptyYardRoutes } from './services/emptyYard.js';
 import { prepareDuplicateForSave } from '../shared/duplicateLoads.js';
@@ -4563,10 +4563,15 @@ app.put('/api/loads/:id', authenticate, requireRoles(movePayRoles), (req, res) =
           db.get(
             `SELECT * FROM loads WHERE id = ? AND companyId = ?`,
             [loadId, companyId],
-            (readErr, updatedLoad) => {
+            async (readErr, updatedLoad) => {
               if (readErr) {
                 console.error('Error reading updated load:', readErr.message);
                 return res.status(500).json({ error: readErr.message });
+              }
+
+              if (existingLoad.perDiemPortOutDate) {
+                try { await markPerDiemRestored(db,existingLoad,updatedLoad); }
+                catch(error) { return res.status(error.status || 500).json({error:error.message}); }
               }
 
 console.log('UPDATE changes =', this.changes);
