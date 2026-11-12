@@ -4,7 +4,7 @@ export function isExportLoadDraft(load, presetName) {
 }
 
 export function unassignDuplicate(load) {
-  return { ...load, id: '', driver: '', truck: '', containerNumber: '', status: 'Pending', streetTurn: false, droppedBy: '', documents: [], pod: '', paperwork: 'Pending', perDiemPortOutDate: '', perDiemDueDate: '', perDiemReturnedDate: '', perDiemOutSource: '', perDiemContainerNumber: '' };
+  return { ...load, id: '', driver: '', truck: '', containerNumber: '', status: 'Pending', streetTurn: false, droppedBy: '', documents: [], pod: '', paperwork: 'Pending', perDiemReopenedAt: '', perDiemPortOutDate: '', perDiemDueDate: '', perDiemReturnedDate: '', perDiemOutSource: '', perDiemContainerNumber: '' };
 }
 export function prepareDuplicateForSave(load) {
   return { ...unassignDuplicate(load), containerNumber: String(load.containerNumber || '').trim().toUpperCase() };

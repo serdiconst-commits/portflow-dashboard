@@ -11,6 +11,15 @@ export async function capturePortOutDay(db,load,availability) {
     WHERE id=? AND companyId=? AND UPPER(TRIM(containerNumber))=? AND COALESCE(perDiemPortOutDate,'')=''`,
   [day,String(load.containerNumber).trim().toUpperCase(),load.id,load.companyId,String(load.containerNumber).trim().toUpperCase()]);
 }
+// Restore only tracking eligibility; retain dates, movement IDs and financial history.
+export async function markPerDiemRestored(db,previous,updated) {
+  const closed=load=>['completed','delivered'].includes(String(load.status || '').trim().toLowerCase());
+  if (!closed(previous) || closed(updated) || !validDay(previous.perDiemPortOutDate) || updated.loadType==='EXPORT')return;
+  const reopenedAt=new Date().toISOString();
+  const result=await dbRun(db, 'UPDATE loads SET perDiemReopenedAt=? WHERE id=? AND companyId=? AND status=?', [reopenedAt,updated.id,updated.companyId,updated.status]);
+  if(result.changes!==1)throw Object.assign(new Error('Load changed while restoring Per Diem. Refresh and try again.'),{status:409});
+  updated.perDiemReopenedAt=reopenedAt;
+}
 export function mountPerDiemRoutes(app,{db,authenticate,requireRoles,dispatchLocationRoles,writeAuditLog}) {
   const auth=[authenticate,requireRoles(dispatchLocationRoles)];
   app.get('/api/per-diem/calendar',authenticate,async(req,res)=>{
@@ -38,7 +47,7 @@ export function mountPerDiemRoutes(app,{db,authenticate,requireRoles,dispatchLoc
       if(!load || load.deletedAt)return res.status(404).json({error:'Load not found.'});
       if(load.loadType==='EXPORT' || !String(load.containerNumber || '').trim())return res.status(409).json({error:'Select an import / regular load with a container number.'});
       const source=out===load.perDiemPortOutDate && load.perDiemOutSource==='Port Houston'?'Port Houston':'Manual';
-      const changed=await dbRun(db,`UPDATE loads SET perDiemPortOutDate=?,perDiemDueDate=?,perDiemReturnedDate=?,perDiemOutSource=?,perDiemContainerNumber=? WHERE id=? AND companyId=? AND UPPER(TRIM(containerNumber))=?`,[out,due,returned,out?source:'',out?String(load.containerNumber).trim().toUpperCase():'',load.id,req.company.companyId,String(load.containerNumber).trim().toUpperCase()]);
+      const changed=await dbRun(db,`UPDATE loads SET perDiemReopenedAt=CASE WHEN ?!='' THEN '' ELSE perDiemReopenedAt END,perDiemPortOutDate=?,perDiemDueDate=?,perDiemReturnedDate=?,perDiemOutSource=?,perDiemContainerNumber=? WHERE id=? AND companyId=? AND UPPER(TRIM(containerNumber))=?`,[returned,out,due,returned,out?source:'',out?String(load.containerNumber).trim().toUpperCase():'',load.id,req.company.companyId,String(load.containerNumber).trim().toUpperCase()]);
       if(changed.changes!==1)return res.status(409).json({error:'The container changed. Refresh the load and try again.'});
       const updated=await dbGet(db,'SELECT * FROM loads WHERE id=? AND companyId=?',[load.id,req.company.companyId]);
       const fields=['perDiemPortOutDate','perDiemDueDate','perDiemReturnedDate'];
